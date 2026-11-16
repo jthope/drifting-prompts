@@ -1,9 +1,0 @@
-# `nsh run --target web` builds the web runtime from source because this app has a Rust crate, and
-# that runtime includes zstd-sys, which is C. cl.exe cannot compile to WebAssembly, so these point
-# cc-rs at the clang from tools/fetch-wasm-clang.ps1. `relative` resolves them from this crate, so
-# they work wherever the repo is cloned. The paths are Windows ones; a real environment variable
-# wins for CC, which is how another platform would use its own clang. AR has to be forced: the
-# build finds it already set to plain `llvm-ar`, apparently by nsh, and that is not on PATH.
-[env]
-CC_wasm32_unknown_unknown = { value = "tools/llvm/bin/clang.exe", relative = true, force = false }
-AR_wasm32_unknown_unknown = { value = "tools/llvm/bin/llvm-ar.exe", relative = true, force = true }
