@@ -1,0 +1,241 @@
+name: Release
+
+# Publishing, not gating: ci.yml runs the lints and the suite. This builds the Windows packages of
+# the suite's apps from whatever "Use workflow from" picks in the Actions tab's "Run workflow":
+#
+# - a product's tag, `ipcamera-v<version>` or `mdviewer-v<version>`, whose version matches that
+#   app's `nsh.json`, packages that app and publishes it to the tag's release;
+# - a branch packages every app, as downloads on the run's page, and publishes nothing.
+#
+# Each product has tags of its own because each has a version of its own. Pushing a tag starts
+# nothing by itself, for now: add `push: { tags: ["ipcamera-v*", "mdviewer-v*"] }` here to publish
+# on every tag pushed.
+#
+# One job builds, then one writes: the package is made first, and the release is created only once
+# it exists, so a failed build leaves no release at all rather than an empty one.
+#
+# What this deliberately does not do: sign the executables. There is nothing to install beside
+# them: each package carries the nsh runtime it needs, and IP Camera's media stack is compiled in.
+
+on:
+  workflow_dispatch:
+
+run-name: ${{ github.ref_type == 'tag' && format('Release {0}', github.ref_name) || format('Packages from {0}', github.ref_name) }}
+
+# A half-published release is worse than none, so runs never cancel each other.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Runs first and alone: a tag that names no product, or disagrees with its app's version, should
+  # fail in seconds, not after a long Windows build. The version is `nsh.json`'s, because that is
+  # what `nsh package` writes into the app. A branch has no version to agree with, so its archives
+  # are named for the version, the branch and the commit instead. Its `matrix` is what the Windows
+  # job builds: one app for a tag, every app for a branch. `pwsh` because it is preinstalled on
+  # every hosted runner. Every job checks out the commit "Use workflow from" picked, which is
+  # checkout's default.
+  prepare:
+    name: Check the version
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.version.outputs.matrix }}
+      product: ${{ steps.version.outputs.product }}
+      title: ${{ steps.version.outputs.title }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Match a tag against nsh.json
+        id: version
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Each product's folder in `crates/` and its name.
+          $products = [ordered]@{ ipcamera = 'IP Camera'; mdviewer = 'Markdown Viewer' }
+
+          function Declared($product) {
+            $version = (Get-Content "crates/$product/app/nsh.json" -Raw | ConvertFrom-Json).version
+            if (-not $version) {
+              Write-Error "crates/$product/app/nsh.json has no version"
+              exit 1
+            }
+            $version
+          }
+
+          if ($env:REF_TYPE -eq 'tag') {
+            if ($env:REF_NAME -notmatch '^(?<product>[a-z]+)-v(?<version>.+)$' -or -not $products.Contains($Matches.product)) {
+              Write-Error "tag $env:REF_NAME names no product: pick a tag such as ipcamera-v1.0.0 or mdviewer-v0.1.0"
+              exit 1
+            }
+            $product = $Matches.product
+            $tagged = $Matches.version
+            $declared = Declared $product
+            if ($tagged -ne $declared) {
+              Write-Error "tag $env:REF_NAME does not match version $declared in crates/$product/app/nsh.json"
+              exit 1
+            }
+            $builds = @(@{ product = $product; title = $products[$product]; suffix = "v$declared" })
+            "product=$product" >> $env:GITHUB_OUTPUT
+            "title=$($products[$product])" >> $env:GITHUB_OUTPUT
+            "version=$declared" >> $env:GITHUB_OUTPUT
+          } else {
+            # A branch's name may hold `/`, which a file name can't.
+            $branch = $env:REF_NAME -replace '[^A-Za-z0-9._-]', '-'
+            $commit = $env:SHA.Substring(0, 7)
+            $builds = @($products.Keys | ForEach-Object {
+              @{ product = $_; title = $products[$_]; suffix = "v$(Declared $_)-$branch-$commit" }
+            })
+          }
+          "matrix=$(@{ include = $builds } | ConvertTo-Json -Compress -Depth 3)" >> $env:GITHUB_OUTPUT
+
+  windows:
+    name: ${{ matrix.title }} for Windows
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      # On a branch, one app failing to build still leaves the other's package.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    env:
+      PRODUCT: ${{ matrix.product }}
+      SUFFIX: ${{ matrix.suffix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.product }}
+          workspaces: crates/${{ matrix.product }}/app -> target
+
+      - name: Install nsh
+        # The CLI has to be the version of the `nsh-*` crates the app builds against, so it is read
+        # from the app's `Cargo.toml` rather than written down a second time here. The installer
+        # puts `bin` on the user PATH, which later steps don't see, so it goes on GITHUB_PATH too.
+        shell: pwsh
+        run: |
+          $line = Select-String -Path "crates/$env:PRODUCT/app/Cargo.toml" -Pattern '^nsh-core = "([^"]+)"'
+          if (-not $line) {
+            Write-Error "crates/$env:PRODUCT/app/Cargo.toml has no nsh-core version"
+            exit 1
+          }
+          $env:NSH_VERSION = "v$($line.Matches[0].Groups[1].Value)"
+          $env:NSH_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'nsh'
+          irm https://nsh.dev/install.ps1 | iex
+          Join-Path $env:NSH_INSTALL_DIR 'bin' >> $env:GITHUB_PATH
+
+      - name: Package
+        # A release build of the app's crate and the Windows runner, with the icon embedded:
+        # `.nsh/out/<product>/` holds `<product>.exe` and the `nsh` runtime folder beside it, and
+        # `.nsh/out/<product>.zip` is the same as one file.
+        working-directory: crates/${{ matrix.product }}/app
+        run: nsh package --target windows
+
+      - name: Install cargo-about
+        # Its program is behind the `cli` feature: without it, cargo builds the library and
+        # installs nothing. rust-cache keeps `~/.cargo/bin`, so later runs find it installed.
+        run: cargo install cargo-about --version 0.9.3 --locked --features cli
+
+      - name: Add the licenses
+        # The package carries the app's own license and the notices of everything compiled into
+        # it: its crates' licenses ask for their notices to travel with the program, and MPL-2.0
+        # (glass2glass, symphonia) for where to find the source. cargo-about reads them from
+        # `windows-app`, the executable's crate in the workspace `nsh package` just built
+        # (`.nsh/rust/`); its settings and template are in `.github/notices/`. Both files go
+        # beside the executable, in the folder and in nsh's zip, which is added to rather than
+        # made again so the rest of it stays exactly as nsh wrote it.
+        shell: pwsh
+        run: |
+          $out = "crates/$env:PRODUCT/app/.nsh/out"
+          $folder = "$out/$env:PRODUCT"
+          cargo about generate --config .github/notices/about.toml `
+            --manifest-path "crates/$env:PRODUCT/app/.nsh/rust/windows-app/Cargo.toml" `
+            --output-file "$folder/THIRD-PARTY-NOTICES.txt" .github/notices/notices.hbs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item LICENSE "$folder/LICENSE.txt"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::Open((Resolve-Path "$out/$env:PRODUCT.zip").Path, 'Update')
+          try {
+            foreach ($name in 'LICENSE.txt', 'THIRD-PARTY-NOTICES.txt') {
+              $file = (Resolve-Path "$folder/$name").Path
+              [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file, "$env:PRODUCT/$name") | Out-Null
+            }
+          } finally {
+            $zip.Dispose()
+          }
+
+      - name: Name the archive
+        shell: pwsh
+        run: Copy-Item "crates/$env:PRODUCT/app/.nsh/out/$env:PRODUCT.zip" "$env:PRODUCT-windows-x86_64-$env:SUFFIX.zip"
+
+      # Keeps a downloadable build even if publishing later fails, and is the only build a branch
+      # makes.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.product }}-windows-x86_64
+          path: ${{ matrix.product }}-windows-x86_64-*.zip
+          retention-days: 14
+
+  # The only job that writes, and only for a tag. It runs after the package has been built, so the
+  # release either has its asset or is never created.
+  publish:
+    name: Publish
+    # `prepare` is listed so its outputs are available: the `needs` context only exposes the
+    # outputs of jobs named here, not transitive dependencies reached through `windows`.
+    needs: [prepare, windows]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Check what is about to be published
+        run: ls -lh dist
+
+      - name: Write IP Camera's notes
+        if: needs.prepare.outputs.product == 'ipcamera'
+        run: |
+          cat > release-notes.md <<'NOTES'
+          IP Camera for Windows.
+
+          Unzip it somewhere writable and run `ipcamera.exe`, keeping the `nsh` folder beside it. The app creates `settings.json` and a `data` folder beside the executable, and never writes to your profile or AppData.
+
+          ## Requirements
+
+          Windows 10 or 11, with nothing to install: H.264 and H.265 cameras both play as they are, on every edition of Windows. Playing a recording back in the app's Videos page on an N edition of Windows needs the Media Feature Pack. Playing an H.265 recording back in the app's Videos page uses Windows' own player, which needs Microsoft's HEVC Video Extensions.
+          NOTES
+
+      - name: Write Markdown Viewer's notes
+        if: needs.prepare.outputs.product == 'mdviewer'
+        run: |
+          cat > release-notes.md <<'NOTES'
+          Markdown Viewer for Windows.
+
+          Unzip it somewhere writable and run `mdviewer.exe`, keeping the `nsh` folder beside it. The app creates `settings.json` and `projects.json` beside the executable, and never writes to your profile or AppData. The Markdown files it opens are only read.
+
+          ## Requirements
+
+          Windows 10 or 11, with nothing to install.
+          NOTES
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          TITLE: ${{ needs.prepare.outputs.title }} ${{ needs.prepare.outputs.version }}
+        # `--repo` because this job never checks anything out. Fails rather than overwriting if
+        # the tag already has a release, which is the safe default for something named a release.
+        run: gh release create "$TAG" dist/* --repo "${{ github.repository }}" --title "$TITLE" --notes-file release-notes.md

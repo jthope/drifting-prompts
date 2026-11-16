@@ -1,0 +1,20 @@
+[package]
+name = "ipcamera-storage"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "IP Camera's snapshots and recordings on disk, for the desktop app and the server alike"
+
+[lints]
+workspace = true
+
+# Files, not pipelines: `media` for the decoded picture a snapshot or a thumbnail is written from,
+# `image` to write it as a PNG, and `fs4` for how full the drive under a folder is.
+[dependencies]
+ipcamera-media.workspace = true
+image.workspace = true
+fs4.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

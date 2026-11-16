@@ -1,0 +1,12 @@
+{
+  "name": "mdviewer",
+  "id": "com.driftingprompts.mdviewer",
+  "version": "0.1.0",
+  "build": 1,
+  "icon": "icon.png",
+  "rust": ".",
+  "theme": "../../dp/ui/theme.json",
+  "window": {
+    "titleBar": { "style": "hidden", "height": 48 }
+  }
+}

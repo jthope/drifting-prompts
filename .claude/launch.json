@@ -1,0 +1,24 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ipcamera-web",
+      "runtimeExecutable": "nsh",
+      "runtimeArgs": ["run", "--target", "web", "--port", "8787"],
+      "cwd": "crates/ipcamera/app",
+      "env": { "IPCAMERA_SERVER": "http://127.0.0.1:8770" },
+      "port": 8787
+    },
+    {
+      "name": "ipcamera-server",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": [
+        "run", "-p", "ipcamera-server", "--",
+        "--port", "8770",
+        "--allow-origin", "http://localhost:8787",
+        "--allow-origin", "http://127.0.0.1:8787"
+      ],
+      "port": 8770
+    }
+  ]
+}

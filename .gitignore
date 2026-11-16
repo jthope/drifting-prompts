@@ -1,0 +1,30 @@
+# Build output
+/target
+
+# The apps keep their settings, projects, snapshots and videos beside their executable, which is
+# normally inside a target folder; these matter when the executable is copied to this folder.
+/settings.json
+/settings.json.*
+/projects.json
+/projects.json.*
+/data/
+
+# Local environment overrides
+.env
+.env.*
+!.env.example
+
+# Logs and editor scratch files
+*.log
+*.bak
+*.tmp
+
+# IDE metadata
+.idea/
+.vs/
+*.suo
+*.user
+
+# Windows Explorer metadata
+Thumbs.db
+Desktop.ini

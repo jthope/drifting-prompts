@@ -1,0 +1,162 @@
+name: CI
+
+# Run by hand for now (the Actions tab, "Run workflow"), on the branch or tag "Use workflow from"
+# picks: nothing starts it by itself. To run it on every push and pull request, add
+# `push: { branches: [main] }` and `pull_request:` here.
+on:
+  workflow_dispatch:
+
+run-name: CI on ${{ github.ref_name }}
+
+# A newer run on the same branch or tag makes the older one pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  # `ipcamera-core` and `mdviewer-core`, and the store under both (`dp-store`), are deliberately free
+  # of any UI and of the media stack, and this job installs *nothing*. Building and testing them on a
+  # bare runner is what keeps it that way: the day one grows a dependency on either, this fails for
+  # the right reason instead of quietly getting slower.
+  core:
+    name: Core, no system libraries at all
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy --locked -p dp-store -p ipcamera-core -p mdviewer-core --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --locked -p dp-store -p ipcamera-core -p mdviewer-core
+
+  # The whole workspace: core and the media stack. glass2glass and both video decoders are Rust,
+  # and ALSA is loaded at run time, so the only package is `pkg-config`, which glass2glass's build
+  # script calls.
+  linux:
+    name: Linux build and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --locked --workspace
+
+  # The minimum supported Rust, checked against the real dependency set. Linux keeps it cheap;
+  # the point is that 1.95 can compile the whole workspace, not which OS does the checking.
+  msrv:
+    name: Rust 1.95
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          # Keep in step with `rust-version` in the root Cargo.toml.
+          toolchain: "1.95"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+
+      - run: cargo check --locked --workspace --all-targets
+
+  # The platform the app ships on, checked for compiling there: the media crate takes WASAPI
+  # there for sound (video decodes in Rust everywhere; Media Foundation is only the pretend
+  # camera's encoder, in tests). Lint only: the full test suite runs on Linux, and Windows tests
+  # took long enough to be worth dropping. Never on pull requests, since Windows minutes cost about twice Linux ones. Delete the
+  # `if:` to run this on pull requests too, and add back a `cargo build --workspace` step if the
+  # Windows link itself should be checked here. Nothing is installed first: the hosted image's
+  # Visual Studio build tools are all a Windows build needs.
+  windows:
+    name: Windows, lint only
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        # No `--all-targets`: this job runs no tests, so checking test targets on Windows only
+        # costs time. The Linux job checks them, and that code is platform-neutral.
+        run: cargo clippy --locked --workspace -- -D warnings
+
+  # The crates built with nsh: each app's own (`crates/ipcamera/app`, `crates/mdviewer/app`) and what
+  # they share (`crates/dp/ui`), each a workspace of its own, which nothing above builds. Their Rust
+  # is the bridges, IP Camera's cameras behind its bridge on Windows, its web's backend (which
+  # `cargo test` builds on Windows too) and the only `unsafe` in the repository (IP Camera's video
+  # and `dp-ui`'s Win32 calls), so this is where clippy checks every `// SAFETY:` comment. It needs
+  # no `nsh` on the runner: cargo builds the crates from crates.io like any other. `nsh check` and
+  # `nsh test` (TypeScript's types and the TSX tests) do need it, and are not run here. Never on
+  # pull requests, like the job above.
+  app:
+    name: ${{ matrix.crate }} on Windows
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [crates/ipcamera/app, crates/mdviewer/app, crates/dp/ui]
+    defaults:
+      run:
+        working-directory: ${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.crate }}
+
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --locked

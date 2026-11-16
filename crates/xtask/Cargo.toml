@@ -1,0 +1,22 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "The repository's own commands, run through cargo by each product's name: `cargo ipcamera`, `cargo mdviewer`, ..."
+
+[lints]
+workspace = true
+
+# None of the workspace's crates: it starts them as programs, through cargo and nsh.
+[dependencies]
+anyhow.workspace = true
+# Waits for the server, the web build, `cargo screenshots`' apps and Ctrl+C at once, and stops the
+# programs it started.
+tokio = { workspace = true, features = ["process", "signal"] }
+# The settings `cargo screenshots` gives the apps in place of the developer's own.
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

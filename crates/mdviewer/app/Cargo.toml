@@ -1,0 +1,36 @@
+[package]
+name = "nsh-app-mdviewer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+license = "MIT"
+
+[workspace]
+
+# The root workspace's lints, said again here because this crate is a workspace of its own and so
+# cannot inherit them. It has no `unsafe` of its own: the Win32 calls it needs are `dp-ui`'s.
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = "warn"
+mod_module_files = "warn"
+
+[dependencies]
+nsh-core = "0.5.1"
+nsh-base = "0.5.1"
+# What the suite's apps share to look alike: the theme files and the `Themes` module that draws
+# them, where the window was left, and on Windows the folder picker and Explorer. Its styled TSX
+# controls sit beside it, imported by path.
+dp-ui = { path = "../../dp/ui" }
+# The projects and settings, the Markdown files in a project, and a file's outline.
+mdviewer-core = { path = "../core" }
+# A dropped folder's `file:` URL has its `%20`-style escapes read (`dropped.rs`). IP Camera's core
+# reads an ONVIF camera's scopes with the same.
+percent-encoding = "2"
+
+# Tests only: a folder of its own for each test, removed when it ends.
+[dev-dependencies]
+tempfile = "3"

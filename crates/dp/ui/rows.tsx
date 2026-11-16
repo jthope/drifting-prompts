@@ -1,0 +1,86 @@
+// Settings as rows in cards, after the settings list in nsh's gallery and
+// the system's own Settings: each row a tinted icon, a name with a line about it,
+// and its control at the end, the rows of a group in one card.
+import { type JSX, Text, View } from "nsh";
+import { BrandBadge, look } from "./brand";
+import { Card } from "./card";
+import type { IconName } from "./icon";
+
+/** A titled card of settings rows; `description` says what they're for. */
+export function SettingsGroup(props: { title: string; description?: string; children: JSX.Element }) {
+  return (
+    <View class="gap-2">
+      <View class="gap-0.5 px-1">
+        <Text role="header" class="text-sm font-semibold text-foreground">
+          {props.title}
+        </Text>
+        <If when={props.description}>
+          <Text class="text-sm text-muted-foreground">{props.description}</Text>
+        </If>
+      </View>
+      {/* Its rows' hover fills stay inside its corners; its own shadow is drawn whole. */}
+      <Card class="overflow-hidden">{props.children}</Card>
+    </View>
+  );
+}
+
+type SettingProps = {
+  icon: IconName;
+  label: string;
+  detail?: string;
+  tag?: string;
+  control?: JSX.Element;
+  children?: JSX.Element;
+};
+
+/**
+ * One setting: its icon on the theme's badge, its name with a line about it
+ * (`detail`) and a small tag (`tag`: "Default"), and its control at the end
+ * (`control`), which wraps under the name in a narrow window. `children` go
+ * under it (a path, a set of tiles), in from the badge so they line up with
+ * the name. It brings no room or line of its own: `SettingRow` gives it those,
+ * and a panel of several settings spaces them itself.
+ */
+export function Setting(props: SettingProps) {
+  return (
+    <View class="gap-3">
+      <View class="flex-row flex-wrap items-center gap-x-4 gap-y-3">
+        <View class="min-w-56 flex-1 flex-row items-center gap-3">
+          <BrandBadge icon={props.icon} size={32} />
+          <View class="min-w-0 flex-1 gap-0.5">
+            <View class="flex-row items-center gap-2">
+              <Text class="text-sm font-medium text-card-foreground">{props.label}</Text>
+              <If when={props.tag}>
+                <Text class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{props.tag}</Text>
+              </If>
+            </View>
+            <If when={props.detail}>
+              <Text class="text-xs text-muted-foreground">{props.detail}</Text>
+            </If>
+          </View>
+        </View>
+        <If when={props.control}>
+          <View class="flex-row flex-wrap items-center gap-2">{props.control}</View>
+        </If>
+      </View>
+      {/* The badge's 32 points and the 12 after it (`pl-11`), so what is under the setting starts where its name does. */}
+      <If when={props.children}>
+        <View class="pl-11">{props.children}</View>
+      </If>
+    </View>
+  );
+}
+
+/** A `Setting` as a row of its group's card. Every row but the group's `first` has a line above it. */
+export function SettingRow(props: SettingProps & { first?: boolean }) {
+  return (
+    <View class={`px-4 py-3.5 ${props.first ? "" : "border-t border-border"}`}>
+      <Setting {...props} />
+    </View>
+  );
+}
+
+/** Several settings in one row of a group's card, with no lines between them. */
+export function SettingsPanel(props: { children: JSX.Element }) {
+  return <View class="gap-5 px-4 py-3.5">{props.children}</View>;
+}

@@ -1,0 +1,17 @@
+[package]
+name = "dp-store"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "A file an app keeps its settings in, saved safely (JSON, write-then-rename, never over a file it could not read), and the lock helper every crate uses"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,22 @@
+[package]
+name = "ipcamera-dpapi"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Windows' Data Protection API behind two safe calls: bytes encrypted for the Windows account running the program, and decrypted again"
+
+# The workspace's lints, with `unsafe` allowed and each block's `// SAFETY:` comment checked in
+# place of `unsafe_code = "forbid"`: this crate exists to hold the root workspace's only `unsafe`,
+# two Win32 calls and freeing what they return, so every other crate keeps forbidding it.
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+all = "warn"
+mod_module_files = "warn"
+undocumented_unsafe_blocks = "warn"
+
+# DPAPI is Windows': the crate is empty everywhere else.
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

@@ -1,0 +1,28 @@
+# cargo-about's settings for THIRD-PARTY-NOTICES.txt, the notices in each release archive.
+# `release.yml` runs it with `notices.hbs` beside this file, against the Windows app that
+# `nsh package` has just built.
+
+# Only what is compiled into the Windows executable: not other platforms' crates, build scripts' or
+# tests' dependencies, or this repository's own crates, which are all `publish = false`.
+targets = ["x86_64-pc-windows-msvc"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+private = { ignore = true }
+
+# The licenses a release may ship. Where a crate offers a choice ("MIT OR Apache-2.0"), the first
+# one listed here wins. A crate under any other license stops the run, so a new dependency's license
+# gets looked at before it ships. MPL-2.0 (glass2glass, symphonia) asks that the notices say where
+# its source is, which the template does for every crate.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+    "MPL-2.0",
+]

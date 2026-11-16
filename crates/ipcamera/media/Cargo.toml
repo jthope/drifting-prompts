@@ -1,0 +1,53 @@
+[package]
+name = "ipcamera-media"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "IP Camera RTSP playback: the glass2glass pipeline and the newest decoded frame"
+
+[lints]
+workspace = true
+
+# glass2glass and nothing else. Frames leave here as plain BGRA bytes, so this crate has no UI and
+# no `image`: it can be built and reasoned about without a renderer.
+[dependencies]
+ipcamera-core.workspace = true
+g2g-core.workspace = true
+g2g-plugins.workspace = true
+retina.workspace = true
+# A Reolink's FLV streams, which its web server sends over HTTP or HTTPS (`src/flv.rs`).
+reqwest.workspace = true
+rust_h264.workspace = true
+rust_h265.workspace = true
+# `sync` for the broadcast channel a relaying session's feed hands its pictures to viewers through.
+tokio = { workspace = true, features = ["sync"] }
+url.workspace = true
+
+[features]
+# The pretend camera (`src/pretend.rs`): a test pattern served over RTSP, for the example and for
+# other crates' tests. Off by default, so the app never carries an encoder and an RTSP server. It
+# encodes with Media Foundation, so turn it on for Windows builds only.
+pretend-camera = ["g2g-plugins/mf-encode", "g2g-plugins/rtsp-server"]
+
+# `cargo run -p ipcamera-media --features pretend-camera --example pretend_camera`
+[[example]]
+name = "pretend_camera"
+required-features = ["pretend-camera"]
+
+# Windows plays sound through WASAPI. Video decodes in Rust on every platform: H.264 with
+# `rust_h264` (`src/avc.rs`), H.265 with `rust_h265` (`src/hevc.rs`).
+[target.'cfg(windows)'.dependencies]
+g2g-plugins = { workspace = true, features = ["wasapi-sink"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# A test stands up a pretend camera: a test pattern, encoded by Media Foundation and served by
+# glass2glass's own RTSP server, so the whole decode path runs without a real camera.
+[target.'cfg(windows)'.dev-dependencies]
+g2g-plugins = { workspace = true, features = ["mf-encode", "rtsp-server"] }
+
+# Linux plays sound through ALSA, which is loaded at run time, so no development package is needed.
+[target.'cfg(target_os = "linux")'.dependencies]
+g2g-plugins = { workspace = true, features = ["alsa-sink"] }
