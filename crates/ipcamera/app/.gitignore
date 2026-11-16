@@ -1,3 +1,4 @@
 .nsh/
 target/
 tools/llvm/
+.cargo/config.toml

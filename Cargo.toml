@@ -107,9 +107,9 @@ tower = { version = "0.5", features = ["util"] }
 tungstenite = "0.29"
 
 # Reolink's HTTP API (`crates/ipcamera/core/src/reolink.rs`) over HTTPS, and Dahua's (`dahua_http.rs`): a
-# small blocking client, which suits the thread each camera's calls run on. Its rustls build compiles `ring` with the C compiler
-# the MSVC build tools bring. gzip is left out: the replies are a few hundred bytes. Not in the web
-# build, where a browser makes the requests.
+# small blocking client, which suits the thread each camera's calls run on. Its rustls build compiles `ring`, which is C.
+# gzip is left out: the replies are a few hundred bytes. Not in the web build, where a browser makes
+# the requests.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 # ONVIF (`crates/ipcamera/core/src/onvif.rs`): the client for its SOAP services, with both of its logins
 # (WS-Security's digest and HTTP's). Async on tokio, over reqwest. Pinned to one release: it is

@@ -63,32 +63,24 @@ build from source.
 
 ## Setup
 
-### Requirements
+These steps are for Windows and Linux. On either one you need:
 
-- Rust 1.97 or newer, on the MSVC toolchain
-- The Visual Studio C++ build tools, with the Windows SDK
+- Rust 1.97 or newer
 - nsh 0.5.1
 
-Cargo builds the video stack from source, so there's nothing else to install.
+Cargo builds the video stack from source, so there are no codecs or media frameworks to install.
 
-### Set up
+### Windows
 
-1. Install the Visual Studio C++ build tools with the Windows SDK.
-2. Make MSVC your default Rust toolchain:
-
-   ```powershell
-   rustup default stable-x86_64-pc-windows-msvc
-   ```
-
-   `rustc -vV` should then say `host: x86_64-pc-windows-msvc`.
-3. Install nsh. It installs to `%LOCALAPPDATA%\nsh` and adds itself to your `PATH`, so open a new terminal afterward:
+1. Install Rust with [rustup](https://rustup.rs).
+2. Install nsh. It installs to `%LOCALAPPDATA%\nsh` and adds itself to your `PATH`, so open a new terminal afterward:
 
    ```powershell
    $env:NSH_VERSION = 'v0.5.1'
    irm https://nsh.dev/install.ps1 | iex
    ```
 
-4. Clone this repository, and from its folder run an app:
+3. Clone this repository, and from its folder run an app:
 
    ```powershell
    cargo ipcamera
@@ -99,17 +91,64 @@ Cargo builds the video stack from source, so there's nothing else to install.
 Build from PowerShell, not Git Bash. Git ships its own `link.exe`, which can get picked up instead of Microsoft's
 linker.
 
+### Linux
+
+Ubuntu 24.04 or later, or another distribution with GTK 4.14 or newer.
+
+1. Install Rust with [rustup](https://rustup.rs):
+
+   ```sh
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+
+2. Install what nsh builds against (GTK 4, WebKitGTK, GStreamer), a C compiler, and clang and LLVM. On Ubuntu or
+   Debian:
+
+   ```sh
+   sudo apt install build-essential pkg-config clang llvm libgtk-4-dev libwebkitgtk-6.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+   ```
+
+   On Fedora:
+
+   ```sh
+   sudo dnf install gcc pkgconf-pkg-config clang llvm gtk4-devel webkitgtk6.0-devel gstreamer1-devel gstreamer1-plugins-base-devel
+   ```
+
+3. Install nsh. It installs to `~/.nsh` and links itself into `~/.local/bin`. If that folder isn't on your `PATH`, the
+   installer tells you how to add it:
+
+   ```sh
+   curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.5.1 sh
+   ```
+
+4. Clone this repository, and from its folder run an app:
+
+   ```sh
+   cargo ipcamera
+   ```
+
+   or `cargo mdviewer`. The first build takes a few minutes; after that, builds take seconds.
+
 ### Optional: the web build
 
-IP Camera's web build needs two more things, once per machine. From `crates/ipcamera/app`:
+IP Camera's web build needs two more things, once per machine: the WebAssembly target and clang.
+[IP Camera's README](crates/ipcamera/README.md#the-web-build) explains why.
+
+On Windows, from `crates/ipcamera/app`:
 
 ```powershell
 rustup target add wasm32-unknown-unknown
 powershell -ExecutionPolicy Bypass -File tools\fetch-wasm-clang.ps1
 ```
 
-The script downloads a pinned copy of clang (about 266 MiB) into `tools\llvm`, which git ignores; delete that folder
-to undo it. [IP Camera's README](crates/ipcamera/README.md#the-web-build) explains why it's needed.
+The script downloads a pinned copy of clang (about 266 MiB) into `tools\llvm` and points cargo at it in
+`.cargo\config.toml`. Git ignores both; delete them to undo it.
+
+On Linux, clang and LLVM came with the packages above, so only the target is left:
+
+```sh
+rustup target add wasm32-unknown-unknown
+```
 
 ## Common commands
 

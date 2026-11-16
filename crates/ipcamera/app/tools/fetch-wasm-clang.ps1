@@ -1,11 +1,12 @@
-# Installs the clang that `nsh run --target web` needs, into tools\llvm beside this script.
+# Installs the clang that `nsh run --target web` needs on Windows, into tools\llvm beside this
+# script, and points cargo at it.
 #
 # An app with its own Rust crate has its web runtime built from source, and that runtime includes
 # zstd-sys, which is C. cl.exe cannot compile to WebAssembly, so cc-rs needs clang. The compiler is
-# too large to commit, so this fetches one pinned release, and `[env]` in ..\.cargo\config.toml
-# points cargo at it. Nothing is installed system-wide and PATH is left alone.
+# too large to commit, so this fetches one pinned release and writes ..\.cargo\config.toml to point
+# cargo at it. Git ignores both. Nothing is installed system-wide and PATH is left alone.
 #
-# Run it once per machine. It does nothing if this version is already there:
+# Run it once per machine. It downloads nothing if this version is already there:
 #
 #   powershell -ExecutionPolicy Bypass -File tools\fetch-wasm-clang.ps1
 
@@ -25,8 +26,31 @@ $zstdUrl = "https://github.com/meta/zstd/releases/download/v$zstdVersion/$zstdNa
 
 $dest = Join-Path $PSScriptRoot 'llvm'
 $stamp = Join-Path $dest 'VERSION'
+$config = Join-Path (Split-Path $PSScriptRoot -Parent) '.cargo\config.toml'
+
+# Written here rather than committed: cargo's `[env]` applies on every system, and on Linux cc-rs
+# needs none of it, finding the system's clang on PATH and llvm-ar beside it. UTF-8 without a byte
+# order mark, which Windows PowerShell's own writers add.
+function Write-CargoConfig {
+    New-Item -ItemType Directory -Force (Split-Path $config -Parent) | Out-Null
+    $text = @'
+# Written by tools/fetch-wasm-clang.ps1, and ignored by git. `nsh run --target web` builds the web
+# runtime from source because this app has a Rust crate, and that runtime includes zstd-sys, which
+# is C. cl.exe cannot compile to WebAssembly, so these point cc-rs at the clang the script fetched.
+# `relative` resolves them from this crate. A real environment variable wins for CC. AR has to be
+# forced: the build finds it already set to plain `llvm-ar`, apparently by nsh, and that is not on
+# PATH.
+[env]
+CC_wasm32_unknown_unknown = { value = "tools/llvm/bin/clang.exe", relative = true, force = false }
+AR_wasm32_unknown_unknown = { value = "tools/llvm/bin/llvm-ar.exe", relative = true, force = true }
+'@
+    [System.IO.File]::WriteAllText($config, $text.Replace("`r`n", "`n"))
+    Write-Output "Cargo points at it in $config"
+}
+
 if ((Test-Path $stamp) -and ((Get-Content $stamp) -eq $version)) {
     Write-Output "clang $version is already in $dest"
+    Write-CargoConfig
     return
 }
 
@@ -80,3 +104,4 @@ Remove-Item $work -Recurse -Force
 
 & (Join-Path $dest 'bin\clang.exe') --version | Select-Object -First 1
 Write-Output "Installed in $dest"
+Write-CargoConfig

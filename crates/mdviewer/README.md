@@ -32,7 +32,7 @@ setting up a machine is in the [root README](../../README.md#setup).
 
 ## Run it
 
-From `crates/mdviewer/app`, in PowerShell:
+From `crates/mdviewer/app`:
 
 ```powershell
 nsh run       # a window, with hot reload

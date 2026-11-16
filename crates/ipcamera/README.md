@@ -99,7 +99,7 @@ up to 20 times.
 
 ## Run it
 
-From `crates/ipcamera/app`, in PowerShell:
+From `crates/ipcamera/app`:
 
 ```powershell
 nsh run
@@ -123,21 +123,24 @@ A browser can't open an RTSP connection to a camera, so the web build gets its c
 `ipcamera-server` ([its README](server/README.md)). Without a server, it's a preview of the interface over a pretend
 camera.
 
-`nsh run --target web` needs two more things, once per machine: the `wasm32-unknown-unknown` target, and clang, which
-`crates/ipcamera/app/tools/fetch-wasm-clang.ps1` fetches. The root README's setup has both commands
-([The web build](../../README.md#optional-the-web-build)).
+`nsh run --target web` needs two more things, once per machine: the `wasm32-unknown-unknown` target, and clang. On
+Windows, `crates/ipcamera/app/tools/fetch-wasm-clang.ps1` fetches clang; on Linux, it's the system's, from the setup's
+packages. The root README's setup has the commands ([The web build](../../README.md#optional-the-web-build)).
 
 Clang is needed because this app has its own Rust crate, so its web runtime is built from source, and that runtime
-includes `zstd-sys`, which is C. `cl.exe` can't compile to WebAssembly. A TSX-only app uses the prebuilt runtime that
-comes with `nsh` and needs none of this. The compiler is too large to commit, so the script downloads a pinned release
-(266 MiB, checked against pinned hashes) and keeps 143 MiB of it in `tools\llvm`, which git ignores.
-`crates/ipcamera/app/.cargo/config.toml` points cargo at that folder. Nothing is installed system-wide and `PATH` is
-left alone, so deleting `tools\llvm` undoes it. To update clang, change the version and hash at the top of the script,
-delete `tools\llvm` and run it again.
+includes `zstd-sys`, which is C. Only clang compiles C to WebAssembly. A TSX-only app uses the prebuilt runtime that
+comes with `nsh` and needs none of this.
+
+On Windows the compiler is too large to commit, so the script downloads a pinned release (266 MiB, checked against
+pinned hashes), keeps 143 MiB of it in `tools\llvm`, and writes `crates/ipcamera/app/.cargo/config.toml` to point
+cargo at that folder. Git ignores both. The config isn't committed because cargo's `[env]` applies on every system,
+and on Linux cc-rs needs none of it: it finds clang on `PATH` and `llvm-ar` beside it. Nothing is installed
+system-wide and `PATH` is left alone, so deleting `tools\llvm` and the config undoes it. To update clang, change the
+version and hash at the top of the script, delete `tools\llvm` and run it again.
 
 | Symptom | Cause |
 | --- | --- |
-| `failed to find tool` naming `clang` or `llvm-ar` | The script hasn't been run on this machine |
+| `failed to find tool` naming `clang` or `llvm-ar` | On Windows, the script hasn't been run on this machine; on Linux, `clang` or `llvm` isn't installed |
 | `Frame requires too much memory for decoding` | The system's `tar` was given LLVM's `.tar.zst` directly. It's compressed with a 1 GiB window, which `tar` refuses, so the script decompresses it with `zstd --long=30` |
 
 ## Releases

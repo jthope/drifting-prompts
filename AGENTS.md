@@ -126,7 +126,8 @@ crates/
                         checks); `video.rs`, the `ipcamera.video` Direct2D component; the window's place, the
                         folder picker and Explorer are `dp-ui`'s
       *.test.ts(x)      headless tests (`nsh test`)
-      tools/            `fetch-wasm-clang.ps1`: clang for the web build, into `tools\llvm`, which git ignores
+      tools/            `fetch-wasm-clang.ps1`: clang for the web build on Windows, into `tools\llvm`, and the
+                        `.cargo\config.toml` that points cargo at it, both of which git ignores
   mdviewer/           Markdown Viewer
     core/             mdviewer-core: `settings.json` (`config.rs`: the window's preferences and place) and
                       `projects.json` (`projects.rs`: the projects, the one open, each one's tabs and last file),
@@ -294,12 +295,12 @@ password included, where `launch.json`'s keeps its own in `target\debug`, so che
 time: starting another ends the first.
 
 The floor is Rust 1.95 for the root workspace (`rust-version`: the highest any dependency declares, from
-glass2glass's `loom`) and 1.97 for the workspaces built with nsh (nsh 0.5.1's), with the MSVC toolchain, the Visual
-Studio C++ build tools and the Windows SDK; raise it when a dependency's floor rises, and keep `ci.yml`'s `msrv` job in
-step with the root's. MSVC `D8050 ... failed to get command line into debug records` or gcc's "Cannot create
+glass2glass's `loom`) and 1.97 for the workspaces built with nsh (nsh 0.5.1's); raise it when a dependency's floor
+rises, and keep `ci.yml`'s `msrv` job in step with the root's. MSVC `D8050 ... failed to get command line into debug records` or gcc's "Cannot create
 temporary file" come from a Low integrity label on the repository folder, not from long paths: check
 `icacls . | Select-String 'Mandatory Label'` first, and leave clearing it to the owner, since it is a security setting.
-The web build needs the `wasm32-unknown-unknown` target and `tools\fetch-wasm-clang.ps1`, once per machine. The root
+The web build needs the `wasm32-unknown-unknown` target and clang, once per machine: `tools\fetch-wasm-clang.ps1` on
+Windows, the system's on Linux. The root
 `.cargo/config.toml` optimizes `rust_h264`, `rust_h265` and `g2g-plugins` in the dev profile (unoptimized, a 1080p
 H.265 camera falls behind), not a `Cargo.toml`: cargo reads profiles only from the workspace it builds, and `nsh run`
 builds through one nsh generates (`crates/ipcamera/app/.nsh/rust`). It also links with `rust-lld.exe`, which every toolchain ships, instead of
