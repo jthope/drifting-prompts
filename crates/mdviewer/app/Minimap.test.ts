@@ -1,8 +1,7 @@
 import { expect, test } from "nsh/test";
-import { TextView } from "nsh/base";
 import type { HeadingInfo, MarkInfo } from "mdviewer/native";
-import { MARKDOWN, splitSections } from "./views/document";
-import { blockAround, blockWeight, lineAtPage, MAP_COLUMNS, MARKS, onTrack, pageMap, railLines, rawMap, rulerMarks, sectionLines } from "./views/minimap";
+import { blockAround, MAP_COLUMNS, MARKS, onTrack, pageMap, railLines, rawMap, rulerMarks, sectionLines } from "./views/minimap";
+import type { PageBlock } from "./views/pagemessages";
 
 const heading = (level: number, title: string, line: number): HeadingInfo => ({ level, title, line });
 
@@ -50,27 +49,16 @@ test("Raw's map is each line's runs of words, its marks in their colors, a band 
   expect(map.labels).toEqual([{ y: 0, text: "Title" }]);
 });
 
-test("the page's map shares each section's measured height among its blocks by their estimated heights", () => {
-  const sections = splitSections(TextView.parse("Intro.\n\n# One\n\nA paragraph.\n\n```\na\nb\n```\n", MARKDOWN));
-  // Section 0 (the intro) from 0 to 100, section 1 from 100 to the page's end, 400.
-  const map = pageMap(sections, [0, 100], 400);
+test("the page's map draws each block where the page drew it, and names the top headings", () => {
+  const block = (kind: string, line: number, top: number, height: number, depth = 0, endLine = line): PageBlock => ({ line, endLine, top, height, kind, depth });
+  const blocks = [block("p", 0, 24, 51), block("h1", 2, 100, 40), block("ul", 4, 150, 60, 0, 5), block("li", 4, 150, 26, 1), block("li", 5, 180, 26, 1), block("pre", 7, 220, 70, 0, 10)];
+  const map = pageMap(blocks, [heading(1, "One", 2)], 400);
   expect(map.extent).toBe(400);
   expect(map.labels).toEqual([{ y: 100, text: "One" }]);
-  const one = sections[1].blocks.map(blockWeight);
-  const total = one.reduce((sum, weight) => sum + weight, 0);
-  const band = map.bars.find((bar) => bar.ink === "band");
-  expect(Math.abs((band?.y ?? 0) - (100 + (300 * (one[0] + one[1])) / total)) < 0.001).toBe(true);
-  // A section not measured yet draws nothing.
-  expect(pageMap(sections, [0], 400).labels).toEqual([]);
-});
-
-test("the line under a place on the page is as far into its section's lines as the place is into the section", () => {
-  const headings = [heading(1, "One", 10), heading(1, "Two", 20)];
-  const tops = [0, 100, 300];
-  expect(lineAtPage(200, headings, 30, tops, 400)).toBe(15);
-  expect(lineAtPage(350, headings, 30, tops, 400)).toBe(25);
-  expect(lineAtPage(50, headings, 30, tops, 400)).toBe(5);
-  expect(lineAtPage(1000, headings, 30, tops, 400)).toBe(29);
+  // Two lines of text in the paragraph, a marker for each item, a band behind the code.
+  expect(map.bars.filter((bar) => bar.ink === "text" && bar.y < 100).length).toBe(2);
+  expect(map.bars.filter((bar) => bar.ink === "marker").map((bar) => Math.round(bar.y))).toEqual([155, 185]);
+  expect(map.bars.find((bar) => bar.ink === "band")).toEqual({ y: 220, height: 70, x: 0, width: MAP_COLUMNS, ink: "band" });
 });
 
 test("the preview shows the block of lines around a line, under its heading", () => {

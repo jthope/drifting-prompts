@@ -15,11 +15,11 @@ use std::{
 use dp_ui::{SavedAppearance, WindowPlace, folders, listen, listen_later};
 use mdviewer_core::{
     ConfigStore, Finder, Listing, MOST_MATCHES, Project, ProjectStore, Saved, Tab, files, marks,
-    summarize,
+    render, summarize,
 };
 use nsh_core::prelude::*;
 
-use crate::dropped;
+use crate::{dropped, page};
 
 const PROJECTS_CHECK_EVERY: Duration = Duration::from_millis(250);
 
@@ -380,6 +380,8 @@ pub struct OpenFile {
     pub headings: Vec<HeadingInfo>,
     /// How many words it has, code left out.
     pub words: f64,
+    /// The page the rendered view shows: its HTML, each block's lines in `data-sourcepos`.
+    pub page: String,
     /// Why it couldn't be read; empty when it could.
     pub problem: String,
 }
@@ -409,6 +411,7 @@ fn open_file(folder: &Path, name: &str) -> OpenFile {
                     })
                     .collect(),
                 words: summary.words as f64,
+                page: render(&text, name),
                 text,
                 problem: String::new(),
             }
@@ -418,6 +421,7 @@ fn open_file(folder: &Path, name: &str) -> OpenFile {
             marks: Vec::new(),
             headings: Vec::new(),
             words: 0.0,
+            page: String::new(),
             problem: error.to_string(),
         },
     }
@@ -463,6 +467,25 @@ impl Documents {
             }
         });
         Stop::new(move || drop(listener.take()))
+    }
+
+    /// Picture `path` of the project, its path in the project, as a `data:` URL for the page.
+    pub async fn picture(project: String, path: String) -> Result<String, String> {
+        off_main(move || files::picture(Path::new(&project), &path))
+            .await?
+            .map_err(|error| error.to_string())
+    }
+}
+
+/// The page the rendered view shows a file on, in a web view.
+#[module]
+pub struct Page;
+
+#[module]
+impl Page {
+    /// The page's HTML, its style and script in it, with a new nonce each time.
+    pub fn shell() -> String {
+        page::shell()
     }
 }
 
@@ -909,6 +932,13 @@ mod tests {
             [(1.0, "Title", 0.0), (2.0, "Part", 4.0)]
         );
         assert_eq!(opened.words, 5.0);
+        assert!(
+            opened
+                .page
+                .starts_with("<h1 id=\"title\" data-sourcepos=\"1:1-1:7\">Title"),
+            "{}",
+            opened.page
+        );
     }
 
     #[test]

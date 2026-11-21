@@ -87,6 +87,18 @@ pulldown-cmark = { version = "0.13", default-features = false }
 # Markdown Viewer's project search: the crate nsh's editor finds with, so both count the same.
 regex = "1.12"
 
+# Markdown Viewer's rendered page: GitHub's Markdown as HTML, each block with its source lines.
+# Its library only: the default features are its command line's.
+comrak = { version = "1.1", default-features = false }
+# What comrak's README points to for the raw HTML a file holds: only harmless tags and attributes.
+ammonia = "4.2"
+# The page's formulas: TeX as MathML, which the web view draws itself.
+pulldown-latex = "0.8"
+# The page's code blocks: the syntaxes nsh's editor and `TextView` highlight with, at nsh-base 0.6.1's versions and
+# with its pure-Rust regular expressions, so the app builds them once.
+syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "dump-load"] }
+two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"] }
+
 # Tests only: a temporary folder for each test.
 tempfile = "3"
 

@@ -96,8 +96,9 @@ a new tab, or shows it in Explorer. Shift with an arrow doesn't pick a range.
 A new tab opens after the one in front, with pinned tabs first. The tabs are saved with the project: which are pinned,
 the preview, and how each shows its file.
 
-- **The preview**: a single press on a file (in the panel, or a link) replaces the preview tab, its name in italics. A
-  double press on the file or the tab keeps it, as do pinning and its menu's Keep open.
+- **The preview**: a single press on a file (in the panel, or a link) replaces the preview tab, its name in italics,
+  and shows as that tab did (Raw, Split or Rendered). A double press on the file or the tab keeps it, as do pinning and
+  its menu's Keep open.
 - **Pinning**: the pin beside a tab's × pins it to the start of the strip, where it stays open when the others close.
 - **Moving**: drag a tab along the strip, among the pinned tabs or among the others.
 - **Its menu**: Keep open, Pin or Unpin, Close, Close others, Close to the right, Close all but pinned, Show in files
@@ -116,12 +117,17 @@ one lists its files or the file's headings, to go to one.
 
 - **Raw** is nsh's code editor, read-only, with line numbers and soft wrap, in the theme's syntax colors. Each heading
   folds the text under it.
-- **Rendered** is nsh's `TextView`: CommonMark and GitHub's Markdown (tables, task lists, footnotes, alerts), inline
-  HTML, and code blocks with a copy button. Front matter shows as a box of its own, and a picture's relative path is
-  resolved from its file's folder. A link to a heading goes there, one to another Markdown file in the project opens
-  it, and any other opens outside the app. Formulas show as their TeX source.
+- **Rendered** is a page in nsh's web view, in the theme's colors: CommonMark and GitHub's Markdown (tables, task lists,
+  footnotes, alerts), the HTML a file holds less anything that could run or load (scripts, styles, frames, forms,
+  handlers), and code blocks with a copy button. Front matter shows as a box of its own, and a picture's relative path
+  is resolved from its file's folder, never outside the project; the page loads each as it nears the view. A link to a
+  heading goes there, one to another Markdown file in the project opens it, and any other opens outside the app. A
+  right click offers Copy, Copy link and Select all, and the app's keys work while the page has the keyboard.
+  Formulas (`$…$`, `$$…$$` and `math` code blocks) show as math in the system's math font, and code blocks in the
+  theme's syntax colors, as Raw colors them.
 - **Split** is both side by side; drag the line between them to share the width. While the header's toggle is on (on
-  at first, and not saved), the side you scroll leads and the other follows, meeting at every top-level heading.
+  at first, and not saved), the side you scroll leads and the other follows, meeting at the start of every block the
+  page draws: each heading, paragraph, list item, code block and table row.
 
 ## Search
 
@@ -141,7 +147,8 @@ and `$` at each line. It runs off the main thread, stops at 10,000 matches, and 
 two seconds. An invalid pattern says why.
 
 While the search has a query, the files panel lists the matches by file. Each file's count shows in the panel and its
-tab, and each heading's in the outline; Raw and Rendered highlight the matches, with ticks on the scroll bar; the
+tab, and each heading's in the outline; Raw and Rendered highlight the matches, the current one stronger, with ticks
+on the scroll bar and the map; the
 status bar says "Match 2 of 12 · 4 files". F3 and Shift+F3 step through the open project's matches, across files and
 wrapping around; a match in another project (All projects) opens that project.
 
@@ -149,8 +156,10 @@ Open in a tab, in the drop-down or the files panel's header, gives the results a
 with two lines above and below, a press going to the match. The tab isn't saved, follows the search, and goes when the
 search ends. Past the first 30 files they start folded, and a file shows its first 50 blocks of lines.
 
-Rendered doesn't highlight a match that crosses formatting or sits in code, a link's target or the front matter, and it
-scrolls near a match rather than exactly to it. Raw and the counts have every match.
+Rendered finds the matches in the text it shows, across formatting, in code and in a link's text, by the same rules
+(JavaScript reads the pattern; one it can't read highlights nothing there). What only the file's text has, such as a
+link's target or Markdown's own punctuation, Raw finds and Rendered doesn't: F3 then takes the page to the block that
+holds the match.
 
 ## The outline
 
@@ -166,7 +175,7 @@ on it lists them, to go to one.
 ## The map
 
 Beside each view, and each side of Split, a map draws the whole file in miniature: Raw's lines as written, or
-Rendered's blocks as shapes. The top two levels of headings are named, each match is marked, and a band shows the part
+Rendered's blocks where the page draws them. The top two levels of headings are named, each match is marked, and a band shows the part
 in view. A press or a drag on the map takes the view there, and resting the pointer shows that part larger. The
 header's map button shows and hides it, and the choice is saved.
 
@@ -213,13 +222,17 @@ In `app/`, `App.tsx` is the shell, `views/model.ts` what every region reads, `vi
 tabs, keys, menus and links do, and `src/bridge.rs` everything TSX imports from `mdviewer/native`. Each region has its
 view in `views/` (`files.tsx`, `tabstrip.tsx`, `reader.tsx`, `searchbar.tsx`, `results.tsx`, `rail.tsx`, `map.tsx`,
 ...), with what it works out beside it as plain TS (`tree.ts`, `tabs.ts`, `document.ts`, `search.ts`, `minimap.ts`,
-`scrollsync.ts`, `syntax.ts`). `crates/mdviewer/core/src` holds the two saved files (`config.rs`, `projects.rs`,
-`saved.rs`), a project's files (`files.rs`), a file's outline (`outline.rs`), Raw's syntax marks (`syntax.rs`) and the
-search (`search.rs`).
+`scrollsync.ts`, `syntax.ts`). Rendered's page is `app/page/` (its HTML, CSS and script, built in by `src/page.rs`),
+shown by `views/page.tsx`; `views/pagemessages.ts` is what the page and the app say to each other, and
+`views/shortcuts.ts` the app's keys, which the page passes on. `crates/mdviewer/core/src` holds the two saved files
+(`config.rs`, `projects.rs`, `saved.rs`), a project's files and pictures (`files.rs`), a file's outline (`outline.rs`),
+Raw's syntax marks (`syntax.rs`), Rendered's HTML (`render.rs`, on comrak and ammonia; `render/math.rs`, formulas as
+MathML; `render/code.rs`, code blocks' tokens) and the search (`search.rs`).
 
 `nsh test` runs `App.test.tsx`, which drops `assets/screenshots/projects/Weathervane` on New and walks through the app,
-and `Tabs`, `Tree`, `Document`, `Syntax`, `ScrollSync`, `Search` and `Minimap` (`.test.ts`). How the views look,
-scrolling to a place and dragging tabs need a look by hand.
+and `Tabs`, `Tree`, `Document`, `Syntax`, `ScrollSync`, `Search`, `Minimap` and `Page` (`.test.ts`); the page's HTML is
+`render.rs`'s tests. The headless runner has no web view, so the page itself, how the views look, scrolling to a place
+and dragging tabs need a look by hand.
 
 ## Not yet
 
@@ -227,3 +240,4 @@ scrolling to a place and dragging tabs need a look by hand.
 - A tab brought back to the front starts at its top rather than where it was left.
 - The tab strip doesn't scroll by itself while a tab is dragged toward its end, and in Wrap a tab can't be dragged to
   another row.
+- A `mermaid` code block shows as its code, not as a diagram.

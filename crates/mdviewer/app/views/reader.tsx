@@ -1,10 +1,10 @@
-import { computed, effect, Scroll, type ScrollRef, signal, Text, untracked, View } from "nsh";
-import { Editor, type EditorRef, ResizablePanel, ResizablePanelGroup, TextView, type TextViewCustomNode, type TextViewDocument } from "nsh/base";
+import { computed, effect, Scroll, signal, Text, untracked, View } from "nsh";
+import { Editor, type EditorRef, ResizablePanel, ResizablePanelGroup } from "nsh/base";
 import { Button, EmptyState, IconButton, Island, look, OutlineList, PaneHeader, Spinner } from "../../../dp/ui";
 import { followLink } from "./actions";
-import { foldRanges, headingAnchors, headingAt, MARKDOWN, pictureSource, splitSections, withPictures } from "./document";
+import { foldRanges, headingAt } from "./document";
 import { FileMap, type MapPreview } from "./map";
-import { blockAround, lineAtPage, MARKS, onTrack, pageMap, rawMap, rulerMarks } from "./minimap";
+import { blockAround, MARKS, onTrack, pageMap, rawMap, rulerMarks } from "./minimap";
 import {
   caret,
   currentInFront,
@@ -26,11 +26,13 @@ import {
   scrollTogether,
   searchQuery,
 } from "./model";
+import { type PageRef, PageView } from "./page";
+import { headingTops, lineAtPlace, type PageBlock, pageFind, readingAt, syncPlaces } from "./pagemessages";
 import { HeadingRail } from "./rail";
 import { ResultsFiles } from "./results";
 import { createScrollSync, type ScrollSync } from "./scrollsync";
-import { highlighted, matchMarks, onThePage, pageOffset, pagePattern } from "./search";
-import { decorationsOf, PAGE } from "./syntax";
+import { matchMarks, pagePattern } from "./search";
+import { decorationsOf } from "./syntax";
 
 const SIDE_MIN_WIDTH = 240;
 
@@ -39,6 +41,9 @@ const HOLD_AFTER_GOING = 800;
 const ABOVE_HEADING = 12;
 
 const ABOVE_MATCH = 160;
+
+// Split measures this many of Raw's lines at most, each a call to the editor.
+const MOST_SYNC_PLACES = 300;
 
 // nsh's `Editor` reports no scrolling, so Raw's map polls which lines are in view.
 const MAP_VIEW_CHECK_ACTIVE = 50;
@@ -50,17 +55,6 @@ const PAGE_SCALE_MOST = 0.2;
 function crumbOf(heading: number, first: number): string {
   const title = headings()[heading]?.title;
   return title ? `${title} · line ${first + 1}` : `Line ${first + 1}`;
-}
-
-const MEASURE_TRIES = 20;
-const MEASURE_WAIT = 50;
-
-function FrontMatter(props: { node: TextViewCustomNode }) {
-  return (
-    <View class="mb-4 rounded-md bg-muted px-3 py-2">
-      <Text class="font-mono text-xs text-muted-foreground">{props.node.text ?? ""}</Text>
-    </View>
-  );
 }
 
 function RawView(props: { sync?: ScrollSync }) {
@@ -136,7 +130,7 @@ function RawView(props: { sync?: ScrollSync }) {
         <Editor
           ref={(ref) => {
             editor = ref;
-            props.sync?.raw(ref ? { editor: ref, headingLines: () => headings().map((heading) => heading.line), lastLine: () => text().split("\n").length - 1 } : undefined);
+            props.sync?.raw(ref ? { editor: ref, lastLine:() => text().split("\n").length - 1 } : undefined);
           }}
           class="flex-1"
           value={text()}
@@ -203,158 +197,94 @@ function RawView(props: { sync?: ScrollSync }) {
 }
 
 function RenderedView(props: { sync?: ScrollSync }) {
-  let scroll: ScrollRef | undefined;
-  const tops: number[] = [];
+  let page: PageRef | undefined;
   let holdUntil = 0;
-
-  let columnHeight = 0;
-  // Bumped on every layout, since `tops` and `columnHeight` aren't signals.
-  const measured = signal(0);
+  const blocks = signal<PageBlock[]>([]);
+  const content = signal(0);
   const track = signal(0);
-
-  const parsed = computed<TextViewDocument>(() => {
-    const folder = projectPath();
-    const file = openPath();
-    const document = TextView.parse(opened()?.text ?? "", MARKDOWN);
-    return folder === "" ? document : withPictures(document, (src) => pictureSource(folder, file, src));
-  });
-  const pattern = computed(() => pagePattern(searchQuery()));
-  const current = computed(() => (currentInFront() < 0 ? null : onThePage(matchesInFront(), currentInFront(), headings(), opened()?.marks ?? [])));
-  const pageSections = computed(() => splitSections(parsed()));
-  const sections = computed(() => {
-    const at = current();
-    const wholeWord = searchQuery()?.wholeWord ?? false;
-    return pageSections().map((document, index) => ({
-      document: highlighted(document, pattern(), wholeWord, at?.section === index ? at.nth : -1, look().found).document,
-      index,
-    }));
-  });
-  const anchors = computed(() => headingAnchors(parsed()));
+  const inView = signal<{ top: number; height: number } | null>(null);
+  const tops = computed(() => headingTops(headings(), blocks()));
   const lines = computed(() => (opened()?.text ?? "").split("\n"));
-  const matchPlaces = computed(() => {
-    measured();
-    return matchesInFront().flatMap((each) => {
-      const place = pageOffset(each.startLine, headings(), lines().length, tops, columnHeight);
-      return place === undefined ? [] : [place];
-    });
+
+  // Up by one each time the reader goes to a match or another file, and the page scrolls to the match it's on.
+  const reveal = signal(0);
+  effect(() => {
+    currentMatch();
+    openPath();
+    untracked(() => reveal.set(reveal() + 1));
   });
+  const find = computed(() => pageFind(pagePattern(searchQuery()), searchQuery()?.wholeWord ?? false, matchesInFront(), currentInFront(), reveal(), ABOVE_MATCH));
+  const matchPlaces = signal<number[]>([]);
   const barMarks = computed<BarMarks>(() => {
-    measured();
-    const height = track();
-    const shown = headings();
-    const at = (offset: number) => onTrack(offset, columnHeight, height);
-    const section = reading() + 1;
-    const top = tops[section];
+    const at = (offset: number) => onTrack(offset, content(), track());
+    const shown = tops();
+    const top = shown[reading()];
+    const next = shown.slice(reading() + 1).find((each) => each !== undefined) ?? content();
     return {
-      headings: shown.flatMap((_, index) => {
-        const start = tops[index + 1];
-        return start === undefined ? [] : [at(start)];
-      }),
+      headings: shown.flatMap((each) => (each === undefined ? [] : [at(each)])),
       matches: matchPlaces().map(at),
-      section: top === undefined || shown.length === 0 ? null : { top: at(top), height: Math.max(2, at(tops[section + 1] ?? columnHeight) - at(top)) },
+      section: top === undefined ? null : { top: at(top), height: Math.max(2, at(next) - at(top)) },
     };
   });
-  const picture = computed(() => {
-    measured();
-    return pageMap(pageSections(), tops, columnHeight);
-  });
-  const inView = signal<{ top: number; height: number } | null>(null);
+  const picture = computed(() => pageMap(blocks(), headings(), content()));
   const preview = (unit: number): MapPreview => {
-    const line = lineAtPage(unit, headings(), lines().length, tops, columnHeight);
-    const block = blockAround(lines(), line, headings());
+    const block = blockAround(lines(), lineAtPlace(blocks(), unit), headings());
     return { crumb: crumbOf(block.heading, block.first), text: block.lines.join("\n"), page: true };
   };
 
   goesToHeadings((index) => {
-    const top = tops[index + 1];
-    if (top === undefined) return;
+    const heading = headings()[index];
+    if (!heading) return;
     holdUntil = Date.now() + HOLD_AFTER_GOING;
-    scroll?.scrollTo({ y: Math.max(0, top - ABOVE_HEADING), animated: true });
+    page?.goToLine(heading.line, ABOVE_HEADING);
   });
+  // In Split, Raw goes to the match on its own.
   effect(() => {
-    openPath();
-    scroll?.scrollTo({ y: 0, animated: false });
-    props.sync?.remeasure();
-  });
-  // A file just opened takes a moment to measure its sections; in Split, Raw goes to the match on its own.
-  effect(() => {
-    const at = matchesInFront()[currentInFront()];
-    if (!at) return;
-    const lines = (opened()?.text ?? "").split("\n").length;
-    const shown = headings();
-    let tries = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const go = () => {
-      const y = pageOffset(at.startLine, shown, lines, tops, columnHeight);
-      if (y === undefined) {
-        if (++tries < MEASURE_TRIES) timer = setTimeout(go, MEASURE_WAIT);
-        return;
-      }
-      props.sync?.pause(HOLD_AFTER_GOING);
-      scroll?.scrollTo({ y: Math.max(0, y - ABOVE_MATCH), animated: true });
-    };
-    timer = setTimeout(go, 0);
-    return () => clearTimeout(timer);
+    reveal();
+    if (untracked(currentInFront) >= 0) props.sync?.pause(HOLD_AFTER_GOING);
   });
   effect(() => () => props.sync?.page(undefined));
 
   const follow = (y: number) => {
     if (Date.now() < holdUntil) return;
-    let section = 0;
-    tops.forEach((top, index) => {
-      if (top <= y + ABOVE_HEADING * 2) section = index;
-    });
-    reading.set(section - 1);
+    reading.set(readingAt(tops(), y, ABOVE_HEADING * 2));
   };
 
   return (
     <View class="flex-1 flex-row">
       <View class="flex-1" onLayout={(event) => track.set(event.bounds.size.height)}>
-        <Scroll
-          ref={(ref) => {
-            scroll = ref;
-            props.sync?.page(ref ? { scroll: ref, headingTops: () => headings().map((_, index) => (tops[index + 1] === undefined ? undefined : tops[index + 1] - ABOVE_HEADING)) } : undefined);
-          }}
+        <PageView
+          file={openPath()}
+          project={projectPath()}
+          html={opened()?.page}
+          find={find()}
+          label={`${openPath()}, as the page shows it`}
           testID="rendered"
-          class="flex-1"
-          // Every frame, so Raw follows the page in step.
-          scrollEventThrottle={16}
-          onScroll={(event) => {
-            follow(event.offset.y);
-            props.sync?.pageScrolled(event.offset.y, event.contentSize.height, event.size.height);
-            inView.set({ top: event.offset.y, height: event.size.height });
+          ref={(ref) => {
+            page = ref;
+            props.sync?.page(
+              ref
+                ? {
+                    scrollTo: (y) => ref.scrollTo(y, false),
+                    places: () => syncPlaces(blocks(), MOST_SYNC_PLACES).map((place) => ({ line: place.line, top: place.top - ABOVE_HEADING })),
+                  }
+                : undefined,
+            );
           }}
-        >
-          <View
-            class="w-full max-w-3xl self-center px-8 pb-24 pt-6"
-            onLayout={(event) => {
-              columnHeight = event.bounds.size.height;
-              measured.set(untracked(measured) + 1);
-            }}
-          >
-            <Each of={sections()} key={(section) => String(section.index)}>
-              {(section) => (
-                <View
-                  onLayout={(event) => {
-                    tops[section().index] = event.bounds.origin.y;
-                    props.sync?.remeasure();
-                    measured.set(untracked(measured) + 1);
-                  }}
-                >
-                  <TextView
-                    document={section().document}
-                    classes={PAGE}
-                    selectable
-                    links="report"
-                    codeBlockActions={[{ id: "copy", label: "Copy code" }]}
-                    renderCustom={(node) => (node.name === "frontmatter" ? <FrontMatter node={node} /> : <Text class="text-muted-foreground">{node.text ?? ""}</Text>)}
-                    onLinkPress={(event) => followLink(event.url, anchors(), event.modifiers.control)}
-                  />
-                </View>
-              )}
-            </Each>
-          </View>
-        </Scroll>
+          onLayout={(height, found) => {
+            content.set(height);
+            blocks.set(found);
+            props.sync?.remeasure();
+          }}
+          onScroll={(y, viewport, height) => {
+            content.set(height);
+            follow(y);
+            props.sync?.pageScrolled(y, height, viewport);
+            inView.set({ top: y, height: viewport });
+          }}
+          onLink={(url, control) => followLink(url, control)}
+          onFound={(places) => matchPlaces.set(places)}
+        />
         <PageMarks marks={barMarks()} />
       </View>
       <If when={mapOpen()}>
@@ -366,7 +296,7 @@ function RenderedView(props: { sync?: ScrollSync }) {
           view={inView() ?? { top: 0, height: track() }}
           matches={matchPlaces()}
           preview={preview}
-          onGo={(unit) => scroll?.scrollTo({ y: Math.max(0, unit - track() / 2), animated: false })}
+          onGo={(unit) => page?.scrollTo(Math.max(0, unit - track() / 2), false)}
         />
       </If>
     </View>
@@ -413,6 +343,15 @@ export function Outline(props: { onHide: () => void }) {
   );
 }
 
+/** Raw, made anew for each file, so each starts at its top. Rendered stays while the next file is read: its page loads once. */
+function FreshRaw(props: { sync?: ScrollSync }) {
+  return (
+    <If when={opened()} else={<Spinner label="Reading the file" />}>
+      <RawView sync={props.sync} />
+    </If>
+  );
+}
+
 /** The file in front, in its tab's mode, or why there is nothing to show. */
 export function Reader(props: { rail: boolean; onRemove: () => void }) {
   const problem = () => listing()?.problem ?? "";
@@ -428,23 +367,19 @@ export function Reader(props: { rail: boolean; onRemove: () => void }) {
           else={<EmptyState icon="file-text" title="No Markdown files here yet" text="This folder and the folders under it hold no .md files. Add one, and it shows here by itself." />}
         >
           <If when={openPath() !== ""} else={<EmptyState icon="file-text" title="No file open" text="Open a file from the files on the left. Ctrl+Shift+T opens the one closed last." />}>
-            <If when={opened()} else={<Spinner label="Reading the file" />}>
-              {(file) => (
-                <If when={file().problem === ""} else={<EmptyState icon="file-text" title="This file can't be shown" text={file().problem} />}>
-                  <View class="min-h-0 min-w-0 flex-1 flex-row">
-                    <View class="min-w-0 flex-1">
-                      <If when={mode() !== "split"} else={<SplitView />}>
-                        <If when={mode() === "raw"} else={<RenderedView />}>
-                          <RawView />
-                        </If>
-                      </If>
-                    </View>
-                    <If when={props.rail && headings().length > 0}>
-                      <HeadingRail />
+            <If when={(opened()?.problem ?? "") === ""} else={<EmptyState icon="file-text" title="This file can't be shown" text={opened()?.problem ?? ""} />}>
+              <View class="min-h-0 min-w-0 flex-1 flex-row">
+                <View class="min-w-0 flex-1">
+                  <If when={mode() !== "split"} else={<SplitView />}>
+                    <If when={mode() === "raw"} else={<RenderedView />}>
+                      <FreshRaw />
                     </If>
-                  </View>
+                  </If>
+                </View>
+                <If when={props.rail && headings().length > 0}>
+                  <HeadingRail />
                 </If>
-              )}
+              </View>
             </If>
           </If>
         </If>
@@ -464,7 +399,7 @@ function SplitView() {
   return (
     <ResizablePanelGroup axis="horizontal" class="flex-1" handleClass={`h-full w-px ${look().edges.panel}`} handleAccessibilityLabel="Resize the raw and rendered views">
       <ResizablePanel minSize={SIDE_MIN_WIDTH}>
-        <RawView sync={sync} />
+        <FreshRaw sync={sync} />
       </ResizablePanel>
       <ResizablePanel minSize={SIDE_MIN_WIDTH}>
         <RenderedView sync={sync} />

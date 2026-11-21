@@ -1,22 +1,16 @@
 import { expect, test } from "nsh/test";
-import { TextView, type TextViewInline } from "nsh/base";
-import type { HeadingInfo, MarkInfo, MatchInfo, SearchResults } from "mdviewer/native";
-import { MARKDOWN } from "./views/document";
+import type { HeadingInfo, MatchInfo, SearchResults } from "mdviewer/native";
 import {
   countIn,
   excerptParts,
   headingCounts,
-  highlighted,
   inProject,
   lineMarks,
   lineParts,
   matchMarks,
   matchOf,
-  matchRanges,
   nearestMatch,
-  onThePage,
   ordinal,
-  pageOffset,
   pagePattern,
   placesFor,
   resultItems,
@@ -191,68 +185,19 @@ test("Raw marks each line that holds a match once, beside it and on the ruler", 
 });
 
 test("the page reads the query as Raw does: as written, in any case, or as a pattern", () => {
+  const ranges = (text: string, pattern: RegExp | null) => [...text.matchAll(pattern!)].map((found) => [found.index, found.index + found[0].length]);
   const plain = pagePattern({ text: "a.b", caseSensitive: false, wholeWord: false, regex: false });
-  expect(matchRanges("A.B axb a.b", plain!, false)).toEqual([
+  expect(ranges("A.B axb a.b", plain)).toEqual([
     [0, 3],
     [8, 11],
   ]);
   const cased = pagePattern({ text: "Rust", caseSensitive: true, wholeWord: false, regex: false });
-  expect(matchRanges("rust Rust", cased!, false)).toEqual([[5, 9]]);
-  const words = pagePattern({ text: "ab", caseSensitive: false, wholeWord: true, regex: false });
-  expect(matchRanges("xab ab abc", words!, true)).toEqual([[4, 6]]);
+  expect(ranges("rust Rust", cased)).toEqual([[5, 9]]);
   const pattern = pagePattern({ text: "\\d+", caseSensitive: false, wholeWord: false, regex: true });
-  expect(matchRanges("v1.95", pattern!, false)).toEqual([
+  expect(ranges("v1.95", pattern)).toEqual([
     [1, 2],
     [3, 5],
   ]);
   expect(pagePattern({ text: "(abc", caseSensitive: false, wholeWord: false, regex: true })).toBe(null);
   expect(pagePattern(null)).toBe(null);
-});
-
-function highlights(inlines: TextViewInline[]): [string, string][] {
-  const found: [string, string][] = [];
-  for (const each of inlines) {
-    if (each.type === "highlight") found.push([each.content.map((part) => (part.type === "text" ? part.text : "")).join(""), each.color ?? ""]);
-    else if ("content" in each && Array.isArray(each.content)) found.push(...highlights(each.content));
-  }
-  return found;
-}
-
-test("the page highlights each match in its text, inside links and strong text too, the current one in its own color", () => {
-  const document = TextView.parse("The toolchain, **the toolchain**, [toolchain](setup.md) and `toolchain`.\n", MARKDOWN);
-  const pattern = pagePattern({ text: "toolchain", caseSensitive: false, wholeWord: false, regex: false });
-  const shown = highlighted(document, pattern, false, 1, { match: "m", current: "c" });
-  expect(shown.count).toBe(3);
-  const paragraph = shown.document.blocks[0];
-  expect(paragraph.type).toBe("paragraph");
-  if (paragraph.type !== "paragraph") return;
-  expect(highlights(paragraph.content)).toEqual([
-    ["toolchain", "m"],
-    ["toolchain", "c"],
-    ["toolchain", "m"],
-  ]);
-  // The text around a match stays as it was.
-  expect(paragraph.content[0]).toEqual({ type: "text", text: "The " });
-  // No query, no change.
-  expect(highlighted(document, null, false, -1, { match: "m", current: "c" }).document).toBe(document);
-});
-
-test("the match the reader is on is found on the page by its section, counting only what the page shows as text", () => {
-  // Line 0 a match in code, line 2 the heading, lines 4 and 5 matches in text.
-  const matches = [at(0, 1, 5), at(4, 0, 4), at(5, 0, 4)];
-  const headings = [heading(1, "Part", 2)];
-  const marks: MarkInfo[] = [{ kind: "code", startLine: 0, startColumn: 1, endLine: 0, endColumn: 5 }];
-  expect(onThePage(matches, 0, headings, marks)).toBe(null);
-  expect(onThePage(matches, 1, headings, marks)).toEqual({ section: 1, nth: 0 });
-  expect(onThePage(matches, 2, headings, marks)).toEqual({ section: 1, nth: 1 });
-});
-
-test("the page goes as far into a match's section as its line is into the section's lines", () => {
-  const headings = [heading(1, "One", 10), heading(1, "Two", 20)];
-  // Sections start at 0, 100 and 300 points; the page ends at 400.
-  const tops = [0, 100, 300];
-  expect(pageOffset(15, headings, 30, tops, 400)).toBe(200);
-  expect(pageOffset(25, headings, 30, tops, 400)).toBe(350);
-  expect(pageOffset(5, headings, 30, tops, 400)).toBe(50);
-  expect(pageOffset(15, headings, 30, [0], 400)).toBe(undefined);
 });

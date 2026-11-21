@@ -9,9 +9,9 @@ name in a workspace to differ and `core` is Rust's own; its folder doesn't (`cra
 The second product is Markdown Viewer (`crates/mdviewer`, the name for now): folders of Markdown opened as projects
 from New, listed in IP Camera's sidebar, their `.md` files in a panel to the left of the file (as a tree, by folder or
 in one list), open in tabs (a preview, pinned ones, dragged into order), each raw (nsh's code editor, highlighted),
-rendered (nsh's `TextView`) or both, with its outline on the right. `crates/mdviewer/app` is its
-nsh app and `crates/mdviewer/core` (`mdviewer-core`) its plain Rust: projects and settings, the files in a project,
-and a file's outline. Its README is `crates/mdviewer/README.md`.
+rendered (HTML from comrak, on a page in nsh's web view) or both, with its outline on the right.
+`crates/mdviewer/app` is its nsh app and `crates/mdviewer/core` (`mdviewer-core`) its plain Rust: projects and
+settings, the files in a project, a file's outline and its page's HTML. Its README is `crates/mdviewer/README.md`.
 
 The first product is IP Camera, a desktop viewer for IP cameras: live RTSP video from several cameras in saved tile
 layouts, PTZ over Dahua DVRIP, snapshots and recordings. `crates/ipcamera/server` is its server, which relays the
@@ -130,13 +130,17 @@ crates/
   mdviewer/           Markdown Viewer
     core/             mdviewer-core: `settings.json` (`config.rs`: the window's preferences and place) and
                       `projects.json` (`projects.rs`: the projects, the one open, each one's tabs and last file),
-                      opened together (`saved.rs`, on `dp-store`), the Markdown files of a project and reading one
-                      (`files.rs`: walked in the panel's order, build and hidden folders skipped, a name never
-                      leaving the project), a file's outline and length (`outline.rs`, on pulldown-cmark: top-level
+                      opened together (`saved.rs`, on `dp-store`), the Markdown files of a project, reading one and
+                      a picture a page shows (`files.rs`: walked in the panel's order, build and hidden folders
+                      skipped, a name never leaving the project), a file's outline and length (`outline.rs`, on pulldown-cmark: top-level
                       headings with their lines), what each part of a file's text is, for the raw view to color
                       (`syntax.rs`, the same parse: lines and UTF-16 columns, as the editor counts), finding text in
                       a project's files as the raw view's search finds it (`search.rs`, on `regex`, the crate nsh's
-                      editor finds with); no UI, no nsh
+                      editor finds with), the rendered page's HTML (`render.rs`: comrak, each block's source lines
+                      in `data-sourcepos`, the outline's headings met by line; ammonia keeping the HTML a file holds
+                      harmless; `render/math.rs`, formulas as MathML on pulldown-latex; `render/code.rs`, code
+                      blocks' tokens as classes, on syntect with two-face's syntaxes, read as nsh reads them); no UI,
+                      no nsh
     app/              the app, nsh package `mdviewer`, a Cargo workspace of its own like IP Camera's:
       App.tsx           the shell: sidebar, header, the files panel, the tabs over the reader, the outline, status bar,
                         the shortcuts
@@ -146,16 +150,23 @@ crates/
                         scrolling or wrapping as Settings says, and the breadcrumbs under them),
                         `reader.tsx` (Raw, Split, Rendered and the outline), `newproject.tsx`, `settings.tsx`,
                         `statusbar.tsx`; `tabs.ts`, `document.ts` and `tree.ts`, what they work out, tested;
-                        `syntax.ts`, the theme's syntax colors (`syntax-*` tokens) on Raw's decorations and Rendered's parts;
+                        `syntax.ts`, the theme's syntax colors (`syntax-*` tokens) on Raw's decorations and the map's preview;
                         `scrollsync.ts`, Split's two sides scrolling together (the header's toggle); `searchbar.tsx`,
                         the title bar's search box and its drop-down (nsh's `Command` in a `Popover`); `search.ts`,
                         what the search works out: where each scope looks, the result rows, the counts, F3's steps
-                        across the files, Raw's marks, the page's highlights; `minimap.ts`, where the scroll bars'
+                        across the files, Raw's marks, the page's pattern; `minimap.ts`, where the scroll bars'
                         marks of a whole file (headings, matches, the reader's section) and the heading rail's lines
-                        go, and the maps' pictures (Raw's lines, the page's block shapes) and previews; `rail.tsx`,
-                        the heading rail, the outline's stand-in while it is hidden; `map.tsx`, the map of the whole
-                        file beside each view, on `Canvas`; `results.tsx`, the search's results as a tab of their own
-      src/              `bridge.rs`, everything TSX imports from `mdviewer/native`; `dropped.rs`, a dropped folder's `file:` URL as a path
+                        go, and the maps' pictures (Raw's lines, the page's blocks where it drew them) and previews;
+                        `rail.tsx`, the heading rail, the outline's stand-in while it is hidden; `map.tsx`, the map of
+                        the whole file beside each view, on `Canvas`; `results.tsx`, the search's results as a tab of
+                        their own; `page.tsx`, Rendered's page in a `WebView` (loaded once, then each file, theme,
+                        search and scroll a message), `pagemessages.ts` the messages both ways, checked, and what the reader
+                        works out from the page's blocks, `shortcuts.ts` the app's keys, which the page passes on
+      page/             Rendered's page: `page.html` (its Content-Security-Policy), `page.css` (every color a theme
+                        token as a CSS variable), `page.js` (showing the HTML, reporting its blocks and scrolling,
+                        the search's highlights, links, pictures, keys, the menu); plain files, built in by `src/page.rs`
+      src/              `bridge.rs`, everything TSX imports from `mdviewer/native`; `page.rs`, the page with a new
+                        nonce each time; `dropped.rs`, a dropped folder's `file:` URL as a path
   xtask/              the repository's own commands, run through cargo (aliases in `.cargo/config.toml`), each
                       product's by its name: `cargo ipcamera` is `nsh run` in crates/ipcamera/app; `cargo
                       ipcamera-web` starts ipcamera-server on the desktop app's `crates\ipcamera\app\target\debug\.nsh`
@@ -209,7 +220,7 @@ other, and `dp-*` crates depend on no product.
 | what the snapshots, videos and events pages share: filters, sizes, selecting, the grid, the viewer | `crates/ipcamera/app/README.md` "Snapshots", `views/library.ts`, `views/grid.tsx`, `views/viewer.tsx` |
 | themes, textures, elevation, islands; the shared controls | `crates/README.md` "dp-ui", "Themes", "Theme files", "Islands", "Textures", "Elevation"; `crates/dp/ui/index.ts`, `brand.tsx`, `src/lib.rs` |
 | what the products share, and moving more there | `crates/README.md`, `crates/dp/store/src/lib.rs`, `crates/dp/ui/src/lib.rs` |
-| Markdown Viewer: projects, the files panel and its views, tabs and the breadcrumbs, Raw, Split and Rendered, the outline, the search and its results' tab, the scroll bars' marks, the heading rail and the map | `crates/mdviewer/README.md`; `crates/mdviewer/core/src/config.rs`, `files.rs`, `outline.rs`, `search.rs`; `crates/mdviewer/app/views/files.tsx`, `tree.ts`, `tabs.ts`, `tabstrip.tsx`, `reader.tsx`, `document.ts`, `search.ts`, `searchbar.tsx`, `results.tsx`, `minimap.ts`, `rail.tsx`, `map.tsx` |
+| Markdown Viewer: projects, the files panel and its views, tabs and the breadcrumbs, Raw, Split and Rendered, the outline, the search and its results' tab, the scroll bars' marks, the heading rail and the map | `crates/mdviewer/README.md`; `crates/mdviewer/core/src/config.rs`, `files.rs`, `outline.rs`, `render.rs`, `search.rs`; `crates/mdviewer/app/views/files.tsx`, `tree.ts`, `tabs.ts`, `tabstrip.tsx`, `reader.tsx`, `page.tsx`, `pagemessages.ts`, `document.ts`, `search.ts`, `searchbar.tsx`, `results.tsx`, `minimap.ts`, `rail.tsx`, `map.tsx`; `crates/mdviewer/app/page/` |
 | Settings, in its dialog | `crates/ipcamera/app/README.md` "Settings", `crates/mdviewer/README.md` "Settings", `crates/dp/ui/settings.tsx`, `editor.tsx` |
 | the dashboard | `crates/ipcamera/app/README.md` "Dashboard", `views/overview.ts` |
 | the web preview, and web streaming later | `crates/ipcamera/app/README.md` "The web" |
@@ -244,7 +255,7 @@ linker.
 ```powershell
 # The root workspace (core, media)
 cargo test -p ipcamera-core                                  # the fast subset: no media stack, no display, milliseconds
-cargo test -p mdviewer-core -p dp-store                      # as fast: Markdown Viewer's projects, files and outline; the shared store
+cargo test -p mdviewer-core -p dp-store                      # as fast: Markdown Viewer's projects, files, outline and page HTML; the shared store
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all                                             # --check to only report

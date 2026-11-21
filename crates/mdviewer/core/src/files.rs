@@ -1,11 +1,14 @@
-//! The Markdown files in a project's folder, and reading one. A file is named by its path in the
-//! project with `/` between parts (`docs/setup.md`), and a name never leaves the project's folder.
+//! The Markdown files in a project's folder, reading one, and reading a picture a page shows. A file
+//! is named by its path in the project with `/` between parts (`docs/setup.md`), and a name never
+//! leaves the project's folder.
 
 use std::{
     fmt, fs, io,
     path::{Component, Path, PathBuf},
     time::UNIX_EPOCH,
 };
+
+use base64::{Engine, engine::general_purpose::STANDARD};
 
 const EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkd", "mkdn", "mdx"];
 
@@ -17,6 +20,22 @@ pub const MOST_FILES: usize = 5_000;
 
 /// The largest file read, in bytes: a larger one would hold the window up.
 pub const MOST_BYTES: u64 = 8 << 20;
+
+/// The largest picture read, in bytes: the page gets it whole, as a `data:` URL.
+pub const MOST_PICTURE_BYTES: u64 = 16 << 20;
+
+/// The pictures a page shows, by extension, and their media types.
+const PICTURES: &[(&str, &str)] = &[
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("gif", "image/gif"),
+    ("webp", "image/webp"),
+    ("avif", "image/avif"),
+    ("bmp", "image/bmp"),
+    ("ico", "image/x-icon"),
+    ("svg", "image/svg+xml"),
+];
 
 /// A Markdown file in a project.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +85,15 @@ pub enum FilesError {
         /// Its size, in bytes.
         size: u64,
     },
+    /// The file isn't a picture a page shows.
+    NotAPicture(String),
+    /// The picture is larger than [`MOST_PICTURE_BYTES`].
+    PictureTooLarge {
+        /// The picture.
+        path: PathBuf,
+        /// Its size, in bytes.
+        size: u64,
+    },
     /// The system refused.
     Unreadable {
         /// The file or folder.
@@ -93,6 +121,17 @@ impl fmt::Display for FilesError {
                 path.display(),
                 size >> 20,
                 MOST_BYTES >> 20
+            ),
+            Self::NotAPicture(name) => write!(
+                f,
+                "{name} isn't a picture Markdown Viewer shows: PNG, JPEG, GIF, WebP, AVIF, BMP, ICO or SVG."
+            ),
+            Self::PictureTooLarge { path, size } => write!(
+                f,
+                "{} is {} MB, too large to show. Markdown Viewer shows pictures up to {} MB.",
+                path.display(),
+                size >> 20,
+                MOST_PICTURE_BYTES >> 20
             ),
             Self::Unreadable { path, source } => {
                 write!(f, "{} couldn't be read: {source}.", path.display())
@@ -216,6 +255,29 @@ pub fn read(folder: &Path, name: &str) -> Result<String, FilesError> {
     let bytes = fs::read(&path).map_err(|source| missing_or(&path, source))?;
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
     Ok(String::from_utf8_lossy(bytes).into_owned())
+}
+
+/// Picture `name` of the project in `folder` as a `data:` URL, for the page.
+pub fn picture(folder: &Path, name: &str) -> Result<String, FilesError> {
+    let path = locate(folder, name)?;
+    let kind = name
+        .rsplit_once('.')
+        .and_then(|(_, extension)| {
+            PICTURES
+                .iter()
+                .find(|(each, _)| each.eq_ignore_ascii_case(extension))
+        })
+        .map(|(_, kind)| *kind)
+        .ok_or_else(|| FilesError::NotAPicture(name.to_owned()))?;
+    let metadata = fs::metadata(&path).map_err(|source| missing_or(&path, source))?;
+    if metadata.len() > MOST_PICTURE_BYTES {
+        return Err(FilesError::PictureTooLarge {
+            size: metadata.len(),
+            path,
+        });
+    }
+    let bytes = fs::read(&path).map_err(|source| missing_or(&path, source))?;
+    Ok(format!("data:{kind};base64,{}", STANDARD.encode(bytes)))
 }
 
 /// The size and time of file `name`, to tell whether it changed; `None` when unreadable.
@@ -357,6 +419,30 @@ mod tests {
             Err(FilesError::MissingFile(_))
         ));
         assert_eq!(stamp(dir.path(), "gone.md"), None);
+    }
+
+    #[test]
+    fn a_picture_comes_as_a_data_url() {
+        let dir = TempDir::new().expect("a temporary folder");
+        fs::create_dir(dir.path().join("shots")).expect("a folder");
+        fs::write(dir.path().join("shots/dot.PNG"), b"\x89PNG").expect("a picture");
+
+        assert_eq!(
+            picture(dir.path(), "shots/dot.PNG").expect("read"),
+            "data:image/png;base64,iVBORw=="
+        );
+        assert!(matches!(
+            picture(dir.path(), "../dot.png"),
+            Err(FilesError::OutsideProject(_))
+        ));
+        assert!(matches!(
+            picture(dir.path(), "notes.md"),
+            Err(FilesError::NotAPicture(_))
+        ));
+        assert!(matches!(
+            picture(dir.path(), "gone.png"),
+            Err(FilesError::MissingFile(_))
+        ));
     }
 
     #[test]

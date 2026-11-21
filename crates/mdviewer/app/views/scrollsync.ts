@@ -1,5 +1,5 @@
-import type { ScrollRef } from "nsh";
 import type { EditorRef } from "nsh/base";
+import type { SyncPlace } from "./pagemessages";
 
 // A side ignores its own scrolling this long after following, since its scroll events come a frame or two late.
 const FOLLOWING = 200;
@@ -16,7 +16,7 @@ export interface Anchors {
   page: number[];
 }
 
-/** The places both sides share: the top, each heading both reach in order, and the ends. */
+/** The places both sides share: the top, each place both reach in order, and the ends. */
 export function anchorsOf(raw: (number | undefined)[], page: (number | undefined)[], rawEnd: number, pageEnd: number): Anchors {
   const anchors: Anchors = { raw: [0], page: [0] };
   raw.forEach((rawAt, index) => {
@@ -46,16 +46,15 @@ export function follow(at: number, from: number[], to: number[]): number {
 
 /** What the rendered view tells a sync. */
 export interface PageSide {
-  scroll: ScrollRef;
-  /** Each top-level heading's scroll offset on the page. */
-  headingTops: () => (number | undefined)[];
+  /** Scrolls the page to `y`, at once. */
+  scrollTo: (y: number) => void;
+  /** The lines to line up at, in order, each with the page's scroll offset that shows it at the top. */
+  places: () => SyncPlace[];
 }
 
 /** What the raw view tells a sync. */
 export interface RawSide {
   editor: EditorRef;
-  /** The line each top-level heading is on, from 0. */
-  headingLines: () => number[];
   /** The file's last line, from 0. */
   lastLine: () => number;
 }
@@ -64,7 +63,7 @@ export interface RawSide {
 export interface ScrollSync {
   /** The raw view, once its editor is there. */
   raw(side: RawSide | undefined): void;
-  /** The page, once its scroll view is there. */
+  /** The page, once it is there. */
   page(side: PageSide | undefined): void;
   /** Whether Raw can be scrolled now; while it can, its place is read. */
   rawActive(active: boolean): void;
@@ -105,10 +104,16 @@ export function createScrollSync(on: () => boolean): ScrollSync {
       const box = (await side.editor.rangeBounds({ start: { line, column: 0 }, end: { line, column: 0 } }))[0]?.bounds;
       return box ? { top: box.origin.y + scrolled, bottom: box.origin.y + box.size.height + scrolled } : undefined;
     };
-    const tops = await Promise.all(side.headingLines().map(async (line) => (await lineTop(line))?.top));
+    const places = page.places();
+    const tops = await Promise.all(places.map(async (place) => (await lineTop(place.line))?.top));
     const last = await lineTop(side.lastLine());
     const rawEnd = Math.max(0, (last?.bottom ?? 0) - rawViewport);
-    return anchorsOf(tops, page.headingTops(), rawEnd, pageEnd);
+    return anchorsOf(
+      tops,
+      places.map((place) => place.top),
+      rawEnd,
+      pageEnd,
+    );
   };
 
   const current = async (): Promise<Anchors | null> => {
@@ -133,7 +138,7 @@ export function createScrollSync(on: () => boolean): ScrollSync {
     const places = await current();
     if (!places || !page) return;
     pageQuietUntil = Date.now() + FOLLOWING;
-    page.scroll.scrollTo({ y: follow(at, places.raw, places.page), animated: false });
+    page.scrollTo(follow(at, places.raw, places.page));
   };
 
   const stop = () => {

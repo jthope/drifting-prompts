@@ -230,6 +230,11 @@ crates. Each workaround goes once a release covers it:
 - **Split's scrolling and the map's band**: Markdown Viewer polls its raw editor's scroll offset (`RAW_CHECK_EVERY` in
   `views/scrollsync.ts`) and visible lines (`MAP_VIEW_CHECK_ACTIVE`, `MAP_VIEW_CHECK_IDLE` in `views/reader.tsx`),
   since `Editor` has no `onScroll`.
+- **Markdown Viewer's rendered page**, in a web view: one with the keyboard focus keeps every key from the window's
+  keymap, F11 included, so the page sends the app's shortcuts back (`page/page.js`, `views/shortcuts.ts`) and stops
+  the browser's own; it stops the browser's context menu and asks for the app's (`views/page.tsx`); and it asks for
+  each of the project's pictures as a `data:` URL (`Documents.picture`), since nsh doesn't serve a web view's
+  `url_scheme` there.
 - **Settings saved by the development host**: each app's development host saves in a `.nsh` folder beside it
   (`development_folder` in `crates/dp/ui/src/lib.rs`), since `nsh run` rebuilds the app on a change to any `.json` file
   in its folder, `target` included, and skips only folders named `.nsh`.

@@ -38,7 +38,7 @@ function changed(set: TabSet, path: string, change: (tab: Tab) => Tab): TabSet {
   return { ...set, tabs };
 }
 
-/** Opens `path` in front; a preview takes over the preview tab, else a new tab opens after the one in front. */
+/** Opens `path` in front; a preview takes over the preview tab and shows as it did, else a new tab opens after the one in front, as `mode`. */
 export function open(set: TabSet, path: string, as: OpenAs, mode: ViewMode): TabSet {
   if (tabOf(set, path)) {
     const shown = as === "keep" ? keep(set, path) : set;
@@ -48,7 +48,7 @@ export function open(set: TabSet, path: string, as: OpenAs, mode: ViewMode): Tab
   const preview = set.tabs.findIndex((each) => each.preview);
   if (as === "preview" && preview >= 0) {
     const tabs = set.tabs.slice();
-    tabs[preview] = tab;
+    tabs[preview] = { ...tab, mode: tabs[preview].mode };
     return { tabs, front: path };
   }
   const after = set.tabs.findIndex((each) => each.path === set.front) + 1;

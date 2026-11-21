@@ -24,6 +24,7 @@ export {
   type ThemeInfo,
   type ThemeName,
   theme,
+  themeColors,
   themeIn,
   themeScheme,
   type ThemesModule,

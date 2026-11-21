@@ -1,0 +1,466 @@
+/* The rendered view's page. Every color is a theme token the app sets as a variable (`--foreground`,
+   `--syntax-link`, ...); `--page` is the document's island. The sizes are the app's reading type. */
+
+:root {
+  --gap: 11.25px;
+  --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --shade: color-mix(in srgb, var(--muted) 50%, transparent);
+  color-scheme: light;
+  background: var(--page);
+  color: var(--foreground);
+  font: 15px/1.7 system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: none;
+}
+
+:root.dark {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+#content {
+  box-sizing: border-box;
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 24px 32px 96px;
+  overflow-wrap: break-word;
+}
+
+#content > :first-child {
+  margin-top: 0;
+}
+
+/* The suite's scroll bars: always shown, 14 points wide, a 10-point thumb. */
+::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+
+::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid transparent;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--muted-foreground) 40%, transparent) padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--muted-foreground) 60%, transparent);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: color-mix(in srgb, var(--muted-foreground) 75%, transparent);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Blocks */
+
+p,
+ul,
+ol,
+dl,
+blockquote,
+pre,
+table,
+details,
+.code-block,
+.markdown-alert {
+  margin: 0 0 var(--gap);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0 0 var(--gap);
+  color: var(--syntax-heading);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.012em;
+}
+
+h1 {
+  margin-top: 29.7px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 27px;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  margin-top: 32px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 20px;
+}
+
+h3 {
+  margin-top: 23.8px;
+  font-size: 17px;
+}
+
+h4,
+h5,
+h6 {
+  margin-top: 21px;
+  font-size: 15px;
+}
+
+:is(h1, h2, h3, h4, h5, h6) + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 0.6em;
+}
+
+hr {
+  height: 1px;
+  margin: 24px 0;
+  border: 0;
+  background: var(--border);
+}
+
+blockquote {
+  padding: 4px 16px;
+  border-left: 3px solid var(--syntax-quote);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--syntax-quote) 10%, transparent);
+}
+
+blockquote > :last-child,
+li > :last-child,
+details > :last-child,
+.markdown-alert > :last-child {
+  margin-bottom: 0;
+}
+
+/* Lists */
+
+ul,
+ol {
+  padding-left: 21px;
+}
+
+li + li {
+  margin-top: 3.75px;
+}
+
+li > ul,
+li > ol {
+  margin-bottom: 0;
+}
+
+li::marker {
+  color: var(--syntax-marker);
+}
+
+.contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.contains-task-list .contains-task-list {
+  padding-left: 21px;
+}
+
+.task-list-item-checkbox {
+  margin: 0 0.5em 0 0;
+  vertical-align: -2px;
+  accent-color: var(--primary);
+}
+
+dt {
+  font-weight: 600;
+}
+
+dd {
+  margin-left: 21px;
+}
+
+/* Text */
+
+a {
+  color: var(--syntax-link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* comrak's link inside each heading, to itself. */
+a.anchor {
+  display: none;
+}
+
+strong {
+  color: var(--syntax-strong);
+  font-weight: 600;
+}
+
+em {
+  color: var(--syntax-emphasis);
+}
+
+del {
+  color: var(--muted-foreground);
+}
+
+mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--warning) 40%, transparent);
+  color: inherit;
+}
+
+kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--shade);
+  font: 12px var(--mono);
+}
+
+sup,
+sub {
+  line-height: 0;
+}
+
+code {
+  padding: 0.1em 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--syntax-code) 10%, transparent);
+  color: var(--syntax-code);
+  font: 13px/1.6 var(--mono);
+}
+
+/* The search's matches, the current one stronger. */
+::highlight(found) {
+  background-color: var(--found-match);
+}
+
+::highlight(found-current) {
+  background-color: var(--found-current);
+}
+
+/* Formulas: MathML, in the system's math font. */
+math {
+  font-family: "Cambria Math", math;
+  font-size: 1.05em;
+}
+
+div.math {
+  overflow-x: auto;
+  margin: 0 0 var(--gap);
+  padding: 4px 0;
+}
+
+/* Code blocks */
+
+.code-block {
+  position: relative;
+}
+
+.code-block > pre {
+  margin: 0;
+}
+
+pre {
+  overflow-x: auto;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--shade);
+  font: 13px/1.6 var(--mono);
+}
+
+pre code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--foreground);
+}
+
+/* Code's tokens, in the theme's syntax colors. */
+.tok-comment {
+  color: var(--syntax-punctuation);
+  font-style: italic;
+}
+
+.tok-keyword {
+  color: var(--syntax-heading);
+}
+
+.tok-string {
+  color: var(--syntax-code);
+}
+
+.tok-number {
+  color: var(--syntax-strong);
+}
+
+.tok-title {
+  color: var(--syntax-link);
+}
+
+.tok-attr {
+  color: var(--syntax-marker);
+}
+
+.tok-built {
+  color: var(--syntax-emphasis);
+}
+
+.tok-deletion {
+  color: var(--destructive);
+}
+
+.tok-bold {
+  font-weight: 600;
+}
+
+.tok-italic {
+  font-style: italic;
+}
+
+.copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--page);
+  color: var(--muted-foreground);
+  font: 12px/1.5 system-ui, sans-serif;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+
+.code-block:hover > .copy,
+.copy:focus-visible {
+  opacity: 1;
+}
+
+.copy:hover {
+  color: var(--foreground);
+}
+
+.front-matter {
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--muted);
+  white-space: pre-wrap;
+}
+
+.front-matter code {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+/* Tables */
+
+table {
+  display: block;
+  overflow-x: auto;
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+th,
+td {
+  padding: 6px 13px;
+  border: 1px solid var(--border);
+}
+
+th {
+  background: var(--shade);
+  font-weight: 600;
+}
+
+tr:nth-child(2n) td {
+  background: color-mix(in srgb, var(--muted) 25%, transparent);
+}
+
+/* Pictures */
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+img.waiting {
+  min-width: 48px;
+  min-height: 32px;
+  border-radius: 4px;
+  background: var(--shade);
+}
+
+img.missing {
+  min-width: 48px;
+  min-height: 32px;
+  outline: 1px dashed var(--border);
+  outline-offset: -1px;
+}
+
+/* Alerts */
+
+.markdown-alert {
+  --alert: var(--info);
+  padding: 8px 16px;
+  border-left: 3px solid var(--alert);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--alert) 8%, transparent);
+}
+
+.markdown-alert-tip {
+  --alert: var(--success);
+}
+
+.markdown-alert-important {
+  --alert: var(--primary);
+}
+
+.markdown-alert-warning {
+  --alert: var(--warning);
+}
+
+.markdown-alert-caution {
+  --alert: var(--destructive);
+}
+
+.markdown-alert-title {
+  margin-bottom: 4px;
+  color: var(--alert);
+  font-weight: 600;
+}
+
+/* Footnotes */
+
+.footnotes {
+  margin-top: 32px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+details > summary {
+  cursor: pointer;
+}

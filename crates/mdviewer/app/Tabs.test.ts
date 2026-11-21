@@ -33,13 +33,16 @@ const FOUR: TabSet = {
   front: "b.md",
 };
 
-test("a single press opens a preview, and the next one takes its place", () => {
-  let set = open(NO_TABS, "a.md", "preview", "rendered");
+test("a single press opens a preview, and the next one takes its place and shows as it did", () => {
+  let set = open(NO_TABS, "a.md", "preview", "split");
   expect(paths(set)).toEqual(["a.md?"]);
-  set = open(set, "b.md", "preview", "raw");
+  set = setMode(set, "a.md", "rendered");
+  set = open(set, "b.md", "preview", "split");
   expect(paths(set)).toEqual(["b.md?"]);
   expect(set.front).toBe("b.md");
-  expect(set.tabs[0].mode).toBe("raw");
+  expect(set.tabs[0].mode).toBe("rendered");
+  set = open(set, "c.md", "keep", "split");
+  expect(set.tabs[1].mode).toBe("split");
 });
 
 test("a kept file opens after the one in front, and keeping the preview keeps its place", () => {

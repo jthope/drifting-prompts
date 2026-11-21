@@ -16,6 +16,14 @@ dp-store.workspace = true
 pulldown-cmark.workspace = true
 regex.workspace = true
 serde.workspace = true
+# The rendered page: the HTML, made harmless, and its pictures as `data:` URLs.
+ammonia.workspace = true
+base64.workspace = true
+comrak.workspace = true
+percent-encoding.workspace = true
+pulldown-latex.workspace = true
+syntect.workspace = true
+two-face.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

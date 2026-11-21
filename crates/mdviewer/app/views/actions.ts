@@ -259,15 +259,12 @@ export function headingMenu(): MenuEntries {
   return headings().map((heading, index) => ({ label: heading.title === "" ? "Untitled" : heading.title, checked: index === reading(), onSelect: () => goToHeading(index) }));
 }
 
-/** Follows a link pressed on the page; `anchors` are the page's, in the outline's order. */
-export function followLink(url: string, anchors: string[], newTab = false) {
+/** Follows a link pressed on the page, which goes to the anchors it has itself. */
+export function followLink(url: string, newTab = false) {
   const target = linkTarget(openPath(), url);
   switch (target.kind) {
-    case "anchor": {
-      const index = anchors.indexOf(target.anchor);
-      if (index >= 0) goToHeading(index);
+    case "anchor":
       return;
-    }
     case "file":
       if (listing()?.files.some((file) => file.path === target.path)) openFile(target.path, newTab ? "keep" : "preview");
       else notify(`${target.path} isn't a Markdown file of this project.`, "warn");

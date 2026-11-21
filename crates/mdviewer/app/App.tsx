@@ -1,4 +1,4 @@
-import { computed, effect, keymap, mount, signal, View, windowSize } from "nsh";
+import { computed, effect, mount, signal, View, windowSize } from "nsh";
 import { ResizablePanel, ResizablePanelGroup, Scrollbar } from "nsh/base";
 import { currentWindow } from "nsh/desktop";
 import { AppWindow, Preferences, Projects, Themes, type ViewMode } from "mdviewer/native";
@@ -25,6 +25,7 @@ import { NewProject } from "./views/newproject";
 import { OUTLINE_WIDTH, Outline, Reader } from "./views/reader";
 import { ResultsView } from "./views/results";
 import { AppSettings } from "./views/settings";
+import { bindShortcuts } from "./views/shortcuts";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, Sidebar } from "./views/sidebar";
 import { StatusBar } from "./views/statusbar";
 import { TabStrip } from "./views/tabstrip";
@@ -46,7 +47,7 @@ filesOpen.set(saved.filesOpen);
 mapOpen.set(saved.mapOpen);
 
 function EscapeLeavesFullScreen() {
-  keymap.bind("escape", () => leaveFullScreen());
+  bindShortcuts({ escape: () => leaveFullScreen() });
   return null;
 }
 
@@ -95,19 +96,17 @@ function App() {
   const filesShown = () => page() === "project" && filesOpen() && !fullScreen() && mainWidth() >= READER_MIN_WIDTH + FILES_MIN_WIDTH;
   const outlineShown = () => outlineOpen() && mainWidth() - (filesShown() ? filesSize() : 0) >= READER_MIN_WIDTH + OUTLINE_WIDTH;
 
-  keymap.bind("mod+b", () => sidebarOpen.set(!sidebarOpen()));
-  keymap.bind("mod+e", () => {
-    if (openPath() === "") return;
-    const order: ViewMode[] = ["raw", "split", "rendered"];
-    setModeInFront(order[(order.indexOf(mode()) + 1) % order.length]);
-  });
-  keymap.bind({
+  bindShortcuts({
+    "mod+b": () => sidebarOpen.set(!sidebarOpen()),
+    "mod+e": () => {
+      if (openPath() === "") return;
+      const order: ViewMode[] = ["raw", "split", "rendered"];
+      setModeInFront(order[(order.indexOf(mode()) + 1) % order.length]);
+    },
     "mod+w": () => closeFront(),
     "ctrl+tab": () => stepTab(1),
     "ctrl+shift+tab": () => stepTab(-1),
     "mod+shift+t": () => reopenClosed(),
-  });
-  keymap.bind({
     f3: () => stepMatch(1),
     "shift+f3": () => stepMatch(-1),
   });

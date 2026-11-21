@@ -1,6 +1,7 @@
-import type { EditorDecoration, TextViewBlock, TextViewDocument, TextViewInline } from "nsh/base";
+import type { EditorDecoration } from "nsh/base";
 import type { HeadingInfo, MarkInfo, MarkKind } from "mdviewer/native";
 import { headingAt } from "./document";
+import type { PageBlock } from "./pagemessages";
 
 /** The marks' classes, in a table so nsh's class-name check, which doesn't know `syntax-heading`, leaves them alone. */
 export const MARKS = { heading: "bg-syntax-heading", section: "bg-ring", line: "bg-muted-foreground/50" };
@@ -107,150 +108,82 @@ export function rawMap(text: string, marks: MarkInfo[], headings: HeadingInfo[])
   return { extent: lines.length, bars, labels: labeled(headings).map((heading) => ({ y: heading.line, text: heading.title })) };
 }
 
-function plainText(inlines: TextViewInline[]): string {
-  return inlines
-    .map((each) => {
-      switch (each.type) {
-        case "text":
-        case "keyboard":
-          return each.text;
-        case "code":
-          return each.code;
-        case "math":
-          return each.tex;
-        case "image":
-          return each.alt ?? "";
-        case "custom":
-          return each.text ?? "";
-        case "break":
-        case "footnoteReference":
-          return " ";
-        default:
-          return plainText(each.content);
-      }
-    })
-    .join("");
+// The page's line heights, in CSS pixels: its text's, and its code's.
+const TEXT_LINE = 25.5;
+const CODE_LINE = 20.8;
+
+const INDENT = 4;
+
+/** How far `block`'s own text runs: to the first block inside it, or its end. */
+function ownHeight(blocks: PageBlock[], at: number): number {
+  const block = blocks[at];
+  const inner = blocks[at + 1];
+  return inner && inner.depth > block.depth && inner.top < block.top + block.height ? Math.max(0, inner.top - block.top) : block.height;
 }
 
-const textLines = (characters: number) => Math.max(1, Math.ceil(characters / 90));
-
-/** About how tall `block` is on the page, in lines of text. */
-export function blockWeight(block: TextViewBlock): number {
-  switch (block.type) {
-    case "heading":
-      return block.level <= 2 ? 2.6 : 2;
-    case "paragraph":
-      return 0.8 + textLines(plainText(block.content).length);
-    case "codeBlock":
-      return 1.6 + block.code.split("\n").length * 0.9;
-    case "list":
-      return 0.6 + block.items.reduce((sum, item) => sum + item.children.reduce((inner, child) => inner + blockWeight(child) - 0.8, 0) + 0.2, 0);
-    case "blockquote":
-      return 1 + block.children.reduce((sum, child) => sum + blockWeight(child), 0);
-    case "details":
-      return 1.4 + (block.open ? block.children.reduce((sum, child) => sum + blockWeight(child), 0) : 0);
-    case "table":
-      return 1 + ((block.rows?.length ?? 0) + 1) * 1.3;
-    case "rule":
-      return 1.2;
-    default:
-      return 2;
-  }
+function textRows(y: number, height: number, lineHeight: number, indent: number, ink: MapInk): MapBar[] {
+  const count = Math.max(1, Math.round(height / lineHeight));
+  return Array.from({ length: count }, (_, row) => ({
+    y: y + row * lineHeight + lineHeight * 0.2,
+    height: lineHeight * 0.55,
+    x: indent,
+    width: Math.max(1, (MAP_COLUMNS - indent) * (row === count - 1 && count > 1 ? 0.6 : 0.95)),
+    ink,
+  }));
 }
 
-function blockBars(block: TextViewBlock, y: number, height: number, weight: number): MapBar[] {
-  const lineHeight = height / Math.max(1, weight);
-  const textRows = (top: number, count: number, indent: number, ink: MapInk = "text"): MapBar[] =>
-    Array.from({ length: count }, (_, row) => ({
-      y: top + row * lineHeight,
-      height: lineHeight * 0.55,
-      x: indent,
-      width: (MAP_COLUMNS - indent) * (row === count - 1 && count > 1 ? 0.6 : 0.95),
-      ink,
-    }));
-  switch (block.type) {
-    case "heading": {
-      const length = plainText(block.content).length;
-      return [{ y: y + height * 0.3, height: Math.max(lineHeight * 0.9, height * 0.3), x: 0, width: Math.min(MAP_COLUMNS, 8 + length * 1.4), ink: "heading" }];
-    }
-    case "paragraph":
-      return textRows(y, Math.max(1, Math.round(weight - 0.8)), 0);
-    case "codeBlock": {
-      const code = block.code.split("\n");
-      return [
-        { y, height: height * 0.92, x: 0, width: MAP_COLUMNS, ink: "band" },
-        ...code.map(
-          (line, row): MapBar => ({
-            y: y + lineHeight * (0.8 + row * 0.9),
-            height: lineHeight * 0.5,
-            x: 3 + Math.min(20, line.length - line.trimStart().length),
-            width: Math.min(MAP_COLUMNS - 6, line.trim().length),
-            ink: "code",
-          }),
-        ),
-      ];
-    }
-    case "list": {
-      let top = y;
-      return block.items.flatMap((item) => {
-        const rows = Math.max(1, Math.round(item.children.reduce((sum, child) => sum + blockWeight(child) - 0.8, 0)));
-        const marker: MapBar = { y: top, height: lineHeight * 0.55, x: 1, width: 2, ink: "marker" };
-        const bars = [marker, ...textRows(top, rows, 5)];
-        top += (rows + 0.2) * lineHeight;
-        return bars;
-      });
-    }
-    case "blockquote":
-      return [{ y, height: height * 0.92, x: 0, width: 1.2, ink: "quote" }, ...textRows(y + lineHeight * 0.4, Math.max(1, Math.round(weight - 1)), 4, "quote")];
-    case "table": {
-      const rows = (block.rows?.length ?? 0) + 1;
-      const rules = Array.from({ length: rows + 1 }, (_, row): MapBar => ({ y: y + row * 1.3 * lineHeight, height: lineHeight * 0.15, x: 0, width: MAP_COLUMNS, ink: "frame" }));
-      const cells = Array.from({ length: rows }, (_, row): MapBar => ({ y: y + (row + 0.45) * 1.3 * lineHeight, height: lineHeight * 0.5, x: 2, width: MAP_COLUMNS * 0.7, ink: row === 0 ? "heading" : "text" }));
-      return [...rules, ...cells];
-    }
-    case "rule":
-      return [{ y: y + height / 2, height: lineHeight * 0.2, x: 0, width: MAP_COLUMNS, ink: "frame" }];
-    default:
-      return [{ y, height: height * 0.9, x: 0, width: MAP_COLUMNS, ink: "band" }];
-  }
-}
-
-/** Rendered's map of the page, a unit a point; a section not measured yet is left out. */
-export function pageMap(sections: TextViewDocument[], tops: (number | undefined)[], end: number): MapPicture {
+/** Rendered's map from where the page drew its blocks, a unit a CSS pixel of a page `end` tall. */
+export function pageMap(blocks: PageBlock[], headings: HeadingInfo[], end: number): MapPicture {
   const bars: MapBar[] = [];
+  const titles = new Map(labeled(headings).map((heading) => [heading.line, heading.title]));
   const labels: MapLabel[] = [];
-  const levels = sections.flatMap((section) => section.blocks.flatMap((block) => (block.type === "heading" ? [block.level] : [])));
-  const top = Math.min(6, ...levels);
-  sections.forEach((section, index) => {
-    const start = tops[index];
-    if (start === undefined) return;
-    const stop = tops.slice(index + 1).find((each) => each !== undefined) ?? end;
-    const weights = section.blocks.map(blockWeight);
-    const total = weights.reduce((sum, weight) => sum + weight, 0);
-    if (total <= 0 || stop <= start) return;
-    let y = start;
-    section.blocks.forEach((block, at) => {
-      const height = ((stop - start) * weights[at]) / total;
-      bars.push(...blockBars(block, y, height, weights[at]));
-      if (block.type === "heading" && block.level <= top + 1) labels.push({ y, text: plainText(block.content) });
-      y += height;
-    });
+  blocks.forEach((block, at) => {
+    const indent = Math.min(MAP_COLUMNS / 2, block.depth * INDENT);
+    const own = ownHeight(blocks, at);
+    switch (block.kind) {
+      case "h1":
+      case "h2":
+      case "h3":
+      case "h4":
+      case "h5":
+      case "h6": {
+        const title = block.depth === 0 ? titles.get(block.line) : undefined;
+        if (title !== undefined) labels.push({ y: block.top, text: title });
+        const length = headings.find((heading) => heading.line === block.line)?.title.length ?? 20;
+        bars.push({ y: block.top + block.height * 0.25, height: Math.max(4, block.height * 0.45), x: indent, width: Math.min(MAP_COLUMNS - indent, 8 + length * 1.4), ink: "heading" });
+        return;
+      }
+      case "p":
+      case "dl":
+        bars.push(...textRows(block.top, own, TEXT_LINE, indent, "text"));
+        return;
+      case "li":
+        bars.push({ y: block.top + TEXT_LINE * 0.2, height: TEXT_LINE * 0.55, x: indent, width: 2, ink: "marker" });
+        if (own > TEXT_LINE / 2) bars.push(...textRows(block.top, own, TEXT_LINE, indent + INDENT, "text"));
+        return;
+      case "pre":
+        bars.push({ y: block.top, height: block.height, x: indent, width: MAP_COLUMNS - indent, ink: "band" });
+        bars.push(...textRows(block.top + 12, block.height - 24, CODE_LINE, indent + 3, "code"));
+        return;
+      case "blockquote":
+        bars.push({ y: block.top, height: block.height, x: indent, width: 1.2, ink: "quote" });
+        return;
+      case "tr":
+        bars.push({ y: block.top, height: 1, x: indent, width: MAP_COLUMNS - indent, ink: "frame" });
+        bars.push({ y: block.top + block.height * 0.3, height: block.height * 0.4, x: indent + 2, width: (MAP_COLUMNS - indent) * 0.7, ink: blocks[at - 1]?.kind === "table" ? "heading" : "text" });
+        return;
+      case "hr":
+        bars.push({ y: block.top + block.height / 2, height: 1, x: 0, width: MAP_COLUMNS, ink: "frame" });
+        return;
+      case "ul":
+      case "ol":
+      case "table":
+        return;
+      default:
+        bars.push(own < block.height ? { y: block.top, height: block.height, x: indent, width: 1.2, ink: "marker" } : { y: block.top, height: block.height, x: indent, width: MAP_COLUMNS - indent, ink: "band" });
+    }
   });
   return { extent: Math.max(end, 1), bars, labels };
-}
-
-/** The line of a file about at `offset` down its page; the inverse of `pageOffset`. */
-export function lineAtPage(offset: number, headings: HeadingInfo[], lineCount: number, tops: (number | undefined)[], end: number): number {
-  let section = 0;
-  tops.forEach((top, index) => {
-    if (top !== undefined && top <= offset) section = index;
-  });
-  const top = tops[section] ?? 0;
-  const bottom = tops.slice(section + 1).find((each) => each !== undefined) ?? end;
-  const first = section === 0 ? 0 : (headings[section - 1]?.line ?? 0);
-  const last = section < headings.length ? headings[section].line : lineCount;
-  const share = bottom > top ? Math.min(1, Math.max(0, (offset - top) / (bottom - top))) : 0;
-  return Math.min(Math.max(0, lineCount - 1), Math.floor(first + (last - first) * share));
 }
 
 /** The block of `lines` between blank lines around `line`, at most `most`, and its heading's index. */

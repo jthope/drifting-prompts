@@ -4,6 +4,7 @@ import { Button, CountBadge, Icon, IconButton, type IconName, look, popupSurface
 import { clearSearch, goToResult, openResultsTab, showResultsInFiles } from "./actions";
 import { currentMatch, found, projectPath, projects, searchOpen, searchOptions, searchResults, searchScope, searchText } from "./model";
 import { excerptParts, MOST_LISTED, matchOf, ordinal, resultItems, rowCount, rowOf, SCOPES, type SearchScope } from "./search";
+import { bindShortcuts } from "./shortcuts";
 
 const OPTIONS: { key: "caseSensitive" | "wholeWord" | "regex"; label: string; icon: IconName }[] = [
   { key: "caseSensitive", label: "Match case", icon: "case-sensitive" },
@@ -193,7 +194,7 @@ function DropDown(props: { onRef: (command: CommandRef) => void }) {
 
 /** The title bar's search: the box, its drop-down, and a button that ends the search. */
 export function SearchBar() {
-  keymap.bind({
+  bindShortcuts({
     "mod+k": () => searchOpen.set(true),
     "mod+f": () => searchOpen.set(true),
   });

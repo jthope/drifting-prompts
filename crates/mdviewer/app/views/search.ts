@@ -1,6 +1,6 @@
-import type { CommandItem, EditorDecoration, TextViewDocument, TextViewInline, TreeItem } from "nsh/base";
-import type { FileMatches, HeadingInfo, MarkInfo, MarkKind, MatchInfo, SearchPlace, SearchQuery, SearchResults } from "mdviewer/native";
-import { folderOf, headingAt, mapLeaves } from "./document";
+import type { CommandItem, EditorDecoration, TreeItem } from "nsh/base";
+import type { FileMatches, HeadingInfo, MatchInfo, SearchPlace, SearchQuery, SearchResults } from "mdviewer/native";
+import { folderOf, headingAt } from "./document";
 
 /** A match, by its file and its index among that file's matches. */
 export type MatchPlace = { file: string; index: number };
@@ -240,93 +240,4 @@ export function pagePattern(query: SearchQuery | null): RegExp | null {
   } catch {
     return null;
   }
-}
-
-const WORD_BEFORE = /[\p{L}\p{N}_]$/u;
-const WORD_AFTER = /^[\p{L}\p{N}_]/u;
-
-/** Must agree with Raw's search: an end in punctuation is a word's edge by itself. */
-function isWholeWord(text: string, start: number, end: number): boolean {
-  const before = WORD_BEFORE.test(text.slice(Math.max(0, start - 2), start));
-  const first = WORD_AFTER.test(text.slice(start, end));
-  const last = WORD_BEFORE.test(text.slice(start, end));
-  const after = WORD_AFTER.test(text.slice(end, end + 2));
-  return (!before || !first) && (!after || !last);
-}
-
-/** Where `pattern` matches in `text`, as UTF-16 ranges, empty matches left out. */
-export function matchRanges(text: string, pattern: RegExp, wholeWord: boolean): [number, number][] {
-  const ranges: [number, number][] = [];
-  for (const found of text.matchAll(pattern)) {
-    const start = found.index ?? 0;
-    const end = start + found[0].length;
-    if (end > start && (!wholeWord || isWholeWord(text, start, end))) ranges.push([start, end]);
-  }
-  return ranges;
-}
-
-/** The colors of the page's highlights. */
-export type HighlightColors = { match: string; current: string };
-
-/** `document` with each match highlighted, the `current`th in its own color, and the count. */
-export function highlighted(
-  document: TextViewDocument,
-  pattern: RegExp | null,
-  wholeWord: boolean,
-  current: number,
-  colors: HighlightColors,
-): { document: TextViewDocument; count: number } {
-  if (!pattern) return { document, count: 0 };
-  let count = 0;
-  const marked = mapLeaves(document, (each) => {
-    if (each.type !== "text") return [each];
-    const ranges = matchRanges(each.text, pattern, wholeWord);
-    if (ranges.length === 0) return [each];
-    const parts: TextViewInline[] = [];
-    let at = 0;
-    for (const [start, end] of ranges) {
-      if (start > at) parts.push({ type: "text", text: each.text.slice(at, start) });
-      parts.push({ type: "highlight", color: count === current ? colors.current : colors.match, content: [{ type: "text", text: each.text.slice(start, end) }] });
-      count += 1;
-      at = end;
-    }
-    if (at < each.text.length) parts.push({ type: "text", text: each.text.slice(at) });
-    return parts;
-  });
-  return { document: marked, count };
-}
-
-// The page highlights no text in these.
-const UNSEEN = new Set<MarkKind>(["codeBlock", "code", "language", "url", "frontMatter", "punctuation"]);
-
-function inside(inner: MatchInfo, outer: MarkInfo): boolean {
-  const before = (line: number, column: number, otherLine: number, otherColumn: number) => line < otherLine || (line === otherLine && column <= otherColumn);
-  return before(outer.startLine, outer.startColumn, inner.startLine, inner.startColumn) && before(inner.endLine, inner.endColumn, outer.endLine, outer.endColumn);
-}
-
-/** Match `index`'s section on the page and which of its highlights it is; `null` when the page can't highlight it. */
-export function onThePage(matches: MatchInfo[], index: number, headings: HeadingInfo[], marks: MarkInfo[]): { section: number; nth: number } | null {
-  const target = matches[index];
-  if (!target) return null;
-  const hidden = marks.filter((mark) => UNSEEN.has(mark.kind));
-  const seen = (each: MatchInfo) => !hidden.some((mark) => inside(each, mark));
-  if (!seen(target)) return null;
-  const section = headingAt(headings, target.startLine) + 1;
-  let nth = 0;
-  for (const each of matches.slice(0, index)) {
-    if (headingAt(headings, each.startLine) + 1 === section && seen(each)) nth += 1;
-  }
-  return { section, nth };
-}
-
-/** About where `line` is on the page, by its share of its section (`TextView` doesn't say where its text is drawn). */
-export function pageOffset(line: number, headings: HeadingInfo[], lineCount: number, tops: (number | undefined)[], end: number): number | undefined {
-  const section = headingAt(headings, line) + 1;
-  const top = tops[section];
-  if (top === undefined) return undefined;
-  const first = section === 0 ? 0 : headings[section - 1].line;
-  const last = section < headings.length ? headings[section].line : lineCount;
-  const bottom = tops[section + 1] ?? end;
-  const share = last > first ? (line - first) / (last - first) : 0;
-  return top + Math.max(0, bottom - top) * share;
 }

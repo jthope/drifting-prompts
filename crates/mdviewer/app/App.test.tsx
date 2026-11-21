@@ -11,7 +11,7 @@ const tabs = () => Projects.list().projects[0]?.tabs ?? [];
 // Pinned ones with `^`, the preview with `?`.
 const tabFiles = () => tabs().map((tab) => `${tab.pinned ? "^" : ""}${tab.file}${tab.preview ? "?" : ""}`);
 
-test("a dropped folder opens on its README, and its files, links and outline lead around it", async () => {
+test("a dropped folder opens on its README, and its files and outline lead around it", async () => {
   const app = await open("./App.tsx", { platform: "windows", width: 1200, height: 800 });
 
   await app.waitFor("Open a folder");
@@ -28,8 +28,7 @@ test("a dropped folder opens on its README, and its files, links and outline lea
   await app.waitFor("text:sensors.md");
   expect(app.texts()).toContain("docs");
 
-  // The README links Sensors twice, in its text and its table.
-  await app.press("Sensors >> nth=0");
+  await app.press("text:sensors.md");
   await app.waitFor("What's supported");
   await app.waitFor("id:crumbs >> text:sensors.md");
   await app.waitUntil(() => Projects.list().projects[0].lastFile === "docs/sensors.md");
@@ -39,7 +38,7 @@ test("a dropped folder opens on its README, and its files, links and outline lea
   expect(app.texts()).toContain("configuration.md");
   expect(app.texts()).toContain("What's supported");
 
-  await app.press("what each sensor records");
+  await app.press("text:README.md");
   await app.waitFor("What it records");
 
   await app.press("label:Rendered. Change how the file shows");
@@ -74,23 +73,6 @@ test("a dropped folder opens on its README, and its files, links and outline lea
 
   await app.press("id:sidebar-projects >> label:Weathervane");
   await app.waitFor("What it records");
-
-  await Projects.remove(Projects.list().projects[0].path);
-  await app.waitFor("Open a folder");
-});
-
-test("Ctrl+click on a link opens its file in a tab of its own, beside the preview", async () => {
-  const app = await open("./App.tsx", { platform: "windows", width: 1200, height: 800 });
-  await app.waitFor("Open a folder");
-  await app.dropFiles("id:window", [WEATHERVANE]);
-  await app.waitFor("What it records");
-  await app.waitUntil(() => tabFiles().join() === "README.md?");
-
-  await app.keyboard.down("ctrl");
-  await app.press("Sensors >> nth=0");
-  await app.keyboard.up("ctrl");
-  await app.waitFor("What's supported");
-  await app.waitUntil(() => tabFiles().join() === "README.md?,docs/sensors.md");
 
   await Projects.remove(Projects.list().projects[0].path);
   await app.waitFor("Open a folder");

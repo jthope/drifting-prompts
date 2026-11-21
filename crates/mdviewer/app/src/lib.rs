@@ -2,11 +2,12 @@
 
 mod bridge;
 mod dropped;
+mod page;
 
 pub use dp_ui::Themes;
 use nsh_core::prelude::*;
 
-pub use crate::bridge::{AppWindow, Documents, Files, Preferences, Projects, Search};
+pub use crate::bridge::{AppWindow, Documents, Files, Page, Preferences, Projects, Search};
 
 /// The crate's UI set (`nsh.json` `"rust"`).
 #[native_module("mdviewer/native")]
@@ -15,6 +16,7 @@ fn native(registry: &mut Registry) {
         .module::<Projects>()
         .module::<Files>()
         .module::<Documents>()
+        .module::<Page>()
         .module::<Search>()
         .module::<Preferences>()
         .module::<Themes>()
