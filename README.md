@@ -5,32 +5,29 @@
   </picture>
 </p>
 
-Small desktop apps, built in Rust: a viewer for your IP cameras and a reader for folders of Markdown.
-
-The apps share one look: the same controls, the same themes (light, dark, high contrast and more) and the same
-Settings. Each keeps its data in a folder beside it, with no account and no cloud service. The screens are TSX on
-[nsh](https://github.com/longbridge/nsh), a native UI framework.
+Small desktop apps, built in Rust: a viewer for your IP cameras and a reader for folders of Markdown. They share the
+same controls, themes and Settings, and keep their data in a folder beside the app, with no account or cloud service.
+The screens are TSX on [nsh](https://github.com/longbridge/nsh), a native UI framework.
 
 ## The apps
 
 ### <img src="assets/brand/ipcamera/logo/ip-camera-icon-color.svg" width="28" align="absmiddle" alt=""> IP Camera
 
-A viewer for the IP cameras on your network. It decodes H.264 and H.265 itself, in Rust, so there are no codecs or
-media frameworks to install.
+A viewer for the IP cameras on your network. It decodes H.264 and H.265 in Rust, so there are no codecs to install.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/ipcamera-dark.png">
   <img src="assets/screenshots/ipcamera-light.png" alt="IP Camera showing four cameras in a 2 × 2 view: a front door, a driveway, a backyard and a side gate in night vision">
 </picture>
 
-- Live video from several cameras at once, with sound, in tile layouts you save
-- Pan, tilt and zoom, on cameras that move
-- Snapshots and recordings, including recording on motion or AI detections that starts a few seconds early
+- Live video with sound from several cameras, in tile layouts you save
+- Pan, tilt and zoom
+- Snapshots and recordings, including recording on motion or AI detections, starting a few seconds early
 - A log of what the cameras saw
-- RTSP for the video; Reolink's, Dahua's and Amcrest's own APIs and ONVIF for PTZ, detections and lights; and a
-  search that finds the cameras on your network
+- RTSP for video; Reolink's, Dahua's and Amcrest's APIs and ONVIF for PTZ, detections and lights; a search for cameras
+  on your network
 - Camera passwords saved encrypted for your user account
-- A server that runs the same app in a browser, without the desktop app
+- A server that runs the app in a browser, without the desktop app
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/ipcamera-dashboard-dark.png">
@@ -48,11 +45,10 @@ A reader for folders of Markdown: notes, documentation, a repository's READMEs.
   <img src="assets/screenshots/mdviewer-light.png" alt="Markdown Viewer showing a project's sensor guide raw and rendered side by side, each with a map of the whole file, between the project's files on the left and the outline on the right">
 </picture>
 
-- Opens folders as projects, with their files in a tree, by folder or in one list
-- Files open in tabs: a preview tab, pinned tabs, dragged into order
-- Each file raw (highlighted), rendered, or both side by side
-- The file's outline beside it, and a map of the whole file
-- Search across a project's files, with the results in a tab of their own
+- Folders open as projects, their files in a tree, by folder or in one list
+- Files in tabs: a preview tab, pinned tabs, dragged into order
+- Each file raw (highlighted), rendered, or both side by side, with its outline and a map of the whole file
+- Search across a project, with the results in a tab of their own
 
 More in [Markdown Viewer's README](crates/mdviewer/README.md).
 
@@ -63,33 +59,22 @@ build from source.
 
 ## Setup
 
-These steps are for Windows and Linux. On either one you need:
-
-- Rust 1.97 or newer
-- nsh 0.5.1
-
-Cargo builds the video stack from source, so there are no codecs or media frameworks to install.
+These steps are for Windows and Linux. You need Rust 1.97 or newer and nsh 0.6.1; cargo builds the video stack itself.
 
 ### Windows
 
 1. Install Rust with [rustup](https://rustup.rs).
-2. Install nsh. It installs to `%LOCALAPPDATA%\nsh` and adds itself to your `PATH`, so open a new terminal afterward:
+2. Install nsh. It installs to `%LOCALAPPDATA%\nsh` and adds itself to `PATH`, so open a new terminal afterward:
 
    ```powershell
-   $env:NSH_VERSION = 'v0.5.1'
+   $env:NSH_VERSION = 'v0.6.1'
    irm https://nsh.dev/install.ps1 | iex
    ```
 
-3. Clone this repository, and from its folder run an app:
+3. Clone this repository and, from its folder, run `cargo ipcamera` or `cargo mdviewer`. The first build takes a few
+   minutes; later ones take seconds.
 
-   ```powershell
-   cargo ipcamera
-   ```
-
-   or `cargo mdviewer`. The first build takes a few minutes; after that, builds take seconds.
-
-Build from PowerShell, not Git Bash. Git ships its own `link.exe`, which can get picked up instead of Microsoft's
-linker.
+Build from PowerShell, not Git Bash ([Troubleshooting](#troubleshooting)).
 
 ### Linux
 
@@ -101,8 +86,7 @@ Ubuntu 24.04 or later, or another distribution with GTK 4.14 or newer.
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
-2. Install what nsh builds against (GTK 4, WebKitGTK, GStreamer), a C compiler, and clang and LLVM. On Ubuntu or
-   Debian:
+2. Install what nsh builds against (GTK 4, WebKitGTK, GStreamer), a C compiler, clang and LLVM. On Ubuntu or Debian:
 
    ```sh
    sudo apt install build-essential pkg-config clang llvm libgtk-4-dev libwebkitgtk-6.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
@@ -114,45 +98,32 @@ Ubuntu 24.04 or later, or another distribution with GTK 4.14 or newer.
    sudo dnf install gcc pkgconf-pkg-config clang llvm gtk4-devel webkitgtk6.0-devel gstreamer1-devel gstreamer1-plugins-base-devel
    ```
 
-3. Install nsh. It installs to `~/.nsh` and links itself into `~/.local/bin`. If that folder isn't on your `PATH`, the
-   installer tells you how to add it:
+3. Install nsh. It installs to `~/.nsh` and links itself into `~/.local/bin`; if that isn't on your `PATH`, the
+   installer says how to add it:
 
    ```sh
-   curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.5.1 sh
+   curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.6.1 sh
    ```
 
-4. Clone this repository, and from its folder run an app:
-
-   ```sh
-   cargo ipcamera
-   ```
-
-   or `cargo mdviewer`. The first build takes a few minutes; after that, builds take seconds.
+4. Clone this repository and, from its folder, run `cargo ipcamera` or `cargo mdviewer`.
 
 ### Optional: the web build
 
-IP Camera's web build needs two more things, once per machine: the WebAssembly target and clang.
-[IP Camera's README](crates/ipcamera/README.md#the-web-build) explains why.
-
-On Windows, from `crates/ipcamera/app`:
+IP Camera's web build needs the WebAssembly target and clang, once per machine
+([why](crates/ipcamera/README.md#the-web-build)). On Windows, from `crates/ipcamera/app`:
 
 ```powershell
 rustup target add wasm32-unknown-unknown
 powershell -ExecutionPolicy Bypass -File tools\fetch-wasm-clang.ps1
 ```
 
-The script downloads a pinned copy of clang (about 266 MiB) into `tools\llvm` and points cargo at it in
-`.cargo\config.toml`. Git ignores both; delete them to undo it.
-
-On Linux, clang and LLVM came with the packages above, so only the target is left:
-
-```sh
-rustup target add wasm32-unknown-unknown
-```
+The script downloads clang (about 266 MiB) into `tools\llvm` and points cargo at it in `.cargo\config.toml`. Git
+ignores both; delete them to undo it. On Linux, clang came with the packages above, so only
+`rustup target add wasm32-unknown-unknown` is left.
 
 ## Common commands
 
-Run these from the repository root.
+From the repository root:
 
 ```powershell
 cargo ipcamera                # run IP Camera, with hot reload
@@ -167,39 +138,38 @@ cargo package-ipcamera        # package IP Camera into crates\ipcamera\app\.nsh\
 cargo package-mdviewer        # package Markdown Viewer into crates\mdviewer\app\.nsh\out\
 ```
 
-Only one app can run under nsh at a time: starting one stops the other. Each app has its own tests; run `nsh test`
-from its folder.
+Only one app runs under nsh at a time: starting one stops the other. Each app's own tests run with `nsh test` from its
+folder.
+
+## Troubleshooting
+
+- **Link errors from a Git Bash build**: Git ships its own `link.exe`, which can shadow Microsoft's linker. Build from
+  PowerShell.
+- **MSVC's `D8050 ... failed to get command line into debug records`, or gcc's "Cannot create temporary file"**: a Low
+  integrity label on the repository folder, not long paths. Check with `icacls . | Select-String 'Mandatory Label'`.
+- **nsh stops at once in an app's folder**: each app's `nsh.json` requires nsh 0.6.1 exactly; check `nsh --version` and
+  reinstall with `NSH_VERSION` set as above.
+- **`failed to find tool` naming `clang` or `llvm-ar`** in the web build: its setup above hasn't been done on this
+  machine.
 
 ## Repository layout
 
-Each product has its own folder under `crates/`. Code that more than one product uses lives in `crates/dp/`.
-
-```
-crates/
-  ipcamera/      IP Camera: core, dpapi, media, storage, server, app
-  mdviewer/      Markdown Viewer: core, app
-  dp/            shared by every product: store, ui
-  xtask/         the repo's own cargo commands (cargo ipcamera, cargo mdviewer, ...)
-assets/brand/    logos and brand colors for the suite and each product
-```
+Each product has a folder under `crates/`, and what more than one product uses is in `crates/dp/`. The two apps and
+`dp-ui` are built with nsh, each a Cargo workspace of its own; `cargo` at the root builds the rest.
 
 | Package | Folder | What it does |
 | --- | --- | --- |
-| `ipcamera-core` | `crates/ipcamera/core` | Cameras, groups, views and settings, and talking to cameras (PTZ, Reolink, Dahua, ONVIF) |
-| `ipcamera-dpapi` | `crates/ipcamera/dpapi` | Encrypts the cameras' passwords for your user account (DPAPI) |
+| `ipcamera-core` | `crates/ipcamera/core` | Cameras, groups, views and settings, and talking to cameras |
+| `ipcamera-dpapi` | `crates/ipcamera/dpapi` | Encrypts the cameras' passwords for your user account |
 | `ipcamera-media` | `crates/ipcamera/media` | The video pipeline: RTSP, decoding, sound and recording |
 | `ipcamera-storage` | `crates/ipcamera/storage` | Snapshots and recordings on disk |
-| `ipcamera-server` | `crates/ipcamera/server` | Serves the cameras and the app to a browser ([README](crates/ipcamera/server/README.md)) |
-| `ipcamera` | `crates/ipcamera/app` | The IP Camera desktop app ([README](crates/ipcamera/app/README.md)) |
-| `mdviewer-core` | `crates/mdviewer/core` | Projects, the files in a project, and a file's outline |
-| `mdviewer` | `crates/mdviewer/app` | The Markdown Viewer desktop app |
-| `dp-store` | `crates/dp/store` | Settings files that save safely, shared by every product |
+| `ipcamera-server` | `crates/ipcamera/server` | The cameras and the app in a browser ([README](crates/ipcamera/server/README.md)) |
+| `ipcamera` | `crates/ipcamera/app` | The IP Camera app, crate `nsh-app-ipcamera` ([README](crates/ipcamera/app/README.md)) |
+| `mdviewer-core` | `crates/mdviewer/core` | Projects, their files, and a file's outline |
+| `mdviewer` | `crates/mdviewer/app` | The Markdown Viewer app, crate `nsh-app-mdviewer` |
+| `dp-store` | `crates/dp/store` | Settings files that save safely |
 | `dp-ui` | `crates/dp/ui` | The shared controls, themes and window helpers |
-| `xtask` | `crates/xtask` | The `cargo ipcamera`, `cargo mdviewer` and packaging commands |
-
-The two apps and `dp-ui` are built with nsh, so each is its own Cargo workspace. The apps' rows give their nsh
-package names; their crates are `nsh-app-ipcamera` and `nsh-app-mdviewer`. `cargo` at the root builds everything
-else. [`crates/README.md`](crates/README.md) explains how the pieces fit together.
+| `xtask` | `crates/xtask` | The repository's cargo commands |
 
 ## Where to read more
 

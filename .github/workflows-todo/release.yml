@@ -1,28 +1,11 @@
 name: Release
 
-# Publishing, not gating: ci.yml runs the lints and the suite. This builds the Windows packages of
-# the suite's apps from whatever "Use workflow from" picks in the Actions tab's "Run workflow":
-#
-# - a product's tag, `ipcamera-v<version>` or `mdviewer-v<version>`, whose version matches that
-#   app's `nsh.json`, packages that app and publishes it to the tag's release;
-# - a branch packages every app, as downloads on the run's page, and publishes nothing.
-#
-# Each product has tags of its own because each has a version of its own. Pushing a tag starts
-# nothing by itself, for now: add `push: { tags: ["ipcamera-v*", "mdviewer-v*"] }` here to publish
-# on every tag pushed.
-#
-# One job builds, then one writes: the package is made first, and the release is created only once
-# it exists, so a failed build leaves no release at all rather than an empty one.
-#
-# What this deliberately does not do: sign the executables. There is nothing to install beside
-# them: each package carries the nsh runtime it needs, and IP Camera's media stack is compiled in.
-
 on:
   workflow_dispatch:
 
 run-name: ${{ github.ref_type == 'tag' && format('Release {0}', github.ref_name) || format('Packages from {0}', github.ref_name) }}
 
-# A half-published release is worse than none, so runs never cancel each other.
+# Runs never cancel each other: a half-published release is worse than none.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -31,13 +14,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Runs first and alone: a tag that names no product, or disagrees with its app's version, should
-  # fail in seconds, not after a long Windows build. The version is `nsh.json`'s, because that is
-  # what `nsh package` writes into the app. A branch has no version to agree with, so its archives
-  # are named for the version, the branch and the commit instead. Its `matrix` is what the Windows
-  # job builds: one app for a tag, every app for a branch. `pwsh` because it is preinstalled on
-  # every hosted runner. Every job checks out the commit "Use workflow from" picked, which is
-  # checkout's default.
+  # Runs first, so a bad tag fails in seconds. The version is `nsh.json`'s, which `nsh package` uses.
   prepare:
     name: Check the version
     runs-on: ubuntu-latest
@@ -57,7 +34,6 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           SHA: ${{ github.sha }}
         run: |
-          # Each product's folder in `crates/` and its name.
           $products = [ordered]@{ ipcamera = 'IP Camera'; mdviewer = 'Markdown Viewer' }
 
           function Declared($product) {
@@ -101,7 +77,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 90
     strategy:
-      # On a branch, one app failing to build still leaves the other's package.
+      # One app failing still leaves the other's package.
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     env:
@@ -118,9 +94,8 @@ jobs:
           workspaces: crates/${{ matrix.product }}/app -> target
 
       - name: Install nsh
-        # The CLI has to be the version of the `nsh-*` crates the app builds against, so it is read
-        # from the app's `Cargo.toml` rather than written down a second time here. The installer
-        # puts `bin` on the user PATH, which later steps don't see, so it goes on GITHUB_PATH too.
+        # The CLI must match the app's `nsh-*` crates, so its version is read from `Cargo.toml`.
+        # The installer's PATH change doesn't reach later steps, so `bin` goes on GITHUB_PATH too.
         shell: pwsh
         run: |
           $line = Select-String -Path "crates/$env:PRODUCT/app/Cargo.toml" -Pattern '^nsh-core = "([^"]+)"'
@@ -134,25 +109,16 @@ jobs:
           Join-Path $env:NSH_INSTALL_DIR 'bin' >> $env:GITHUB_PATH
 
       - name: Package
-        # A release build of the app's crate and the Windows runner, with the icon embedded:
-        # `.nsh/out/<product>/` holds `<product>.exe` and the `nsh` runtime folder beside it, and
-        # `.nsh/out/<product>.zip` is the same as one file.
         working-directory: crates/${{ matrix.product }}/app
         run: nsh package --target windows
 
       - name: Install cargo-about
-        # Its program is behind the `cli` feature: without it, cargo builds the library and
-        # installs nothing. rust-cache keeps `~/.cargo/bin`, so later runs find it installed.
+        # The program is behind the `cli` feature: without it, cargo installs nothing.
         run: cargo install cargo-about --version 0.9.3 --locked --features cli
 
       - name: Add the licenses
-        # The package carries the app's own license and the notices of everything compiled into
-        # it: its crates' licenses ask for their notices to travel with the program, and MPL-2.0
-        # (glass2glass, symphonia) for where to find the source. cargo-about reads them from
-        # `windows-app`, the executable's crate in the workspace `nsh package` just built
-        # (`.nsh/rust/`); its settings and template are in `.github/notices/`. Both files go
-        # beside the executable, in the folder and in nsh's zip, which is added to rather than
-        # made again so the rest of it stays exactly as nsh wrote it.
+        # cargo-about reads `windows-app`, the executable's crate in nsh's generated workspace.
+        # The zip is added to, not remade, so the rest stays as nsh wrote it.
         shell: pwsh
         run: |
           $out = "crates/$env:PRODUCT/app/.nsh/out"
@@ -177,20 +143,17 @@ jobs:
         shell: pwsh
         run: Copy-Item "crates/$env:PRODUCT/app/.nsh/out/$env:PRODUCT.zip" "$env:PRODUCT-windows-x86_64-$env:SUFFIX.zip"
 
-      # Keeps a downloadable build even if publishing later fails, and is the only build a branch
-      # makes.
+      # Keeps a downloadable build even if publishing fails.
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.product }}-windows-x86_64
           path: ${{ matrix.product }}-windows-x86_64-*.zip
           retention-days: 14
 
-  # The only job that writes, and only for a tag. It runs after the package has been built, so the
-  # release either has its asset or is never created.
+  # Runs after the package is built, so a release always has its asset.
   publish:
     name: Publish
-    # `prepare` is listed so its outputs are available: the `needs` context only exposes the
-    # outputs of jobs named here, not transitive dependencies reached through `windows`.
+    # `needs` exposes only the outputs of jobs named here, so `prepare` is listed.
     needs: [prepare, windows]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
@@ -236,6 +199,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           TITLE: ${{ needs.prepare.outputs.title }} ${{ needs.prepare.outputs.version }}
-        # `--repo` because this job never checks anything out. Fails rather than overwriting if
-        # the tag already has a release, which is the safe default for something named a release.
+        # `--repo`: this job checks nothing out. Fails rather than overwrite an existing release.
         run: gh release create "$TAG" dist/* --repo "${{ github.repository }}" --title "$TITLE" --notes-file release-notes.md

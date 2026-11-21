@@ -3,17 +3,11 @@ import { Cameras } from "ipcamera/native";
 import { DirectionPad, IconButton, LevelSlider, PanelHeader, SectionLabel } from "../../../dp/ui";
 import { failed } from "./actions";
 
-/**
- * The pan, tilt and zoom controls for the selected camera, beside the video,
- * on the tool pane's island `App.tsx` sets it on. Holding a direction or a
- * zoom keeps moving until it is released. With no camera selected (`camera` is
- * `""`) the buttons do nothing.
- */
+/** The pan, tilt and zoom controls for the selected camera; with `camera` `""` the buttons do nothing. */
 export function PtzPanel(props: { camera: string; status: string; onHide: () => void }) {
   const speed = signal(0.5);
 
-  // Not awaited: on the web a move resolves only when it is let go. A move the camera refuses says
-  // why in the status below; these reject only for a camera that is gone.
+  // Not awaited: on the web a move resolves only when it is let go.
   const move = (pan: number, tilt: number, zoom: number) => {
     if (props.camera) Cameras.ptzMove(props.camera, pan, tilt, zoom, speed()).catch(failed);
   };

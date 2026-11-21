@@ -1,49 +1,6 @@
-//! ONVIF, the standard most IP cameras speak beside their own APIs: what a camera is, which events
-//! it can send, and motion and detections from its event service.
-//!
-//! ONVIF is SOAP: an XML envelope POSTed to a service's URL. The protocol is the `oxvif` crate's:
-//! the envelopes, both logins, and reading the replies. This module is what the app asks of a
-//! camera through it, and the app's own rules about the answers:
-//!
-//! - **The device service** (`onvif_device_path` on `onvif_port`): the camera's time, which
-//!   answers without a login; what it is (make, model, firmware); and where its event, media and
-//!   PTZ services are ([`Services`]).
-//! - **The media services**: the profiles, for the one a PTZ move names and the streams the
-//!   camera lists. The second media service is asked what each picture is, since the first can't
-//!   name every codec.
-//! - **The PTZ service**: whether it pans and tilts, zooms, and the auxiliary commands it takes,
-//!   among which a light bulb camera's light; moves, a stop, and the command that switches that
-//!   light (`Light|On`, `Light|Off`).
-//! - **The event service**: the topics the camera can send, which say whether it reports motion
-//!   and what it tells apart; a pull-point subscription, pulled in a loop and renewed before it
-//!   runs out.
-//!
-//! **Calls block.** `oxvif` is async, and the app asks each camera on a thread of its own, so
-//! every [`OnvifClient`] has a small tokio runtime that its calls run to their end on. A client
-//! is made, used and dropped off any async runtime's own threads.
-//!
-//! **The login** is WS-Security's digest, with the camera's time, which the client asks first
-//! (without a login) and keeps the difference to; and HTTP's digest for a camera that asks for
-//! it. A camera that refuses (`NotAuthorized`, or HTTP 401) is refused for good: the client
-//! remembers it and sends nothing more, since a failed ONVIF login counts against the account
-//! like any other. `oxvif` never repeats a call by itself.
-//!
-//! **Events** say what changed: a topic (`tns1:RuleEngine/CellMotionDetector/Motion`,
-//! `tns1:VideoSource/MotionAlarm`, `.../MyRuleDetector/PeopleDetect`) and a state (`IsMotion`,
-//! `State`: true or false). Most cameras send each state once as the subscription starts, then on
-//! every change, so [`OnvifEvents`] keeps the last state of each topic. Topics are told apart by
-//! words in their names, which vendors share: motion, people or human, vehicle, dog/cat or
-//! animal, face. A recorder's channels all count as one camera.
-//!
-//! **Finding cameras** ([`discover`]) is WS-Discovery: one question to every device on the
-//! network at once, which a camera with ONVIF on answers with where its device service is, its
-//! name and its model. Wi-Fi often drops a question sent to everyone, so the same question also
-//! goes to each address of this machine's private networks by itself. It logs in to nothing, and
-//! reaches only this machine's own networks.
-//!
-//! Many cameras give their services' addresses with an IP they don't answer on (behind NAT, or
-//! 0.0.0.0), so only the path of an address the camera gives is used, on the address and port the
-//! camera's settings name.
+//! What the app asks a camera over ONVIF, which `oxvif` speaks: what it is, its streams, PTZ, light
+//! and events, and finding cameras. Calls block on a runtime of their own, so keep a client off
+//! async runtimes' threads; a refused login is remembered and never sent again.
 
 use std::{
     collections::HashMap,
@@ -66,38 +23,32 @@ use crate::{
     ptz::PtzVelocity,
 };
 
-/// How long [`OnvifClient::answers`] waits. Every other call has `oxvif`'s ten seconds, and a
-/// pull waits up to [`PULL_WAIT`] on the camera's side, well inside them.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// How long the camera may hold a pull open waiting for an event: a motion badge that lags by a
-/// second at most, as Reolink's polling.
 const PULL_WAIT: &str = "PT1S";
 
-/// How long a subscription lasts unless renewed, and how often it is renewed.
+/// Renewed well before it runs out.
 const SUBSCRIPTION: &str = "PT60S";
 const RENEW_EVERY: Duration = Duration::from_secs(30);
 
-/// How often [`discover`] asks the network, how long it listens each time, and the pause between.
 const ROUNDS: usize = 2;
 const ROUND_WAIT: Duration = Duration::from_millis(1500);
 const ROUND_PAUSE: Duration = Duration::from_millis(300);
 
-/// How long [`discover`] waits for an address it asked by itself to answer, and how many of this
-/// machine's networks it asks address by address: its own few, not every virtual one.
 const SWEEP_WAIT: Duration = Duration::from_secs(2);
+/// This machine's own few networks, not every virtual one.
 const SWEEP_NETWORKS: usize = 4;
 
 /// Why a call to a camera's ONVIF services failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OnvifError {
-    /// The camera refused the login, for the reason given. Nothing retries it.
+    /// The camera refused the login. Nothing retries it.
     LoginRejected(String),
-    /// The camera could not be reached, or the connection broke, for the reason given.
+    /// The camera could not be reached, or the connection broke.
     Unreachable(String),
-    /// The camera answered with a SOAP fault, for the reason it gave: it may not have the service.
+    /// The camera answered with a SOAP fault.
     Fault(String),
-    /// The camera answered with something that isn't ONVIF, for the reason given.
+    /// The camera answered with something that isn't ONVIF.
     Protocol(String),
 }
 
@@ -122,18 +73,16 @@ impl fmt::Display for OnvifError {
 
 impl std::error::Error for OnvifError {}
 
-/// What an ONVIF call returns.
 type Result<T> = std::result::Result<T, OnvifError>;
 
-/// What `oxvif` returns.
 type Asked<T> = std::result::Result<T, oxvif::OnvifError>;
 
-/// Where a camera's services are, as paths on its address. A service it doesn't have is `None`.
+/// Where a camera's services are, as paths on its address.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Services {
-    /// The event service, for motion and detections.
+    /// The event service.
     pub events: Option<String>,
-    /// The media service, for the profile a PTZ move names.
+    /// The media service.
     pub media: Option<String>,
     /// The PTZ service.
     pub ptz: Option<String>,
@@ -146,26 +95,22 @@ pub struct PtzNode {
     pub pan_tilt: bool,
     /// Whether it zooms at a speed.
     pub zoom: bool,
-    /// The auxiliary commands that switch its light on and off, for a camera with one: a light
-    /// bulb camera's bulb, not an infrared lamp.
+    /// The auxiliary commands that switch its light on and off, never an infrared lamp.
     pub light: Option<(String, String)>,
 }
 
 /// A logged-in connection to a camera's ONVIF services.
 pub struct OnvifClient {
-    /// The client, which holds the login. Before the runtime, so it is dropped first.
+    /// Before the runtime, so it is dropped first.
     client: oxvif::OnvifClient,
-    /// What the client's calls run on, on the thread that makes them.
     runtime: Runtime,
-    /// `http://host:port`, where every service is asked.
     base: String,
-    /// Why the camera refused the login, after which nothing is sent.
+    /// After which nothing is sent.
     refused: Option<OnvifError>,
 }
 
 impl OnvifClient {
-    /// Whether an ONVIF device service answers at `host` on `port` and `path`. It asks the
-    /// camera's time, which needs no login: never a login, so never a failed one.
+    /// Whether an ONVIF device service answers at `host`, `port` and `path`, without a login.
     pub fn answers(host: &str, port: u16, path: &str) -> bool {
         let Ok(runtime) = runtime() else {
             return false;
@@ -177,8 +122,7 @@ impl OnvifClient {
         })
     }
 
-    /// Asks the camera's time (no login), then logs in once by asking what it is. The device
-    /// information comes back with the client.
+    /// Asks the camera's time for the login's digest, then logs in once by asking what it is.
     pub fn connect(
         host: &str,
         port: u16,
@@ -189,8 +133,7 @@ impl OnvifClient {
         let runtime = runtime()?;
         let base = base_of(host, port);
         let url = format!("{base}{}", with_slash(path));
-        // Asked by a client with no login to send. A camera that doesn't say its time is asked
-        // with this machine's; one that isn't there is not asked again.
+        // Without a login. A camera that isn't there is not asked again.
         let asked = runtime.block_on(oxvif::OnvifClient::new(&url).get_system_date_and_time());
         let clock_offset = match asked {
             Ok(time) => time.utc_offset_secs(),
@@ -242,8 +185,7 @@ impl OnvifClient {
         })
     }
 
-    /// The token of the media profile a PTZ move names: the first with a PTZ configuration, else
-    /// the first.
+    /// The token of the first media profile with a PTZ configuration, else the first.
     pub fn profile_token(&mut self, media_path: &str) -> Result<String> {
         let url = self.url(media_path);
         let profiles = self.ask(async |client| client.get_profiles(&url).await)?;
@@ -255,10 +197,7 @@ impl OnvifClient {
             .ok_or_else(|| OnvifError::Fault("the camera has no media profile".into()))
     }
 
-    /// What the camera's second media service says of each profile's picture, by the profile's
-    /// token; empty for a camera without that service, or that won't say. The first media
-    /// service can only name JPEG, MPEG-4 and H.264, so a camera sending H.265 calls it H.264
-    /// there, and only says what it is here.
+    /// Each profile's picture by token, from the second media service: the first can't name H.265.
     fn pictures(&mut self) -> HashMap<String, String> {
         let Ok(services) = self.ask(async |client| client.get_services().await) else {
             return HashMap::new();
@@ -292,15 +231,10 @@ impl OnvifClient {
             .collect()
     }
 
-    /// The streams the camera's media service lists: each profile's name, what it says of its
-    /// picture, and the RTSP address the camera gives for it. A profile the camera gives no
-    /// address for is left out. Where the camera has the second media service, what that says
-    /// of a profile's picture is taken over the first's, which can't name every codec
-    /// ([`pictures`](Self::pictures)).
+    /// The streams the camera's media service lists, each with an RTSP address.
     pub fn streams(&mut self, media_path: &str) -> Result<Vec<CameraStream>> {
         let url = self.url(media_path);
         let profiles = self.ask(async |client| client.get_profiles(&url).await)?;
-        // A camera that won't say what its encoders send still lists its streams.
         let encoders = self
             .ask(async |client| client.get_video_encoder_configurations(&url).await)
             .unwrap_or_default();
@@ -324,11 +258,10 @@ impl OnvifClient {
             let asked = self.ask(async |client| client.get_stream_uri(&url, &profile.token).await);
             let address = match asked {
                 Ok(address) => address,
-                // The login or the connection: the rest would fail the same way.
+                // The rest would fail the same way.
                 Err(error @ (OnvifError::LoginRejected(_) | OnvifError::Unreachable(_))) => {
                     return Err(error);
                 }
-                // A profile with no stream of its own.
                 Err(_) => continue,
             };
             if let Some(path) = rtsp_path(&address.uri) {
@@ -359,8 +292,7 @@ impl OnvifClient {
         })
     }
 
-    /// Starts moving at `velocity` (each part -1 to 1), as `profile` names the PTZ to move; a move
-    /// lasts until [`stop`](Self::stop). Zoom wins over pan and tilt, as everywhere in the app.
+    /// Starts moving at `velocity` until [`stop`](Self::stop); zoom wins over pan and tilt.
     pub fn continuous_move(
         &mut self,
         ptz_path: &str,
@@ -387,7 +319,7 @@ impl OnvifClient {
         self.ask(async |client| client.ptz_stop(&url, profile).await)
     }
 
-    /// Sends an auxiliary command (`Light|On`), as the PTZ service of `profile` lists them.
+    /// Sends an auxiliary command (`Light|On`).
     pub fn auxiliary(&mut self, ptz_path: &str, profile: &str, command: &str) -> Result<()> {
         let url = self.url(ptz_path);
         self.ask(async |client| {
@@ -395,27 +327,25 @@ impl OnvifClient {
                 .ptz_send_auxiliary_command(&url, profile, command)
                 .await;
             match sent {
-                // The reply's text is optional, and a camera that leaves it out took the command.
+                // The reply's text is optional: a camera that leaves it out took the command.
                 Ok(_) | Err(oxvif::OnvifError::Soap(SoapError::MissingField(_))) => Ok(()),
                 Err(error) => Err(error),
             }
         })
     }
 
-    /// What the camera can tell: motion, and what it tells apart, from the topics it can send.
+    /// Whether the camera reports motion, and what it tells apart, from the topics it can send.
     pub fn features(&mut self, events_path: &str) -> Result<CameraFeatures> {
         let url = self.url(events_path);
         let properties = self.ask(async |client| client.get_event_properties(&url).await)?;
         Ok(features_of(&properties.topics))
     }
 
-    /// The address of `path` on the camera.
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base, with_slash(path))
     }
 
-    /// One call with the login, run to its end on this thread. A refused login is remembered, so
-    /// nothing is sent after it.
+    /// One call, blocking; a refused login is remembered, so nothing is sent after it.
     fn ask<T>(&mut self, call: impl AsyncFnOnce(&oxvif::OnvifClient) -> Asked<T>) -> Result<T> {
         if let Some(refused) = &self.refused {
             return Err(refused.clone());
@@ -428,21 +358,17 @@ impl OnvifClient {
     }
 }
 
-/// A camera's events, pulled from a subscription of its own, with the last state of each topic.
-/// Dropping it ends the subscription.
+/// A camera's events, from a pull-point subscription, with the last state of each topic: most
+/// cameras send a state only when it changes. Dropping it ends the subscription.
 pub struct OnvifEvents {
     client: OnvifClient,
-    /// The subscription's address: the path the camera gave, on the camera's own address.
     subscription: String,
     renew_at: Instant,
-    /// The last state of each topic that is about motion or a detection.
     states: HashMap<String, (Kind, bool)>,
 }
 
 impl OnvifEvents {
-    /// Subscribes to the events of the camera `client` is logged in to, at `events_path`. When it
-    /// can't, the client comes back with why, for whatever else it can do (boxed: a client is
-    /// large to carry in an error).
+    /// Subscribes to the camera's events; when it can't, the client comes back with why.
     pub fn subscribe(
         mut client: OnvifClient,
         events_path: &str,
@@ -464,13 +390,12 @@ impl OnvifEvents {
         }
     }
 
-    /// The client the events come through, for the camera's other services.
+    /// The client the events come through.
     pub fn client(&mut self) -> &mut OnvifClient {
         &mut self.client
     }
 
-    /// Waits up to a second for events, and returns what the camera sees after them. Renews the
-    /// subscription when it is due.
+    /// Waits up to a second for events, and returns what the camera sees after them.
     pub fn activity(&mut self) -> Result<CameraActivity> {
         let url = &self.subscription;
         if Instant::now() >= self.renew_at {
@@ -489,8 +414,7 @@ impl OnvifEvents {
 }
 
 impl Drop for OnvifEvents {
-    /// Ends the subscription, so the camera's few don't run out; the camera ends it by itself
-    /// within a minute anyway, so a failure changes nothing. It can wait for up to ten seconds.
+    /// Ends the subscription, so the camera's few don't run out. It can block for seconds.
     fn drop(&mut self) {
         let url = &self.subscription;
         let _ = self
@@ -499,12 +423,8 @@ impl Drop for OnvifEvents {
     }
 }
 
-/// Asks the network which ONVIF cameras are on it (WS-Discovery: a question sent to every device
-/// at once, over UDP multicast, which each camera answers with where its device service is), and
-/// returns those that answered, by address. No camera is logged in to. It asks [`ROUNDS`] times,
-/// since a camera can miss one, and meanwhile asks each address of this machine's networks by
-/// itself ([`sweep`]), for the cameras a question to everyone doesn't reach. It takes about three
-/// seconds; a network that can't be asked finds none.
+/// The ONVIF cameras on this machine's networks, by address, over WS-Discovery with no login.
+/// Blocks for about three seconds.
 pub fn discover() -> Vec<FoundCamera> {
     let Ok(runtime) = runtime() else {
         return Vec::new();
@@ -522,11 +442,7 @@ pub fn discover() -> Vec<FoundCamera> {
     found
 }
 
-/// Asks each address of this machine's networks the same question by itself, all at once, and
-/// returns the devices that answered. Wi-Fi access points and some switches don't pass a question
-/// sent to everyone on to the cameras behind them, and a camera asked by its own address answers
-/// all the same. Only private networks are asked (a home's or an office's own), and each as the
-/// 254 addresses that share this machine's first three numbers, which is what such networks are.
+/// Asks each private address by itself: Wi-Fi often drops a question sent to everyone.
 async fn sweep() -> Vec<oxvif::discovery::DiscoveredDevice> {
     let mut asked = tokio::task::JoinSet::new();
     for network in private_networks() {
@@ -541,8 +457,6 @@ async fn sweep() -> Vec<oxvif::discovery::DiscoveredDevice> {
     answered
 }
 
-/// This machine's addresses on private networks (a home's or an office's own), the first
-/// [`SWEEP_NETWORKS`] of them: the networks a search asks address by address.
 pub(crate) fn private_networks() -> Vec<Ipv4Addr> {
     oxvif::discovery::discovery_interfaces()
         .unwrap_or_default()
@@ -553,7 +467,6 @@ pub(crate) fn private_networks() -> Vec<Ipv4Addr> {
         .collect()
 }
 
-/// The other addresses that share `own`'s first three numbers.
 pub(crate) fn neighbors(own: Ipv4Addr) -> impl Iterator<Item = Ipv4Addr> {
     let [a, b, c, mine] = own.octets();
     (1..=254)
@@ -561,15 +474,12 @@ pub(crate) fn neighbors(own: Ipv4Addr) -> impl Iterator<Item = Ipv4Addr> {
         .map(move |last| Ipv4Addr::new(a, b, c, last))
 }
 
-/// What the camera form needs of a device that answered: the first of its addresses the app can
-/// ask (HTTP, on an address other machines reach), and the name and model among its scopes.
-/// `None` for a device that gave no such address.
 fn found_of(device: &oxvif::discovery::DiscoveredDevice) -> Option<FoundCamera> {
     let (host, onvif_port, onvif_device_path) = device
         .xaddrs
         .iter()
         .filter_map(|address| service_of(address))
-        // An IPv4 address before an IPv6 one, which is often the link's own.
+        // IPv4 first: an IPv6 address is often the link's own.
         .min_by_key(|(host, ..)| host.contains(':'))?;
     Some(FoundCamera {
         host,
@@ -582,8 +492,6 @@ fn found_of(device: &oxvif::discovery::DiscoveredDevice) -> Option<FoundCamera> 
     })
 }
 
-/// The host, port and path of a device service's `address` (`http://10.0.0.5:8000/onvif/x`);
-/// `None` for one that isn't HTTP, or names no machine (`0.0.0.0`).
 fn service_of(address: &str) -> Option<(String, u16, String)> {
     let rest = address.trim().strip_prefix("http://")?;
     let (authority, path) = match rest.find('/') {
@@ -591,7 +499,6 @@ fn service_of(address: &str) -> Option<(String, u16, String)> {
         None => (rest, "/"),
     };
     let (host, port) = match authority.strip_prefix('[') {
-        // An IPv6 address in its brackets.
         Some(bracketed) => {
             let (host, after) = bracketed.split_once(']')?;
             (host, after.strip_prefix(':'))
@@ -609,8 +516,6 @@ fn service_of(address: &str) -> Option<(String, u16, String)> {
     (!nowhere).then(|| (host.to_string(), port, path.to_string()))
 }
 
-/// What a device's `scopes` say under `kind`: `Front Door` from
-/// `onvif://www.onvif.org/name/Front%20Door`. Empty when they say nothing.
 fn scope_of(scopes: &[String], kind: &str) -> String {
     let prefix = format!("onvif://www.onvif.org/{kind}/");
     scopes
@@ -624,11 +529,7 @@ fn scope_of(scopes: &[String], kind: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Whatever else a device's `scopes` say of it, each as `Kind: what it says`: what a maker adds
-/// (a serial number, a MAC address). Its name and model have fields of their own, and the rest
-/// of what ONVIF itself defines says nothing a person choosing a camera reads: its type, the
-/// profiles it keeps to, its location, which cameras leave as the country that made them, and
-/// its extensions, which are for other programs.
+/// What a maker adds to a device's `scopes` (a serial number, a MAC address), as `Kind: value`.
 fn details_of(scopes: &[String]) -> Vec<String> {
     const PREFIX: &str = "onvif://www.onvif.org/";
     let mut details: Vec<String> = Vec::new();
@@ -658,7 +559,6 @@ fn details_of(scopes: &[String]) -> Vec<String> {
         if skipped || kind.is_empty() || value.is_empty() {
             continue;
         }
-        // `serial` as `Serial`; a kind in capitals (`MAC`) stays as it is.
         let mut label = kind.to_string();
         label[..1].make_ascii_uppercase();
         let detail = format!("{label}: {value}");
@@ -669,15 +569,13 @@ fn details_of(scopes: &[String]) -> Vec<String> {
     details
 }
 
-/// `text` with its `%20`-style escapes read, as a scope writes a space or a letter outside ASCII.
 fn unescaped(text: &str) -> String {
     percent_encoding::percent_decode_str(text)
         .decode_utf8_lossy()
         .into_owned()
 }
 
-/// What addresses sort by: an IPv4 address by its numbers, so `.9` comes before `.10`, and any
-/// other after those, by its text.
+/// IPv4 addresses by their numbers, so `.9` comes before `.10`, then any other by its text.
 fn by_address(host: &str) -> (bool, [u8; 4], &str) {
     match host.parse::<Ipv4Addr>() {
         Ok(address) => (false, address.octets(), host),
@@ -685,7 +583,6 @@ fn by_address(host: &str) -> (bool, [u8; 4], &str) {
     }
 }
 
-/// A runtime for one client's calls, which run on the thread that makes them.
 fn runtime() -> Result<Runtime> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -693,8 +590,8 @@ fn runtime() -> Result<Runtime> {
         .map_err(|error| OnvifError::Protocol(format!("ONVIF couldn't be started: {error}.")))
 }
 
-/// Why a call failed, in this app's terms: a refused login apart from everything else, since it
-/// alone is never tried again.
+/// Tells a refused login apart from every other failure, since it alone is never tried again:
+/// `oxvif` has no error of its own for it.
 fn told(error: oxvif::OnvifError) -> OnvifError {
     const NOT_ONVIF: &str =
         "The camera answered with something that isn't ONVIF. Check the ONVIF port and path.";
@@ -707,7 +604,6 @@ fn told(error: oxvif::OnvifError) -> OnvifError {
                 "The camera answered ONVIF with HTTP {status}. Check the ONVIF port and path."
             ))
         }
-        // Without the address, which the settings already show.
         oxvif::OnvifError::Transport(TransportError::Http(error)) => {
             OnvifError::Unreachable(error.without_url().to_string())
         }
@@ -739,8 +635,6 @@ fn told(error: oxvif::OnvifError) -> OnvifError {
     }
 }
 
-/// Whether a part of a SOAP fault says the login was refused: ONVIF's `ter:NotAuthorized`,
-/// WS-Security's `wsse:FailedAuthentication`, or the same in words.
 fn refuses_login(said: &str) -> bool {
     let said = said.to_ascii_lowercase();
     [
@@ -753,16 +647,13 @@ fn refuses_login(said: &str) -> bool {
     .any(|word| said.contains(word))
 }
 
-/// Whether one of a PTZ node's `spaces` moves at a speed, which a continuous move needs: its
-/// velocity spaces, told from its position and translation spaces by their addresses.
+/// Whether a PTZ node has a velocity space, which a continuous move needs.
 fn at_a_speed(spaces: &[PtzSpaceRange]) -> bool {
     spaces
         .iter()
         .any(|space| space.uri.to_ascii_lowercase().contains("velocity"))
 }
 
-/// What a video encoder says of its picture, its size and codec: `3840×2160, H265`. A size of
-/// nothing is one the camera didn't say.
 fn picture_of(width: u32, height: u32, encoding: &str) -> String {
     let size = (width > 0 && height > 0).then(|| format!("{width}\u{d7}{height}"));
     let encoding = Some(encoding.trim().to_string()).filter(|encoding| !encoding.is_empty());
@@ -770,9 +661,7 @@ fn picture_of(width: u32, height: u32, encoding: &str) -> String {
     parts.join(", ")
 }
 
-/// The auxiliary commands among `commands` that switch a light on and off: one named for a light
-/// or a lamp, but not an infrared one. `Light|On` and `Light|Off` when the camera lists them so,
-/// or a bare `Light` with `|On` and `|Off` put after it.
+/// The commands that switch a light on and off, never an infrared lamp's.
 fn light_commands(commands: &[String]) -> Option<(String, String)> {
     let light = commands.iter().find(|command| {
         let name = command.to_ascii_lowercase();
@@ -785,16 +674,14 @@ fn light_commands(commands: &[String]) -> Option<(String, String)> {
     Some((format!("{base}|On"), format!("{base}|Off")))
 }
 
-/// What an event's topic is about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Motion,
     Detected(Detection),
 }
 
-/// What a topic, or a topic's path in the topic set, is about, by the words in its parts; `None`
-/// for a topic about something else (tampering, an input). A part is matched by its start where a
-/// word could hide inside another (`Face` but not `Interface`, `Pet` but not `Competition`).
+/// What a topic is about, by the words in its parts. Some match only a part's start, so `Face` is
+/// not found in `Interface`, nor `Pet` in `Competition`.
 fn kind_of(topic: &str) -> Option<Kind> {
     let topic = topic.to_ascii_lowercase();
     let parts: Vec<&str> = topic.split(['/', ':']).collect();
@@ -825,7 +712,6 @@ fn kind_of(topic: &str) -> Option<Kind> {
     }
 }
 
-/// What the camera sees, from the last state of each topic.
 fn activity_of(states: impl Iterator<Item = (Kind, bool)>) -> CameraActivity {
     let mut activity = CameraActivity::default();
     for (kind, _) in states.filter(|(_, on)| *on) {
@@ -841,10 +727,8 @@ fn activity_of(states: impl Iterator<Item = (Kind, bool)>) -> CameraActivity {
     activity
 }
 
-/// What a pulled notification says, when it is about motion or a detection: its topic with its
-/// source, what it is about, and its state. A topic and its source together name the state, so
-/// a recorder's channels each keep their own. The state is the item most cameras name it by,
-/// else the first (by name) that is true or false.
+/// A notification's topic with its source, so a recorder's channels each keep their own state, what
+/// it is about, and its state.
 fn state_of(message: &NotificationMessage) -> Option<(String, Kind, bool)> {
     let kind = kind_of(&message.topic)?;
     let truth = |value: &String| match value.trim().to_ascii_lowercase().as_str() {
@@ -869,7 +753,6 @@ fn state_of(message: &NotificationMessage) -> Option<(String, Kind, bool)> {
     Some((format!("{}|{}", message.topic, source.join(",")), kind, on))
 }
 
-/// What a camera can tell, from the topics its event service lists.
 fn features_of(topics: &[String]) -> CameraFeatures {
     let mut features = CameraFeatures::default();
     for topic in topics {
@@ -885,7 +768,7 @@ fn features_of(topics: &[String]) -> CameraFeatures {
     features
 }
 
-/// The path (and query) of `address`, which the camera gives whole: `/onvif/event_service`.
+/// Only the path of an address the camera gives: many give one they don't answer on.
 fn path_of(address: &str) -> String {
     let after_scheme = address.split_once("://").map_or(address, |(_, rest)| rest);
     match after_scheme.find('/') {
@@ -894,7 +777,6 @@ fn path_of(address: &str) -> String {
     }
 }
 
-/// `http://host:port`, with an IPv6 address in its brackets.
 fn base_of(host: &str, port: u16) -> String {
     if host.contains(':') {
         format!("http://[{host}]:{port}")
@@ -903,7 +785,6 @@ fn base_of(host: &str, port: u16) -> String {
     }
 }
 
-/// `path` with a leading slash.
 fn with_slash(path: &str) -> String {
     let path = path.trim();
     if path.starts_with('/') {
@@ -964,7 +845,6 @@ mod tests {
         );
     }
 
-    /// A notification of `topic` from `source`, with `data`'s items.
     fn notification(topic: &str, source: &str, data: &[(&str, &str)]) -> NotificationMessage {
         NotificationMessage {
             topic: topic.to_string(),

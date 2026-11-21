@@ -1,6 +1,3 @@
-// Settings as rows in cards, after the settings list in nsh's gallery and
-// the system's own Settings: each row a tinted icon, a name with a line about it,
-// and its control at the end, the rows of a group in one card.
 import { type JSX, Text, View } from "nsh";
 import { BrandBadge, look } from "./brand";
 import { Card } from "./card";
@@ -18,7 +15,7 @@ export function SettingsGroup(props: { title: string; description?: string; chil
           <Text class="text-sm text-muted-foreground">{props.description}</Text>
         </If>
       </View>
-      {/* Its rows' hover fills stay inside its corners; its own shadow is drawn whole. */}
+      {/* Clips its rows' hover fills to its corners; its own shadow still draws whole. */}
       <Card class="overflow-hidden">{props.children}</Card>
     </View>
   );
@@ -33,14 +30,7 @@ type SettingProps = {
   children?: JSX.Element;
 };
 
-/**
- * One setting: its icon on the theme's badge, its name with a line about it
- * (`detail`) and a small tag (`tag`: "Default"), and its control at the end
- * (`control`), which wraps under the name in a narrow window. `children` go
- * under it (a path, a set of tiles), in from the badge so they line up with
- * the name. It brings no room or line of its own: `SettingRow` gives it those,
- * and a panel of several settings spaces them itself.
- */
+/** One setting: its badge, name and `detail`, its control at the end, and `children` under it. */
 export function Setting(props: SettingProps) {
   return (
     <View class="gap-3">
@@ -63,7 +53,7 @@ export function Setting(props: SettingProps) {
           <View class="flex-row flex-wrap items-center gap-2">{props.control}</View>
         </If>
       </View>
-      {/* The badge's 32 points and the 12 after it (`pl-11`), so what is under the setting starts where its name does. */}
+      {/* `pl-11`: the badge's 32 points and the 12 after it. */}
       <If when={props.children}>
         <View class="pl-11">{props.children}</View>
       </If>
@@ -71,7 +61,7 @@ export function Setting(props: SettingProps) {
   );
 }
 
-/** A `Setting` as a row of its group's card. Every row but the group's `first` has a line above it. */
+/** A `Setting` as a row of its group's card, ruled above unless `first`. */
 export function SettingRow(props: SettingProps & { first?: boolean }) {
   return (
     <View class={`px-4 py-3.5 ${props.first ? "" : "border-t border-border"}`}>

@@ -24,8 +24,6 @@ use crate::{
     form,
 };
 
-/// A folder of its own for one test, removed when it ends. It starts with [`test_camera`], as
-/// `nsh test`'s runner does.
 struct Folder(tempfile::TempDir);
 
 impl Folder {
@@ -39,7 +37,6 @@ impl Folder {
         Arc::new(ConfigStore::load(self.0.path().join("settings.json")))
     }
 
-    /// The library as a fresh launch would read it, to check what reached the files.
     fn library(&self) -> Library {
         Library::open(self.0.path().join("data").join("settings"))
     }
@@ -57,7 +54,6 @@ fn pattern_hub(folder: &Folder) -> Hub {
     Hub::new(folder.settings(), Source::Pattern)
 }
 
-/// The camera every test starts with: [`test_camera`].
 fn first(hub: &Hub) -> Arc<Camera> {
     hub.all()[0].clone()
 }
@@ -78,7 +74,6 @@ fn wait_for_frame(camera: &Camera) {
     }
 }
 
-/// The cameras' own streams.
 fn own(cameras: &[&Arc<Camera>]) -> Vec<StreamOf> {
     cameras
         .iter()
@@ -95,7 +90,6 @@ fn on_screen(hub: &Hub, shown: &[&Arc<Camera>], audible: Option<&Arc<Camera>>) {
     hub.reconcile();
 }
 
-/// No tile shows anything, as on the dashboard, and `kept` stay connected.
 fn kept_off_screen(hub: &Hub, kept: &[&Arc<Camera>]) {
     hub.set_on_screen(Vec::new(), own(kept), None);
     hub.reconcile();
@@ -259,7 +253,7 @@ fn the_test_picture_is_always_ready_and_never_touches_ptz() {
 fn the_hub_follows_what_another_program_saved() {
     let folder = Folder::new();
     let hub = pattern_hub(&folder);
-    // The server, sharing the app's files: a library of its own over the same folder.
+    // The server: a library of its own over the same folder.
     let server = folder.library();
 
     let added = server
@@ -279,7 +273,6 @@ fn the_hub_follows_what_another_program_saved() {
     assert_eq!(hub.all().len(), 1, "the deleted camera is gone");
     assert_eq!(first(&hub).summary().name, "Renamed in the browser");
 
-    // And a change made here starts from what the server saved, so neither loses the other's.
     hub.add(form::to_config(&named("From the desktop")))
         .unwrap();
     let names: Vec<String> = folder
@@ -297,7 +290,7 @@ fn releasing_ptz_closes_it_until_the_next_move() {
     let hub = Hub::new(folder.settings(), Source::Stream);
     let camera = first(&hub);
 
-    // Nothing listens on this port, so PTZ fails at once rather than reaching a real camera.
+    // Nothing listens here, so PTZ never reaches a real camera.
     let mut form = camera.form();
     form.host = "127.0.0.1".into();
     form.dvrip_port = "1".into();
@@ -398,7 +391,6 @@ fn saving_the_form_updates_the_file_and_the_labels() {
     assert_eq!(camera.state().name, "Driveway");
     assert!(camera.state().stream_label.contains("10.0.0.9"));
 
-    // A fresh launch sees what was saved, so it really reached the file.
     let saved = folder.library().cameras();
     assert_eq!(saved[0].name, "Driveway");
     assert_eq!(saved[0].id.as_str(), camera.id, "the id never changes");
@@ -475,7 +467,6 @@ fn changes_reach_every_camera_named_in_one_save_and_leave_the_rest() {
     for (camera, user) in saved.iter().zip(["viewer", "viewer", "admin"]) {
         assert_eq!(camera.user, user, "{}", camera.name);
     }
-    // What the changes leave out stays each camera's own: names, addresses and channels.
     assert_eq!(saved[0].name, "Camera 1");
     assert_eq!(saved[0].host, "192.0.2.10");
     assert_eq!(saved[1].stream, Stream::Sub);
@@ -490,7 +481,6 @@ fn changes_that_change_nothing_save_nothing() {
     let camera = first(&hub);
     let before = hub.library.revision();
 
-    // A blank port saves as the default, which the camera already has.
     let changes = CameraChanges {
         user: Some("admin".into()),
         rtsp_port: Some(String::new()),
@@ -709,7 +699,6 @@ fn a_recording_camera_stays_connected_off_screen_until_recording_stops() {
     let hub = pattern_hub(&folder);
     let camera = first(&hub);
     on_screen(&hub, &[&camera], Some(&camera));
-    // As a camera stream that started recording would be.
     camera.recording.store(true, Ordering::SeqCst);
 
     on_screen(&hub, &[], None);
@@ -764,7 +753,6 @@ fn only_the_selected_camera_is_heard() {
     on_screen(&hub, &[], None);
 }
 
-/// Camera `camera`'s sub stream, as a tile that picks it says.
 fn sub_of(camera: &Camera) -> StreamOf {
     StreamOf {
         stream: TileStream::from_key("sub"),
@@ -772,7 +760,6 @@ fn sub_of(camera: &Camera) -> StreamOf {
     }
 }
 
-/// The streams of `camera` that run.
 fn running(camera: &Camera) -> Vec<Option<TileStream>> {
     let inner = camera.inner.locked();
     let mut keys: Vec<_> = inner
@@ -822,7 +809,6 @@ fn a_tile_on_another_stream_is_a_connection_of_its_own() {
         );
     }
 
-    // The tile goes back to the camera's own stream.
     on_screen(&hub, &[&camera], Some(&camera));
     assert_eq!(running(&camera), [None]);
     assert!(
@@ -871,7 +857,6 @@ fn recording_is_of_the_cameras_own_stream() {
 
     hub.set_on_screen(vec![sub_of(&camera)], Vec::new(), None);
     hub.reconcile();
-    // The test picture can't record, so the answer says so, once the camera's own stream is up.
     assert_eq!(
         hub.record(&ids).unwrap_err(),
         "The test picture can't be recorded."
@@ -889,11 +874,9 @@ fn a_recording_no_tile_shows_decodes_nothing() {
     let folder = Folder::new();
     let hub = pattern_hub(&folder);
     let camera = first(&hub);
-    // The camera's own stream is up, as recording starts it, and no tile shows it.
     hub.set_on_screen(vec![sub_of(&camera)], vec![StreamOf::own(&camera.id)], None);
     hub.reconcile();
 
-    // As a camera stream that started recording would be: its own stream stays for it.
     camera.recording.store(true, Ordering::SeqCst);
     hub.set_on_screen(vec![sub_of(&camera)], Vec::new(), None);
     hub.reconcile();
@@ -939,7 +922,6 @@ fn an_events_snapshot_is_the_picture_on_screen_tagged_and_linked() {
         "a picture is all Settings asks for"
     );
 
-    // The sighting ending changes the log, keeping the picture it has.
     hub.log_event(
         &camera,
         seen_event(&camera, EventStep::Quiet, 1_000, Some(2_000)),
@@ -969,7 +951,6 @@ fn a_camera_no_tile_shows_connects_for_its_events_picture() {
         "the stream connected for the picture disconnects again"
     );
 
-    // One the user disconnected stays so, and goes without.
     camera.held.store(true, Ordering::SeqCst);
     hub.log_event(
         &camera,
@@ -1006,7 +987,6 @@ fn an_event_no_watch_sees_any_more_ends() {
     let event = seen_event(&camera, EventStep::Started, 1_000, None).event;
     hub.events.record(event.clone()).unwrap();
 
-    // The test picture has no watch, as a camera that was deleted or changed has none.
     hub.watch_cameras();
     let logged = hub.events.event(&event.id).expect("still logged");
     assert!(logged.ended.is_some_and(|ended| ended > event.started));
@@ -1016,8 +996,6 @@ fn an_event_no_watch_sees_any_more_ends() {
     );
 }
 
-/// An event of `camera`'s as its watch would hand it over at `step`: one the camera sees now, or
-/// last saw at `ended`, having seen a person.
 fn seen_event(camera: &Camera, step: EventStep, started: u64, ended: Option<u64>) -> SeenEvent {
     SeenEvent {
         step,
@@ -1065,7 +1043,6 @@ fn a_snapshot_past_the_media_limit_is_refused_unless_the_oldest_may_go() {
     assert!(old.exists(), "nothing is deleted unless the user allows it");
     assert!(hub.record(std::slice::from_ref(&camera.id)).is_err());
 
-    // Nor does an event take one.
     hub.log_event(
         &camera,
         seen_event(&camera, EventStep::Started, 1_000, None),
@@ -1095,7 +1072,6 @@ fn a_recording_a_sighting_started_stops_as_the_sighting_ends() {
         .update(|config| config.automation.event_capture = EventCapture::Nothing)
         .unwrap();
 
-    // As a recording a sighting started would be.
     camera.recording.store(true, Ordering::SeqCst);
     camera.recording_by_itself.store(true, Ordering::SeqCst);
     hub.log_event(
@@ -1112,7 +1088,6 @@ fn a_recording_a_sighting_started_stops_as_the_sighting_ends() {
         "the sighting is over, and so is its recording"
     );
 
-    // One the user started carries on through an event.
     camera.recording.store(true, Ordering::SeqCst);
     hub.log_event(
         &camera,
@@ -1186,7 +1161,6 @@ fn only_the_kinds_picked_save_a_video_and_one_seen_later_starts_it() {
         "a person isn't recorded: no recording was tried"
     );
 
-    // An animal comes into the same sighting: now it records, which the test picture can't.
     let mut added = seen_event(&camera, EventStep::Added, 1_000, None);
     added.tags = vec!["person", "animal"];
     hub.log_event(&camera, added);
@@ -1294,7 +1268,6 @@ fn turning_events_off_stops_what_they_started() {
     hub.events
         .record(seen_event(&camera, EventStep::Started, 1_000, None).event)
         .unwrap();
-    // As a recording a sighting started would be.
     camera.recording.store(true, Ordering::SeqCst);
     camera.recording_by_itself.store(true, Ordering::SeqCst);
 
@@ -1309,8 +1282,7 @@ fn turning_events_off_stops_what_they_started() {
     );
 }
 
-/// A listener on this machine that hangs up on every connection, as a camera's port does when the
-/// camera has gone, and counts them; no login ever reaches a real camera.
+/// A local listener that hangs up on every connection and counts them; no login reaches a camera.
 fn hangs_up() -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port for the test");
     let port = listener.local_addr().unwrap().port();
@@ -1334,7 +1306,6 @@ fn a_stream_that_gave_up_says_why_and_connect_tries_it_again() {
     let mut form = camera.form();
     form.host = "127.0.0.1".into();
     form.rtsp_port = port.to_string();
-    // So the first failure is the last, rather than a reconnect.
     form.auto_reconnect = false;
     hub.save(&camera.id, &form).unwrap();
 

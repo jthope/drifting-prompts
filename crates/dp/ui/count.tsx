@@ -1,12 +1,8 @@
-// How many matches a search found in what a row or a tab shows (a file, a
-// heading), in a small pill beside its name, on the search's own color
-// (`look().found`), so it reads as the matches it counts.
 import { Text, View } from "nsh";
 import { look } from "./brand";
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
 
-/** A count of 1,000 or more, said shortly: `1k`, `12k`. */
 function short(count: number): string {
   return count < 1000 ? String(count) : `${Math.floor(count / 1000)}k`;
 }

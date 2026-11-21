@@ -1,39 +1,6 @@
-//! A file an app saves its settings in, and the copy of it the app is running with: each
-//! product's `settings.json`, Markdown Viewer's `projects.json`, and IP Camera's JSON files in
-//! `data\settings`.
-//!
-//! [`FileStore`] does the same for each: a change is made to a copy, the copy is written
-//! (write-then-rename, so a failure never leaves half a file), and only then does the app use it.
-//! What differs is the [`Document`] a file holds: its [`Format`] (JSON), its layout number, what a
-//! hand edit can get wrong, and whether the file is its owner's alone, as IP Camera's
-//! `cameras.json` is. A product's own crate keeps one store for each of its
-//! files (`ipcamera_core::config::ConfigStore`, `mdviewer_core::ConfigStore`), and says the rest
-//! through [`Stored`].
-//!
-//! These files hold what a user typed in, which the defaults cannot give back. So a store never
-//! overwrites a file it could not read:
-//!
-//! - A file that is not valid JSON is moved aside to `<name>.broken-<seconds>`, and the app starts
-//!   without it.
-//! - A file that cannot be read, cannot be moved aside, or was written by a newer version of the
-//!   app is used as far as it can be but never written. Every change is refused, saying why.
-//!
-//! Either way [`FileStore::problem`] says what happened, for the app to tell the user.
-//!
-//! **Two programs, one file.** Two programs can work on the same files (IP Camera's desktop app
-//! and its server), each with a copy of its own in memory. So a store remembers what the file
-//! looked like when it last read or wrote it (when it was written, and its size), and before every
-//! change it looks again: a file another program has written since is read first, and the change
-//! starts from that, never from the older copy, which would write over the other program's change.
-//! [`FileStore::refresh`] does the same with no change to make, for a program to learn what the
-//! other did. Looking costs one request for the file's details, and nothing is read while they are
-//! the same. A file that has changed and can't be read refuses that one change, saying why, and is
-//! left as it is. Two writes in one tick of the file system's clock that leave the file the same
-//! size look alike, so the second program can miss the first's change; a lock file held across the
-//! read and the rename would close that if it ever shows.
-//!
-//! [`sync`] is how every lock in the suite is taken, and [`Appearance`] and [`WindowState`] are
-//! what every product saves of its window (`window.rs`).
+//! A document saved in a file, written then renamed so a failure never leaves half a file.
+//! A store never overwrites a file it could not read, and rereads one another program wrote since;
+//! two writes in one tick of the file system's clock that leave the same size look alike.
 
 pub mod sync;
 mod window;
@@ -56,7 +23,7 @@ use crate::sync::LockExt;
 
 /// How a document is written to its file and read back.
 pub trait Format {
-    /// The format's name, for a message: "JSON".
+    /// The format's name: "JSON".
     const NAME: &'static str;
 
     /// The document `text` holds, or why it holds none, on one line.
@@ -66,7 +33,7 @@ pub trait Format {
     fn render<D: Serialize>(document: &D) -> Result<String, String>;
 }
 
-/// Every file the suite saves: `settings.json`, `projects.json` and the files in `data\settings`.
+/// The JSON format.
 pub struct Json;
 
 impl Format for Json {
@@ -76,7 +43,6 @@ impl Format for Json {
         serde_json::from_str(text).map_err(|error| error.to_string())
     }
 
-    /// Pretty, with a final newline, so the file reads well and diffs cleanly.
     fn render<D: Serialize>(document: &D) -> Result<String, String> {
         let mut text = serde_json::to_string_pretty(document).map_err(|error| error.to_string())?;
         text.push('\n');
@@ -85,37 +51,27 @@ impl Format for Json {
 }
 
 /// What a store keeps in its file: the whole file, as one value.
-///
-/// Like a C# interface whose members have default bodies: a document names its format and
-/// overrides only what it does differently.
 pub trait Document: Clone + Default + PartialEq + Serialize + DeserializeOwned {
     /// How the file is written.
     type Format: Format;
 
-    /// The layout this build writes. A file with a higher number came from a newer app. A document
-    /// without a layout number leaves this at 0.
+    /// The layout this build writes; a file with a higher number came from a newer app.
     const VERSION: u32 = 0;
 
-    /// Whether the file is for its owner's eyes only, as one holding passwords is. On Unix it is
-    /// written readable and writable by its owner alone (mode 0600). Windows has no such mode: a
-    /// file there takes its folder's permissions, and what must stay secret is encrypted before it
-    /// reaches the document.
+    /// Whether the file is its owner's alone (0600 on Unix); on Windows, secrets come encrypted.
     const OWNER_ONLY: bool = false;
 
-    /// The layout number the document carries, for one that carries one. A file without it reads
-    /// as 0.
+    /// The document's layout number, for one that carries one.
     fn version_mut(&mut self) -> Option<&mut u32> {
         None
     }
 
-    /// Repairs what a hand edit can get wrong, such as a missing or repeated id. Returns whether
-    /// anything changed.
+    /// Repairs what a hand edit can get wrong, such as a repeated id; whether anything changed.
     fn repair(&mut self) -> bool {
         false
     }
 
-    /// What the user reads when the file at `path` could not be read, because of `error`, and was
-    /// moved to `moved`.
+    /// What the user reads when the file could not be read and was moved to `moved`.
     fn moved_problem(path: &Path, error: &str, moved: &Path) -> String {
         format!(
             "{} could not be read ({error}). It was moved to {} and the app started without it.",
@@ -124,8 +80,7 @@ pub trait Document: Clone + Default + PartialEq + Serialize + DeserializeOwned {
         )
     }
 
-    /// What the user reads when the file at `path` is used as far as it can be but never written,
-    /// because `reason`.
+    /// What the user reads when the file is used but never written, because `reason`.
     fn kept_problem(path: &Path, reason: &str) -> String {
         format!(
             "{} is shown but will not be changed, because {reason}.",
@@ -137,8 +92,7 @@ pub trait Document: Clone + Default + PartialEq + Serialize + DeserializeOwned {
 /// Something a store could not do. The message says what, and names the file where there is one.
 #[derive(Debug)]
 pub enum StoreError {
-    /// The file could not be read, when the app started or after another program changed it, so
-    /// writing it would overwrite something the app never saw.
+    /// The file could not be read, so writing it would overwrite something the app never saw.
     ReadOnly {
         /// The store's file.
         path: PathBuf,
@@ -220,38 +174,26 @@ impl std::error::Error for WriteError {
 pub struct FileStore<D> {
     path: PathBuf,
     document: Mutex<D>,
-    /// Held from taking the copy to adopting it, so two changes can never start from the same copy
-    /// and lose one, or write the same temporary file at once. Readers never wait for it, only for
-    /// `document`, which is never held while the disk is busy.
+    /// Held from taking the copy to adopting it, so two changes never start from one copy.
+    /// Readers wait only for `document`, which is never held while the disk is busy.
     writing: Mutex<()>,
-    /// Bumped by every change that was saved, so the app can tell when to look again.
     revision: AtomicU64,
-    /// Why the file must not be written, when it must not.
     read_only: Option<String>,
-    /// What went wrong opening the file, for the app to tell the user.
     problem: Option<String>,
-    /// Whether there was no file when the store opened: how a first launch is told apart.
     was_missing: bool,
-    /// Whether changes are written to `path`. A store with no file keeps them in memory only.
     on_disk: bool,
-    /// What the file looked like when this store last read or wrote it; `None` when there was no
-    /// file. A file that looks different now was written by another program.
     seen: Mutex<Option<Look>>,
 }
 
-/// What tells one writing of a file from the next without reading it: when it was written, and
-/// its size.
 type Look = (SystemTime, u64);
 
-/// How the file at `path` looks now; `None` when there is no file there.
 fn look_at(path: &Path) -> Option<Look> {
     let metadata = fs::metadata(path).ok().filter(fs::Metadata::is_file)?;
     Some((metadata.modified().ok()?, metadata.len()))
 }
 
 impl<D: Document> FileStore<D> {
-    /// Opens the file at `path`. A missing file starts the default document and writes nothing
-    /// until the first change.
+    /// Opens the file at `path`; a missing one is written only by the first change.
     pub fn open(path: PathBuf) -> Self {
         let mut store = Self {
             path,
@@ -264,12 +206,11 @@ impl<D: Document> FileStore<D> {
             Err(error) if error.kind() == io::ErrorKind::NotFound => store.was_missing = true,
             Err(error) => store.refuse_writes(format!("it could not be read ({error})")),
         }
-        // After any repair was saved, so the store's own write isn't taken for another program's.
+        // After any repair's save, so that write isn't taken for another program's.
         *store.seen.locked_mut() = look_at(&store.path);
         store
     }
 
-    /// Takes what the file held, or deals with it not being usable.
     fn adopt_file(&mut self, text: &str) {
         match D::Format::parse::<D>(text) {
             Ok(mut document) => {
@@ -277,14 +218,13 @@ impl<D: Document> FileStore<D> {
                 if version > D::VERSION {
                     *self.document.locked_mut() = document;
                     self.refuse_writes(format!(
-                        "it was saved by a newer version of IP Camera (layout {version})"
+                        "it was saved by a newer version of the app (layout {version})"
                     ));
                     return;
                 }
                 if document.repair() {
                     stamp(&mut document);
-                    // Saved now so new ids stay the same from launch to launch. If this fails, the
-                    // next change saves them instead.
+                    // Saved now so new ids stay put; a failed save is left to the next change.
                     let _ = save(&self.path, &document);
                 }
                 *self.document.locked_mut() = document;
@@ -299,8 +239,7 @@ impl<D: Document> FileStore<D> {
         }
     }
 
-    /// A store with no file: it starts with the default document, and its changes are kept in
-    /// memory only, gone when the app closes. The web preview's, which has no disk to save to.
+    /// A store with no file, starting with the default document; changes stay in memory.
     pub fn in_memory() -> Self {
         Self {
             path: PathBuf::new(),
@@ -315,8 +254,7 @@ impl<D: Document> FileStore<D> {
         }
     }
 
-    /// A store with no file that starts with `document`: a copy of one kept elsewhere, such as the
-    /// server's, whose changes are kept in memory only.
+    /// A store with no file that starts with `document`; changes stay in memory.
     pub fn holding(document: D) -> Self {
         let mut store = Self::in_memory();
         *store.document.locked_mut() = document;
@@ -358,14 +296,8 @@ impl<D: Document> FileStore<D> {
         self.read(D::clone)
     }
 
-    /// Makes `change` to a copy of the document, saves the copy, then uses it.
-    ///
-    /// Nothing is written, and the revision stays as it was, when `change` fails or changes
-    /// nothing. When the write fails the app keeps the document it had, so it is never using
-    /// something that is not on disk.
-    ///
-    /// The copy is of the file as it is now: one another program has written since this store
-    /// last looked is read first, so `change` is made to what that program saved.
+    /// Makes `change` to a copy of the file as it is now, saves the copy, then uses it.
+    /// Nothing is written when `change` fails or changes nothing.
     pub fn update<R>(
         &self,
         change: impl FnOnce(&mut D) -> Result<R, StoreError>,
@@ -399,21 +331,14 @@ impl<D: Document> FileStore<D> {
         Ok(())
     }
 
-    /// Takes the file as it is now when another program has written it since this store last
-    /// looked, and returns whether that changed anything, bumping the revision when it did. A
-    /// store with no file, or one that never writes its file, has nothing to take.
+    /// Takes another program's change to the file, if any; whether that changed anything.
     pub fn refresh(&self) -> bool {
         let _writing = self.writing.locked();
-        // A file that can't be read just now is looked at again the next time.
+        // An unreadable file is looked at again next time.
         self.catch_up().unwrap_or(false)
     }
 
-    /// Reads the file again when it no longer looks as it did when this store last read or wrote
-    /// it. Returns whether the document changed. The caller holds `writing`.
-    ///
-    /// A file that is gone is left gone: the store keeps what it has, and its next change writes
-    /// the file again. One that can't be read, or that a newer version of the app wrote, is an
-    /// error, so the change that asked is refused rather than written over it.
+    /// Rereads the file when it changed since this store last looked. The caller holds `writing`.
     fn catch_up(&self) -> Result<bool, StoreError> {
         if !self.on_disk || self.read_only.is_some() {
             return Ok(false);
@@ -445,14 +370,13 @@ impl<D: Document> FileStore<D> {
         let version = document.version_mut().map_or(0, |version| *version);
         if version > D::VERSION {
             return Err(unread(format!(
-                "it was saved by a newer version of IP Camera (layout {version})"
+                "it was saved by a newer version of the app (layout {version})"
             )));
         }
-        // In memory only: the next change saves the repair with it.
+        // In memory only: the next change saves the repair.
         document.repair();
 
-        // Had the other program written again between the look and the read, the file looks
-        // different from `now` the next time too, and is read once more.
+        // A write between the look and the read makes the file look different next time too.
         *self.seen.locked() = now;
         let changed = {
             let mut current = self.document.locked();
@@ -468,7 +392,6 @@ impl<D: Document> FileStore<D> {
         Ok(changed)
     }
 
-    /// Writes `document` to the file, for a store that has one.
     fn save(&self, document: &D) -> Result<(), StoreError> {
         if self.on_disk {
             save(&self.path, document)?;
@@ -477,7 +400,6 @@ impl<D: Document> FileStore<D> {
         Ok(())
     }
 
-    /// Refuses a write to a file the app could not read.
     fn writable(&self) -> Result<(), StoreError> {
         match &self.read_only {
             Some(reason) => Err(StoreError::ReadOnly {
@@ -489,10 +411,7 @@ impl<D: Document> FileStore<D> {
     }
 }
 
-/// A store over one file: what is the file's rather than the store's own.
-///
-/// Each store says which [`FileStore`] it keeps and gets the rest from here, the way a C#
-/// interface with default methods would hand them out.
+/// A store over one file.
 pub trait Stored {
     /// What the file holds.
     type Doc: Document;
@@ -505,7 +424,7 @@ pub trait Stored {
         self.file().path()
     }
 
-    /// What went wrong opening the file, for the app to tell the user.
+    /// What went wrong opening the file.
     fn problem(&self) -> Option<&str> {
         self.file().problem()
     }
@@ -515,13 +434,12 @@ pub trait Stored {
         self.file().was_missing()
     }
 
-    /// Bumped by every saved change, so the app can tell when to look again.
+    /// Bumped by every saved change.
     fn revision(&self) -> u64 {
         self.file().revision()
     }
 
-    /// Takes what another program has saved in the file since this store last looked; whether
-    /// that changed anything. It reads a file, so it stays off a window's thread.
+    /// Takes another program's change, if any; it reads a file, so never on a window's thread.
     fn refresh(&self) -> bool {
         self.file().refresh()
     }
@@ -532,7 +450,6 @@ pub trait Stored {
     }
 }
 
-/// Marks `document` as written by this build.
 fn stamp<D: Document>(document: &mut D) {
     if let Some(version) = document.version_mut() {
         *version = D::VERSION;
@@ -544,9 +461,6 @@ fn save<D: Document>(path: &Path, document: &D) -> Result<(), StoreError> {
     write_atomically(path, &text, D::OWNER_ONLY).map_err(StoreError::Write)
 }
 
-/// Write-then-rename, so a failure never leaves a half-written file behind. Every file the app
-/// saves goes through here. An `owner_only` file is its owner's alone on Unix
-/// ([`Document::OWNER_ONLY`]).
 fn write_atomically(path: &Path, text: &str, owner_only: bool) -> Result<(), WriteError> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(dir).map_err(|source| WriteError::CreateDir {
@@ -554,7 +468,6 @@ fn write_atomically(path: &Path, text: &str, owner_only: bool) -> Result<(), Wri
         source,
     })?;
 
-    // `settings.json.tmp`, `cameras.json.tmp`: the whole name plus `.tmp`.
     let mut temp_name = path.file_name().unwrap_or_default().to_os_string();
     temp_name.push(".tmp");
     let temp = path.with_file_name(temp_name);
@@ -569,9 +482,7 @@ fn write_atomically(path: &Path, text: &str, owner_only: bool) -> Result<(), Wri
     })
 }
 
-/// Writes `text` to `path`, readable by its owner alone on Unix when `owner_only`. The mode is set
-/// while the file is still empty, so its text is never readable by anyone else, even in a
-/// temporary file a failed save left behind with a wider mode.
+/// The mode is set while the file is empty, narrowing a leftover temporary file first.
 #[cfg(unix)]
 fn write_file(path: &Path, text: &str, owner_only: bool) -> io::Result<()> {
     use std::{
@@ -592,13 +503,11 @@ fn write_file(path: &Path, text: &str, owner_only: bool) -> io::Result<()> {
     file.write_all(text.as_bytes())
 }
 
-/// Writes `text` to `path`. Windows has no owner-only mode ([`Document::OWNER_ONLY`]).
 #[cfg(not(unix))]
 fn write_file(path: &Path, text: &str, _owner_only: bool) -> io::Result<()> {
     fs::write(path, text)
 }
 
-/// Renames an unreadable file to `<name>.broken-<seconds>`, keeping it for the user to look at.
 fn move_aside(path: &Path) -> io::Result<PathBuf> {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -620,7 +529,6 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// A small document of its own, so these tests are about the store and nothing else.
     #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
     #[serde(default)]
     struct Notes {
@@ -636,7 +544,6 @@ mod tests {
             Some(&mut self.version)
         }
 
-        /// Blank items are what a hand edit gets wrong here.
         fn repair(&mut self) -> bool {
             let before = self.items.len();
             self.items.retain(|item| !item.trim().is_empty());
@@ -644,7 +551,6 @@ mod tests {
         }
     }
 
-    /// The same with no layout number and nothing to repair: what `settings.json` is.
     #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
     #[serde(default)]
     struct Plain {
@@ -655,7 +561,6 @@ mod tests {
         type Format = Json;
     }
 
-    /// The same, for its owner's eyes only.
     #[cfg(unix)]
     #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
     #[serde(default)]
@@ -780,7 +685,6 @@ mod tests {
         assert_eq!(kept.len(), 1, "the broken file is kept beside it");
         assert_eq!(fs::read_to_string(kept[0].path()).unwrap(), broken);
 
-        // The store still works: the next change starts a new file.
         add(&store, "fresh").unwrap();
         assert_eq!(
             FileStore::<Notes>::open(folder.path().join("notes.json"))
@@ -814,7 +718,7 @@ mod tests {
     #[test]
     fn a_file_that_cannot_be_read_is_never_written() {
         let folder = TempDir::new().unwrap();
-        // A folder can't be read as text, which stands in for a locked or forbidden file.
+        // A folder stands in for a file that can't be read.
         fs::create_dir_all(folder.path().join("notes.json")).unwrap();
 
         let store = FileStore::<Notes>::open(folder.path().join("notes.json"));
@@ -879,7 +783,6 @@ mod tests {
         let server = FileStore::<Notes>::open(path.clone());
 
         add(&desktop, "from the desktop").unwrap();
-        // The server's copy is from before that: its change must start from the file.
         add(&server, "from the server, which is longer").unwrap();
         add(&desktop, "the desktop again").unwrap();
 
@@ -916,8 +819,7 @@ mod tests {
         let path = folder.path().join("notes.json");
         let store = FileStore::<Notes>::open(path.clone());
         add(&store, "kept").unwrap();
-        // A store tells writes apart by their time and size, and two writes in one tick of the
-        // file system's clock share a time, so the other program's file must differ in size.
+        // Writes in one clock tick share a time, so the other program's file must differ in size.
         let broken = "{ this is not json, and somebody is still typing away at it";
         assert_ne!(
             fs::metadata(&path).unwrap().len(),
@@ -934,7 +836,6 @@ mod tests {
         assert_eq!(store.current().items, ["kept"]);
         assert!(!store.refresh(), "and a refresh takes nothing from it");
 
-        // Once it reads again, the store carries on from what it holds.
         fs::write(&path, r#"{ "version": 2, "items": ["kept", "by hand"] }"#).unwrap();
         add(&store, "after").unwrap();
         assert_eq!(store.current().items, ["kept", "by hand", "after"]);
@@ -976,8 +877,7 @@ mod tests {
         add("first").unwrap();
         assert_eq!(mode(&path), 0o600);
 
-        // A temporary file a failed save left behind, readable by everyone, is narrowed before
-        // anything is written to it.
+        // A leftover temporary file readable by everyone is narrowed before anything is written.
         let temp = folder.path().join("secret.json.tmp");
         fs::write(&temp, "").unwrap();
         fs::set_permissions(&temp, fs::Permissions::from_mode(0o644)).unwrap();

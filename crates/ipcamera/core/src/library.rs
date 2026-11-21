@@ -1,22 +1,6 @@
-//! The cameras, their groups and the views together: the only way the app reaches them.
-//!
-//! Each is kept by a store of its own, private to this crate: `CameraStore`, `GroupStore` and
-//! `ViewStore`, each saving its own file in `data\settings`. The app never names them. Every read
-//! and change goes through [`Library`], so how they are saved can change without the app knowing.
-//! In C# terms, `Library` is a facade over three repositories.
-//!
-//! The stores know nothing of each other. A few things need more than one, and they live here:
-//!
-//! - deleting a camera, which also takes it out of every group and every view;
-//! - putting cameras in a group or a view's tile, which checks the cameras exist;
-//! - the groups as the sidebar shows them, listing only cameras that exist;
-//! - the first view, made when there is none, which shows the first cameras.
-//!
-//! The files can disagree: a crash between the writes of a delete, or a hand edit, can leave a
-//! group or a tile with a camera that is gone. `cameras.json` is what counts. An id for a missing
-//! camera is skipped by [`Library::tree`], [`Library::shown_tiles`] and [`Library::hidden_tiles`],
-//! and cleared out the next
-//! time the library opens, so nothing worse than a stale id can happen.
+//! The cameras, their groups and the views together, over three private stores: the only way to
+//! them. `cameras.json` is what counts: an id for a missing camera is skipped when read, and
+//! cleared out the next time the library opens.
 
 use std::path::PathBuf;
 
@@ -36,15 +20,13 @@ use crate::{
     view_store::ViewStore,
 };
 
-/// What the first launch calls the view it makes.
 const FIRST_VIEW: &str = "Default";
 
-/// The cameras, the groups and the views, whole: what the server sends a client that keeps a copy
-/// ([`Library::snapshot`], [`Library::from_snapshot`]).
+/// The cameras, the groups and the views, whole, for a client that keeps a copy.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Snapshot {
-    /// The library's revision when it was taken. A client that holds an older one is out of date.
+    /// The library's revision when it was taken.
     pub revision: u64,
     /// Every camera, in order.
     pub cameras: Vec<CameraConfig>,
@@ -55,8 +37,7 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// This snapshot with every camera's password taken out, and which cameras had one: what the
-    /// server sends a browser, which is never told a password.
+    /// This snapshot with every password taken out, for a client never told one.
     pub fn for_client(mut self) -> ClientCopy {
         let mut with_password = Vec::new();
         for camera in &mut self.cameras {
@@ -72,7 +53,7 @@ impl Snapshot {
     }
 }
 
-/// A [`Snapshot`] with no passwords in it, as a browser gets it ([`Snapshot::for_client`]).
+/// A [`Snapshot`] with no passwords in it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientCopy {
@@ -87,16 +68,11 @@ pub struct Library {
     cameras: CameraStore,
     groups: GroupStore,
     views: ViewStore,
-    /// What went wrong while opening, beyond what each store reports itself.
     problems: Vec<String>,
 }
 
 impl Library {
-    /// Opens `cameras.json`, `groups.json` and `views.json` in `dir`.
-    ///
-    /// A first launch starts with no cameras: an empty `cameras.json` and an empty `groups.json`
-    /// are created, ready to edit. When there is no `views.json`, a 2 × 2 view called "Default"
-    /// shows the first cameras, and is empty when there are none.
+    /// Opens `cameras.json`, `groups.json` and `views.json` in `dir`, making a first view if none.
     pub fn open(dir: impl Into<PathBuf>) -> Self {
         let dir = dir.into();
         let mut library = Self {
@@ -106,8 +82,7 @@ impl Library {
             problems: Vec::new(),
         };
 
-        // Only a convenience, for both: the first camera added, or the first change to a group,
-        // writes the file anyway.
+        // Failures ignored: the first change writes the file anyway.
         if library.cameras.was_missing() {
             let _ = library.cameras.create_file();
         }
@@ -118,10 +93,8 @@ impl Library {
             library.add_first_view();
         }
 
-        // Groups and views may list cameras deleted since, or never there after a hand edit. Only
-        // cleared out when `cameras.json` was there and read as it is: after a broken one every id
-        // would look unknown, and the groups would lose cameras the user can still bring back from
-        // the moved-aside file. `tree` and `shown_tiles` skip unknown ids either way.
+        // Only when `cameras.json` read cleanly: after a broken one every id would look unknown,
+        // and the groups would lose cameras the moved-aside file can still bring back.
         if !library.cameras.was_missing() && library.cameras.problem().is_none() {
             let known = library.cameras.ids();
             let _ = library.groups.prune(&known);
@@ -130,9 +103,7 @@ impl Library {
         library
     }
 
-    /// A library with no files: `cameras`, no groups, and the first view showing them, as a first
-    /// launch has. Its changes are kept in memory only, and gone when the app closes. It is the
-    /// web preview's, which has no disk to save to, and keeps every rule `open`'s does.
+    /// A library with no files: `cameras`, no groups and a first view, changed in memory only.
     pub fn in_memory(cameras: Vec<CameraConfig>) -> Self {
         let mut library = Self {
             cameras: CameraStore::in_memory(),
@@ -147,7 +118,7 @@ impl Library {
         library
     }
 
-    /// The cameras, groups and views as they are now, whole, for a client that keeps a copy.
+    /// The cameras, groups and views as they are now, whole.
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             revision: self.revision(),
@@ -157,11 +128,7 @@ impl Library {
         }
     }
 
-    /// A copy of `snapshot` with no files: the same cameras, groups and views, ids and all, with
-    /// every rule `open`'s library keeps. Its changes are kept in memory only. It is how the web
-    /// build holds the server's library: reads come from the copy at once, and changes go to the
-    /// server, which sends a new snapshot back. Unlike [`Library::in_memory`], no first view is
-    /// made: the snapshot's views are the ones there are.
+    /// A copy of `snapshot` with no files, changed in memory only; no first view is made.
     pub fn from_snapshot(snapshot: Snapshot) -> Self {
         Self {
             cameras: CameraStore::holding(snapshot.cameras),
@@ -171,7 +138,6 @@ impl Library {
         }
     }
 
-    /// Saves the first view: 2 × 2, called "Default", showing the first cameras.
     fn add_first_view(&mut self) {
         let layout = Layout::Four;
         let tiles = self
@@ -192,17 +158,13 @@ impl Library {
         Self::open(config.settings_dir())
     }
 
-    /// Bumped by every saved change to the cameras, the groups or the views, so the app can tell
-    /// when to look again.
+    /// Bumped by every saved change to the cameras, the groups or the views.
     pub fn revision(&self) -> u64 {
         self.cameras.revision() + self.groups.revision() + self.views.revision()
     }
 
-    /// Takes what another program has saved in the files since this library last read or wrote
-    /// them, and returns whether anything changed; [`revision`](Self::revision) has moved on when
-    /// it did. The desktop app and the server can share the files: each calls this every few
-    /// seconds to learn what the other did. A change made here never needs it, since every change
-    /// starts from the file as it is. It reads files, so it stays off a window's thread.
+    /// Takes what another program saved in the files since, returning whether anything changed.
+    /// It reads files, so keep it off the UI thread.
     pub fn refresh(&self) -> bool {
         let cameras = self.cameras.refresh();
         let groups = self.groups.refresh();
@@ -210,9 +172,7 @@ impl Library {
         cameras || groups || views
     }
 
-    // The cameras.
-
-    /// Every camera, entered once, in the order they are shown.
+    /// Every camera, in order.
     pub fn cameras(&self) -> Vec<CameraConfig> {
         self.cameras.list()
     }
@@ -222,23 +182,17 @@ impl Library {
         self.cameras.get(id)
     }
 
-    /// Replaces several cameras' settings in one save. A camera's id never changes, whatever its
-    /// settings say, and an unknown id changes none of them.
+    /// Replaces cameras' settings in one save, keeping their ids; an unknown id changes none.
     pub fn update_cameras(&self, cameras: Vec<(CameraId, CameraConfig)>) -> Result<(), StoreError> {
         self.cameras.update_many(cameras)
     }
 
-    /// Moves camera `id` to `index` among the cameras, which is the order [`cameras`](Self::cameras)
-    /// lists them in and the sidebar's All cameras shows. An index past the end moves it to the
-    /// end. Groups keep their own order.
+    /// Moves camera `id` to `index` among the cameras, or to the end past it.
     pub fn move_camera(&self, id: &CameraId, index: usize) -> Result<(), StoreError> {
         self.cameras.move_camera(id, index)
     }
 
-    // The groups. `tree` lists them.
-
-    /// Adds a group at the end with `cameras` in it, in that order, in one save, and returns its
-    /// id. Rejects a blank name, or a camera that doesn't exist, adding nothing.
+    /// Adds a group at the end with `cameras`, which must exist, and returns its id.
     pub fn add_group(&self, name: &str, cameras: Vec<CameraId>) -> Result<GroupId, StoreError> {
         self.check_cameras(&cameras)?;
         self.groups.add_with(name, cameras)
@@ -249,8 +203,7 @@ impl Library {
         self.groups.rename(id, name)
     }
 
-    /// Gives group `id` a name and `cameras`, in that order, in one save. Rejects a blank name, or
-    /// a camera that doesn't exist, changing nothing.
+    /// Gives group `id` a name and `cameras`, which must exist, in one save.
     pub fn update_group(
         &self,
         id: &GroupId,
@@ -261,14 +214,12 @@ impl Library {
         self.groups.update(id, name, cameras)
     }
 
-    /// Removes every group in `ids` in one save. Their cameras stay, in the list and in every other
-    /// group. An unknown group removes none.
+    /// Removes every group in `ids` in one save; an unknown group removes none.
     pub fn remove_groups(&self, ids: &[GroupId]) -> Result<(), StoreError> {
         self.groups.remove_many(ids)
     }
 
-    /// Moves group `id` to `index` among the groups, as the sidebar lists them. An index past the
-    /// end moves it to the end.
+    /// Moves group `id` to `index` among the groups, or to the end past it.
     pub fn move_group(&self, id: &GroupId, index: usize) -> Result<(), StoreError> {
         self.groups.move_group(id, index)
     }
@@ -283,9 +234,7 @@ impl Library {
         self.groups.groups_of(camera)
     }
 
-    // The views. `shown_tiles` says what each tile shows.
-
-    /// Every view, in the order they are shown.
+    /// Every view, in order.
     pub fn views(&self) -> Vec<CameraView> {
         self.views.list()
     }
@@ -300,19 +249,17 @@ impl Library {
         self.views.rename(id, name)
     }
 
-    /// Removes view `id`. Its cameras are not touched.
+    /// Removes view `id`.
     pub fn remove_view(&self, id: &ViewId) -> Result<(), StoreError> {
         self.views.remove(id)
     }
 
-    /// Divides view `id` as `layout`, each tile keeping its camera. Tiles the layout has no room
-    /// for keep their cameras, for when the view has room for them again.
+    /// Divides view `id` as `layout`, each tile keeping its camera.
     pub fn set_layout(&self, id: &ViewId, layout: Layout) -> Result<(), StoreError> {
         self.views.set_layout(id, layout)
     }
 
-    /// Moves, resizes, adds and removes view `id`'s tiles at once
-    /// ([`ViewStore::arrange`](crate::view_store::ViewStore::arrange)).
+    /// Rearranges view `id`'s tiles at once.
     pub fn arrange_tiles(&self, id: &ViewId, tiles: &[ArrangedTile]) -> Result<(), StoreError> {
         self.views.arrange(id, tiles)
     }
@@ -322,19 +269,13 @@ impl Library {
         self.views.set_fit(id, fit)
     }
 
-    /// Sets how the picture fills tile `index` of view `id`, which must show a camera
-    /// ([`ViewStore::set_tile_fit`](crate::view_store::ViewStore::set_tile_fit)).
+    /// Sets how the picture fills tile `index` of view `id`, which must show a camera.
     pub fn set_tile_fit(&self, id: &ViewId, index: usize, fit: Fit) -> Result<(), StoreError> {
         self.views.set_tile_fit(id, index, fit)
     }
 
-    // What needs more than one store.
-
-    /// Adds a camera to the list and, when `group` is given, to that group as well.
-    ///
-    /// The group is checked first, so an unknown one adds nothing. If putting the camera in the
-    /// group then fails, the camera is still saved, under All cameras, and the error says why it
-    /// is not in the group.
+    /// Adds a camera, and to `group` when given. An unknown group adds nothing; if joining it then
+    /// fails, the camera is still saved.
     pub fn add_camera(
         &self,
         camera: CameraConfig,
@@ -359,7 +300,6 @@ impl Library {
         self.groups.add_camera(group, camera)
     }
 
-    /// Says which of `cameras` doesn't exist, if one doesn't: a group lists only cameras that do.
     fn check_cameras(&self, cameras: &[CameraId]) -> Result<(), StoreError> {
         match cameras.iter().find(|camera| !self.cameras.contains(camera)) {
             Some(camera) => Err(not_found(camera)),
@@ -367,8 +307,7 @@ impl Library {
         }
     }
 
-    /// Shows `tile` in tile `index` of view `view`: a camera, which must exist, and which of its
-    /// streams. `None` empties it.
+    /// Shows `tile`, whose camera must exist, in tile `index` of `view`; `None` empties it.
     pub fn show_in_tile(
         &self,
         view: &ViewId,
@@ -383,10 +322,8 @@ impl Library {
         self.views.set_tile(view, index, tile.cloned())
     }
 
-    /// Deletes a camera everywhere: from the camera list, then from every group and every view.
-    ///
-    /// A delete that stopped half way, with the camera gone but still listed in a group or a tile,
-    /// is finished by calling this again.
+    /// Deletes a camera from the list, then every group and view; calling it again finishes a
+    /// delete that stopped half way.
     pub fn delete_camera(&self, id: &CameraId) -> Result<(), StoreError> {
         match self.cameras.remove(id) {
             Ok(()) | Err(StoreError::NotFound(_)) => {}
@@ -396,18 +333,16 @@ impl Library {
         self.views.forget_camera(id)
     }
 
-    /// What each tile view `view` shows holds, leaving out cameras that are gone.
+    /// What each tile `view` shows holds, leaving out cameras that are gone.
     pub fn shown_tiles(&self, view: &ViewId) -> Option<Vec<Option<ViewTile>>> {
         Some(self.known_only(self.views.get(view)?.shown_tiles()))
     }
 
-    /// What each tile of view `view` past its cells holds, kept for when the view has room for
-    /// them again, leaving out cameras that are gone.
+    /// The tiles kept past `view`'s cells, leaving out cameras that are gone.
     pub fn hidden_tiles(&self, view: &ViewId) -> Option<Vec<Option<ViewTile>>> {
         Some(self.known_only(self.views.get(view)?.hidden_tiles()))
     }
 
-    /// `tiles` with the cameras that are gone taken out.
     fn known_only(&self, mut tiles: Vec<Option<ViewTile>>) -> Vec<Option<ViewTile>> {
         let known = self.cameras.ids();
         for tile in &mut tiles {
@@ -421,7 +356,7 @@ impl Library {
         tiles
     }
 
-    /// The groups in order, as the sidebar shows them: each lists only cameras that exist.
+    /// The groups in order, each listing only cameras that exist.
     pub fn tree(&self) -> Vec<CameraGroup> {
         let known = self.cameras.ids();
         let mut groups = self.groups.list();
@@ -431,7 +366,7 @@ impl Library {
         groups
     }
 
-    /// Everything that went wrong opening the library, for the app to tell the user once.
+    /// Everything that went wrong opening the library.
     pub fn problems(&self) -> Vec<String> {
         self.cameras
             .problem()
@@ -712,7 +647,6 @@ mod tests {
         let x = library.add_group("X", Vec::new()).unwrap();
         let a = library.add_camera(named("A"), Some(&x)).unwrap();
 
-        // As if a delete stopped half way: gone from the list, still in the group's file.
         library.cameras.remove(&a).unwrap();
 
         assert!(library.tree()[0].cameras.is_empty());

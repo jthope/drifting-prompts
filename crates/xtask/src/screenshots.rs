@@ -1,38 +1,6 @@
-//! `cargo screenshots`: the READMEs' screenshots of each app, light and dark, into
-//! `assets/screenshots/`. `cargo screenshots ipcamera` or `cargo screenshots mdviewer` takes one
-//! app's.
-//!
-//! Each app opens once, in a real window on this machine: its development build under
-//! `nsh test --target windows`, running a test this writes to the app's `.nsh/test/` and deletes
-//! once the app closes ([`test_file`]), with a time limit of its own. The app goes through its
-//! screens in turn ([`Screen`]), taking each one's picture in the mode it is in, then switching
-//! mode and taking the other, so the mode switches once a screen. IP Camera's screens are its view,
-//! its dashboard, its events and its camera form's network search; it opens on the view, so its
-//! cameras are live before it leaves for the other pages, since a camera no page has shown stays
-//! disconnected. The app opens as it would the first time, in its default appearance (System, no
-//! texture, no elevation, and the Default themes), on made-up content:
-//!
-//! - IP Camera shows four cameras in a 2 × 2 view. Their pictures are the SVGs in
-//!   `assets/screenshots/cameras/`, each named for its camera, which `resvg` renders to PNGs in
-//!   `target/screenshots/cameras/` and the test pattern shows in place of its own
-//!   (`IPCAMERA_SOURCE=pattern` with `IPCAMERA_PICTURES`,
-//!   `crates/ipcamera/app/src/camera/pattern.rs`), so nothing reaches a camera. Its snapshots and
-//!   videos folders are new ones in `target/screenshots/ipcamera-media/`, holding two weeks of
-//!   made-up events' files for the dashboard and the events page, and its event log theirs
-//!   ([`dashboard`]). The network search lists [`FOUND`], from `target/screenshots/found.json`
-//!   (`IPCAMERA_FOUND`), and searches nothing.
-//! - Markdown Viewer shows the folders in `assets/screenshots/projects/` as its projects,
-//!   `Weathervane`'s sensor guide in front, raw and rendered side by side, with every panel
-//!   showing, in a larger window than IP Camera's to give them the room.
-//!
-//! The windows open where you are working, and a pointer resting on one shows what it hovers
-//! (a tile's toolbar): keep it away from them until the command ends.
-//!
-//! A development build keeps its settings beside it in `target\debug`, your own cameras, events
-//! and projects among them. This sets those files aside in `target/screenshots/kept/`, writes the
-//! made-up ones in their place, and puts yours back when the app closes, whatever happened, then
-//! deletes the copies: IP Camera's `cameras.json` holds the cameras' passwords. A run stopped
-//! before it could (its console closed) leaves them there, and the next run puts them back first.
+//! `cargo screenshots`: each app's README screenshots, light and dark, in a real window on made-up
+//! content. The development build's own settings (IP Camera's hold the cameras' passwords) are set
+//! aside and put back whatever happens; a run stopped first leaves them for the next to put back.
 
 mod dashboard;
 
@@ -49,32 +17,24 @@ use serde_json::{Value, json};
 
 use crate::{IPCAMERA, MDVIEWER, NO_NSH, nsh, repository_root, runtime};
 
-/// Each app's window size, in points: Markdown Viewer's larger, for Split's two sides with a map
-/// each beside the files panel and the outline.
 const IPCAMERA_SIZE: (u32, u32) = (1600, 900);
 const MDVIEWER_SIZE: (u32, u32) = (1920, 1080);
 
-/// How long, in milliseconds, an app is given to show its content before the first picture.
 const SETTLE: u32 = 5000;
 
-/// How long, in milliseconds, each app is given to draw itself again after its mode switches:
-/// Markdown Viewer's file takes more than two seconds to change.
+/// Milliseconds to redraw after a mode switch: Markdown Viewer's file takes over two seconds.
 const IPCAMERA_SWITCH: u32 = 2000;
 const MDVIEWER_SWITCH: u32 = 6000;
 
-/// How long, in milliseconds, a screen is given to draw in once its steps are done: the
-/// dashboard's charts grow into place.
+/// Milliseconds a screen is given once its steps are done: the dashboard's charts grow in.
 const DRAW_IN: u32 = 3000;
 
-/// How long, in milliseconds, the test may take before nsh fails it: well past what the waits add
-/// up to.
 const TIME_LIMIT: u32 = 180_000;
 
-/// The test this writes in an app's `.nsh/test/`, the folder nsh writes its own in.
 const TEST_FILE: &str = "screenshots.test.ts";
 
-/// IP Camera's screens, from the view it opens on. The search is the view's, gone back to from the
-/// events, and is last since its window stays open.
+/// The view comes first: a camera no page has shown stays disconnected. The search's window
+/// stays open, so it goes last.
 const IPCAMERA_SCREENS: &[Screen] = &[
     Screen {
         steps: &[],
@@ -101,14 +61,12 @@ const IPCAMERA_SCREENS: &[Screen] = &[
     },
 ];
 
-/// Markdown Viewer's one screen, the project it opens on.
 const MDVIEWER_SCREENS: &[Screen] = &[Screen {
     steps: &[],
     shots: ["mdviewer-light", "mdviewer-dark"],
 }];
 
-/// IP Camera's cameras: each one's name, which its picture in `cameras/` is named for, and a
-/// made-up address its tile shows.
+/// Each camera's name, which names its picture in `cameras/`, and its made-up address.
 const CAMERAS: [(&str, &str); 4] = [
     ("Front door", "192.168.1.21"),
     ("Driveway", "192.168.1.22"),
@@ -116,9 +74,7 @@ const CAMERAS: [(&str, &str); 4] = [
     ("Side gate", "192.168.1.24"),
 ];
 
-/// What IP Camera's network search finds: the four cameras, and two devices not added yet, one of
-/// them found by its video alone. Each is its address, then its ONVIF port, its name and its model
-/// for one with ONVIF, and what else it says of itself.
+/// Address, ONVIF port, name and model (for one with ONVIF), and what else it says of itself.
 const FOUND: [(&str, Option<u16>, &str, &str, &str); 6] = [
     (
         "192.168.1.21",
@@ -158,16 +114,13 @@ const FOUND: [(&str, Option<u16>, &str, &str, &str); 6] = [
     ("192.168.1.40", None, "", "", "Video over RTSP"),
 ];
 
-/// How wide a thumbnail is, as `crates/ipcamera/storage` makes them.
+/// As wide as `crates/ipcamera/storage` makes thumbnails.
 const THUMBNAIL_WIDTH: u32 = 480;
 
-/// The view IP Camera opens on.
 const HOME_VIEW: &str = "8d2e4f60-7a1b-4c3d-8e5f-6a7b8c9d0e01";
 
-/// Markdown Viewer's projects, folders of `projects/`, the first one open.
 const PROJECTS: [&str; 3] = ["Weathervane", "Garden journal", "Recipes"];
 
-/// `cargo screenshots`, for both apps or the one named.
 pub fn take(arguments: Vec<String>) -> Result<ExitCode> {
     let products: &[&str] = match arguments.as_slice() {
         [] => &[IPCAMERA, MDVIEWER],
@@ -216,8 +169,6 @@ pub fn take(arguments: Vec<String>) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// An app's run: the settings it opens on, the environment it runs in, its window's size, how
-/// long it is given to draw itself again after its mode switches, and its screens, in order.
 struct Run {
     files: Vec<(PathBuf, Value)>,
     environment: Vec<(&'static str, OsString)>,
@@ -226,17 +177,12 @@ struct Run {
     screens: &'static [Screen],
 }
 
-/// One screen of an app: the steps that go there from the screen before, each a press with what
-/// shows once it was heard (both as nsh's tests find them: `label:Events`, `text:…`, `id:…`), and
-/// its two pictures, light then dark, named as they are in `assets/screenshots/` without the
-/// `.png`.
+/// Each step is a press and what then shows; the shots are light then dark, without `.png`.
 struct Screen {
     steps: &'static [(&'static str, &'static str)],
     shots: [&'static str; 2],
 }
 
-/// Runs `product`'s app on `run`'s files in place of its own settings, and takes the run's
-/// pictures into `assets`.
 fn shoot(root: &Path, product: &str, assets: &Path, work: &Path, run: &Run) -> Result<()> {
     let app = root.join("crates").join(product).join("app");
     let debug = app.join("target").join("debug");
@@ -276,15 +222,13 @@ fn shoot(root: &Path, product: &str, assets: &Path, work: &Path, run: &Run) -> R
     }
 }
 
-/// What a run sets aside of an app's settings in `folder`: a copy of each file it writes over in
-/// `debug`, or, for one that wasn't there, an empty `<name>.absent`.
+/// A copy of each file in `debug` it writes over, or an empty `<name>.absent` for one that wasn't.
 struct Aside {
     debug: PathBuf,
     folder: PathBuf,
 }
 
 impl Aside {
-    /// Sets the files `names` aside. Should a copy fail, puts back the ones already made.
     fn set(&self, names: &[&Path]) -> Result<()> {
         let copied = names.iter().try_for_each(|name| {
             let from = self.debug.join(name);
@@ -303,7 +247,6 @@ impl Aside {
         Ok(())
     }
 
-    /// Puts the files `names` back as they were, and deletes the folder of copies.
     fn put_back(&self, names: &[&Path]) -> Result<()> {
         for name in names {
             let kept = self.folder.join(name);
@@ -322,7 +265,7 @@ impl Aside {
             }
         }
         fs::remove_dir_all(&self.folder)?;
-        // The folder all apps' copies go in, once it holds none.
+        // The shared `kept` folder, once it is empty.
         if let Some(kept) = self.folder.parent() {
             let _ = fs::remove_dir(kept);
         }
@@ -330,14 +273,12 @@ impl Aside {
     }
 }
 
-/// The note that `file` wasn't there.
 fn absent(file: &Path) -> PathBuf {
     let mut name = file.as_os_str().to_owned();
     name.push(".absent");
     PathBuf::from(name)
 }
 
-/// Writes each of `files` under `debug`, as JSON.
 fn write_all(debug: &Path, files: &[(PathBuf, Value)]) -> Result<()> {
     for (name, value) in files {
         let path = debug.join(name);
@@ -348,8 +289,6 @@ fn write_all(debug: &Path, files: &[(PathBuf, Value)]) -> Result<()> {
     Ok(())
 }
 
-/// The test `nsh test` runs for `run`: the app's `App.tsx` opened, then [`steps`], within
-/// [`TIME_LIMIT`].
 fn test_file(app: &Path, assets: &Path, run: &Run) -> String {
     format!(
         "// Made by `cargo screenshots` (`crates/xtask/src/screenshots.rs`), which deletes it once \
@@ -365,14 +304,8 @@ fn test_file(app: &Path, assets: &Path, run: &Run) -> String {
     )
 }
 
-/// The steps the app takes for `run`: its size, then each screen's steps, its picture in the mode
-/// the app is in, the switch to the other mode and its picture there, into `assets`. The first
-/// screen starts light, the next dark, and so on, so the mode switches once a screen.
-///
-/// nsh opens it at a phone's width before these steps size it, and narrower than 640 points an
-/// app hides its sidebar until it is asked to show it again. A press can go unheard just after a
-/// page shows, so each is pressed until what it shows is there, and the screen is given time to
-/// draw in.
+/// nsh opens the app at a phone's width, where it hides its sidebar, before this sizes it.
+/// A press can go unheard just after a page shows, so each repeats until what it shows is there.
 fn steps(assets: &Path, run: &Run) -> String {
     let (width, height) = run.size;
     let mut steps = format!(
@@ -407,7 +340,6 @@ fn steps(assets: &Path, run: &Run) -> String {
     steps
 }
 
-/// `path` as a JavaScript string, with forward slashes.
 fn script_string(path: &Path) -> String {
     let path = path
         .to_string_lossy()
@@ -416,9 +348,7 @@ fn script_string(path: &Path) -> String {
     format!("\"{path}\"")
 }
 
-/// Writes `test` in `app`'s `.nsh/test/` and runs it there in a real window, under
-/// `nsh test --target windows` in `run`'s environment, then deletes it. Ctrl+C reaches nsh too, and
-/// this waits for it to close the app, so the settings are put back after.
+/// On Ctrl+C this waits for nsh to close the app, so the settings are put back after it.
 fn run_test(root: &Path, product: &str, app: &Path, test: &str, run: &Run) -> Result<()> {
     let folder = app.join(".nsh").join("test");
     let file = folder.join(TEST_FILE);
@@ -462,8 +392,6 @@ fn run_test(root: &Path, product: &str, app: &Path, test: &str, run: &Run) -> Re
     ran
 }
 
-/// Renders each camera's SVG in `assets/cameras/` to a PNG in `work/cameras/`, the folder it
-/// returns, and to a thumbnail in its `thumbnails/` for the snapshots and videos.
 fn render_cameras(assets: &Path, work: &Path) -> Result<PathBuf> {
     let pictures = work.join("cameras");
     fs::create_dir_all(pictures.join("thumbnails"))?;
@@ -484,7 +412,6 @@ fn render_cameras(assets: &Path, work: &Path) -> Result<PathBuf> {
     Ok(pictures)
 }
 
-/// `resvg` rendering `svg` to `png`, with `options`.
 fn resvg(svg: &Path, png: &Path, options: &[&str]) -> Result<()> {
     let status = std::process::Command::new("resvg")
         .args(options)
@@ -501,8 +428,7 @@ fn resvg(svg: &Path, png: &Path, options: &[&str]) -> Result<()> {
     }
 }
 
-/// Writes [`FOUND`] to `work/found.json` as `ipcamera_core::FoundCamera`s, for IP Camera's network
-/// search, and returns the file.
+/// Writes [`FOUND`] as `ipcamera_core::FoundCamera`s to `work/found.json`.
 fn write_found(work: &Path) -> Result<PathBuf> {
     let found: Vec<Value> = FOUND
         .iter()
@@ -524,9 +450,6 @@ fn write_found(work: &Path) -> Result<PathBuf> {
     Ok(file)
 }
 
-/// IP Camera's settings for the pictures: its four cameras, a 2 × 2 view of them it opens on, and
-/// another view for the sidebar to list, with its snapshots and videos in new folders of `work`
-/// holding two weeks of made-up events, made from the cameras' pictures in `pictures`.
 fn ipcamera_files(work: &Path, pictures: &Path) -> Result<Vec<(PathBuf, Value)>> {
     let id = |index: usize| format!("3b0f6c1e-2f4a-4d8e-9a51-1c2d3e4f5a{index:02}");
     let cell = |column: u8, row: u8, columns: u8, rows: u8| json!({ "column": column, "row": row, "column_span": columns, "row_span": rows });
@@ -549,13 +472,14 @@ fn ipcamera_files(work: &Path, pictures: &Path) -> Result<Vec<(PathBuf, Value)>>
         .collect();
     let events = dashboard::seed(&named, pictures, &snapshots, &videos)?;
 
-    let settings = Path::new("data").join("settings");
+    // Where the development host saves (`dp_ui::development_folder`).
+    let store = PathBuf::from(".nsh");
+    let settings = store.join("data").join("settings");
     Ok(vec![
         (
-            PathBuf::from("settings.json"),
+            store.join("settings.json"),
             json!({
-                // The appearance is the defaults' but for following the system, which the steps
-                // switch from light to dark.
+                // The default appearance but following the system, which the steps switch.
                 "ui": { "follow_system": true, "muted": true, "page": format!("view:{HOME_VIEW}") },
                 "window": window(IPCAMERA_SIZE),
                 "storage": {
@@ -569,7 +493,10 @@ fn ipcamera_files(work: &Path, pictures: &Path) -> Result<Vec<(PathBuf, Value)>>
             settings.join("cameras.json"),
             json!({ "version": 1, "cameras": cameras }),
         ),
-        (Path::new("data").join("events").join("events.json"), events),
+        (
+            store.join("data").join("events").join("events.json"),
+            events,
+        ),
         (
             settings.join("groups.json"),
             json!({ "version": 1, "groups": [] }),
@@ -599,9 +526,6 @@ fn ipcamera_files(work: &Path, pictures: &Path) -> Result<Vec<(PathBuf, Value)>>
     ])
 }
 
-/// Markdown Viewer's settings for the pictures: the folders of `assets/projects/`, the first open
-/// on its sensor guide in Split, with every panel showing: the files, a map beside each side, and
-/// the outline.
 fn mdviewer_files(assets: &Path) -> Vec<(PathBuf, Value)> {
     let folder = |name: &str| {
         assets
@@ -649,7 +573,6 @@ fn mdviewer_files(assets: &Path) -> Vec<(PathBuf, Value)> {
     ]
 }
 
-/// Where the window opens, at `size`.
 fn window((width, height): (u32, u32)) -> Value {
     json!({ "x": 160.0, "y": 90.0, "width": width, "height": height, "maximized": false })
 }

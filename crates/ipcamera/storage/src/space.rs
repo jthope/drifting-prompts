@@ -1,8 +1,6 @@
 //! How full the drive under a folder is, and whether a folder takes files at all.
 //!
-//! A folder is made only by the first file saved in it, so until then the nearest folder above it
-//! that exists stands in: it is on the same drive. Asking a drive can wait on it (a network drive, a
-//! disk spinning up), so callers ask off any thread that must stay quick.
+//! Asking a drive can wait on it (a network drive, a disk spinning up): never on a quick thread.
 
 use std::{fs, path::Path};
 
@@ -11,8 +9,7 @@ use crate::error::{Result, StorageError};
 /// How full the drive under a folder is.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Space {
-    /// The drive, as Explorer names it (`D:`), or the folder's root where there are no drive
-    /// letters (`/`).
+    /// The drive (`D:`), or the folder's root where there are no drive letters (`/`).
     pub drive: String,
     /// What is left to fill, in bytes.
     pub free: u64,
@@ -37,8 +34,7 @@ pub fn space_under(folder: &Path) -> Result<Space> {
     })
 }
 
-/// The drive `folder` is on as Explorer names it, `D:`, from the start of its path; its root
-/// (`\\server\share\`, `/`) where it has no drive letter.
+/// The drive `folder` is on (`D:`), or its root where it has no drive letter.
 pub fn drive_of(folder: &Path) -> String {
     let root = folder
         .ancestors()
@@ -52,8 +48,7 @@ pub fn drive_of(folder: &Path) -> String {
     }
 }
 
-/// Whether files can be saved in `folder`, which is made if it isn't there: a folder that can't
-/// take a file is refused when chosen, not when the next snapshot fails.
+/// Whether files can be saved in `folder`, which is made if it isn't there.
 pub fn check_writable(folder: &Path) -> Result<()> {
     let refused = |error: std::io::Error| {
         StorageError::io(format!("The app can't save in {}", folder.display()))(error)
@@ -88,7 +83,6 @@ mod tests {
     #[test]
     fn a_folder_the_app_cannot_write_to_is_refused_with_why() {
         let temp = TempDir::new().unwrap();
-        // A file where the folder should be stands in for a folder the app may not write to.
         let file = temp.path().join("taken");
         fs::write(&file, b"x").unwrap();
 

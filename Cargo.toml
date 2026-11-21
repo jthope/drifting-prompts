@@ -1,32 +1,3 @@
-# Drifting Prompts: every product's crates but its app, and what they share (`crates/dp/`).
-# A crate's package name carries its product, as Cargo needs every name here to differ.
-#
-# - `crates/dp/store`          a settings file saved safely (JSON, write-then-rename), and the
-#                              lock helper every crate uses. `crates/dp/ui`, what the apps share to
-#                              look alike, is built with nsh, so like the apps it is a workspace of
-#                              its own that `cargo` here does not build.
-#
-# IP Camera's app is built on two layers, and its server on them:
-#
-# - `crates/ipcamera/core`     settings, cameras, groups and views, RTSP addressing, the PTZ domain and
-#                              DVRIP. No UI and no media stack, so it builds and tests anywhere.
-# - `crates/ipcamera/dpapi`    Windows' DPAPI behind two safe calls, which `core` encrypts the
-#                              cameras' passwords with: the only `unsafe` in this workspace.
-# - `crates/ipcamera/media`    the glass2glass pipeline that turns RTSP into frames, sound and recordings,
-#                              or relays it compressed.
-# - `crates/ipcamera/storage`  snapshots and recordings on disk: their names, PNGs, thumbnails and
-#                              folders, for the app and the server alike.
-# - `crates/ipcamera/server`   `ipcamera-server`, which relays the cameras' live video to browsers.
-# - `crates/xtask`             the repository's own commands: `cargo ipcamera` runs the desktop app, and
-#                              `cargo ipcamera-web` the server and the web build.
-#
-# The app itself is `crates/ipcamera/app`, a Cargo workspace of its own that `cargo` here does not build.
-#
-# Markdown Viewer:
-#
-# - `crates/mdviewer/core`     its projects (folders of Markdown files) and settings, the files in a
-#                              project, and a file's outline. Its app is `crates/mdviewer/app`, a
-#                              workspace of its own like IP Camera's.
 [workspace]
 members = ["crates/dp/store", "crates/ipcamera/core", "crates/ipcamera/dpapi", "crates/ipcamera/media", "crates/ipcamera/storage", "crates/ipcamera/server", "crates/mdviewer/core", "crates/xtask"]
 resolver = "3"
@@ -36,142 +7,92 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 license = "MIT"
-# The highest floor in the graph, not a guess: glass2glass's `g2g-core` pulls in `loom`, whose
-# `generator` and `windows` 0.100 crates declare 1.95; glass2glass itself declares 1.92, and
-# edition 2024 needs 1.85. Verified with `cargo +1.95 check --workspace --all-targets`, and CI
-# re-checks it. `crates/ipcamera/app` has the same floor, for the same reason.
+# The highest `rust-version` any dependency declares (glass2glass's `loom`).
 rust-version = "1.95"
 
-# The decoders are optimized even in debug builds by `.cargo/config.toml`, which the app's own
-# workspace and the one nsh generates read too.
-
-# The server's password check (`crates/ipcamera/server/src/access.rs`): Argon2 is slow by design, and
-# unoptimized each check takes seconds, in the server's tests too. Here rather than beside the
-# decoders because only this workspace has it.
+# Argon2 is slow by design: unoptimized, each password check takes seconds, tests included.
 [profile.dev.package.argon2]
 opt-level = 3
 [profile.dev.package.blake2]
 opt-level = 3
 
-# `cargo clippy --workspace --all-targets` and `cargo fmt --all --check` are clean as they stand.
-# These keep them that way, and each crate opts in with `[lints] workspace = true`.
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
 
 [workspace.lints.clippy]
 all = "warn"
-# A module with children is `name.rs` beside a `name/` folder, never `name/mod.rs`. It is a
-# restriction lint, which `all` leaves out.
+# A restriction lint, which `all` leaves out.
 mod_module_files = "warn"
 
-# One version of each dependency for the whole workspace; crates write `.workspace = true`.
 [workspace.dependencies]
-# RTSP playback, all of it Rust that cargo builds: nothing to install, nothing to put on PATH.
-# glass2glass is a media pipeline whose RTSP source runs on retina; it converts to BGRA and plays
-# the sound. Only the elements every platform shares are turned on here. `crates/ipcamera/media` adds each
-# platform's audio output.
+# The media pipeline: RTSP, BGRA, sound. `ipcamera-media` adds each platform's audio output.
 g2g-core = "0.14"
 g2g-plugins = { version = "0.14", features = ["std", "rtsp", "aac-decode"] }
-# The media crate DESCRIBEs the camera itself before building a pipeline, because glass2glass
-# reports every RTSP failure as the same connect error, and a rejected password is the one failure
-# that must not be retried. This is the retina glass2glass uses, so it adds no second copy.
+# Our own DESCRIBE, to tell a rejected password apart; the version glass2glass uses.
 retina = "0.4"
-# Both codecs are decoded in Rust on every platform, by two crates from the same author.
-# glass2glass's Media Foundation element creates Windows' H.264 decoder with defaults that cost
-# about 160 MB per camera, and offers no way to change them.
+# H.264 decoding in Rust: Media Foundation's decoder costs about 160 MB a camera.
 rust_h264 = "0.6"
-# glass2glass's Media Foundation element cannot reach the H.265 decoder the Microsoft Store
-# installs, and Linux has no other H.265 decoder here.
+# H.265 decoding in Rust: Media Foundation can't reach the HEVC decoder the Store installs.
 rust_h265 = "0.4"
 # retina takes the stream address as a parsed URL.
 url = "2"
-# retina is async. Each camera session drives its pipeline on a current-thread runtime of its own.
+# retina is async: each camera session runs a current-thread runtime of its own.
 tokio = { version = "1", features = ["rt", "time", "macros"] }
 
-# Errors in the programs only (`ipcamera-server`'s `main.rs`, `xtask`), where a failure is printed
-# and the program ends. The library crates return error enums of their own instead.
+# Errors in the programs only (`ipcamera-server`'s `main.rs`, `xtask`).
 anyhow = "1"
 
-# The server: HTTP and the WebSocket each viewer watches a camera over. axum runs on the same tokio
-# as everything else, and its `ws` feature brings tungstenite 0.29.
+# The server's HTTP and the viewers' WebSocket.
 axum = { version = "0.8", features = ["ws"] }
-# The server's two pieces of plumbing from axum's own family: serving the packaged web build's
-# files (`fs`), and answering the web build across origins while it is worked on (`cors`).
+# Serving the web build's files (`fs`) and answering it across origins (`cors`).
 tower-http = { version = "0.6", features = ["fs", "cors"] }
-# `oneshot`, to answer one request with tower-http's file service: a snapshot or recording the
-# server located by name, range requests included. 0.5, the version axum brings.
+# `oneshot`, to answer a request with tower-http's file service; the version axum brings.
 tower = { version = "0.5", features = ["util"] }
-# Tests only: the server's tests watch a camera as a browser does, with tungstenite's blocking
-# client. 0.29, the version axum brings, so it adds no second copy.
+# Tests only: a blocking WebSocket client; the version axum brings.
 tungstenite = "0.29"
 
-# Reolink's HTTP API (`crates/ipcamera/core/src/reolink.rs`) over HTTPS, and Dahua's (`dahua_http.rs`): a
-# small blocking client, which suits the thread each camera's calls run on. Its rustls build compiles `ring`, which is C.
-# gzip is left out: the replies are a few hundred bytes. Not in the web build, where a browser makes
-# the requests.
+# Reolink's and Dahua's HTTP APIs, blocking on each camera's thread. Not in the web build.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
-# ONVIF (`crates/ipcamera/core/src/onvif.rs`): the client for its SOAP services, with both of its logins
-# (WS-Security's digest and HTTP's). Async on tokio, over reqwest. Pinned to one release: it is
-# young, and its minor versions have changed its API. Not in the web build.
+# ONVIF's SOAP services. Pinned exactly: its minor versions change its API.
 oxvif = "=0.17.0"
-# A Reolink's FLV streams (`crates/ipcamera/media/src/flv.rs`), which its web server sends as one long HTTP
-# response, read chunk by chunk on the session's tokio runtime. The version and features `oxvif`
-# already brings, so it adds no second copy.
+# A Reolink's FLV streams over HTTP; the version and features `oxvif` brings.
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
-# Dahua's XML API (`crates/ipcamera/core/src/dahua_http.rs`): reading its replies, a small read-only XML
-# parser with no dependencies of its own. Not in the web build.
+# Reading the replies of Dahua's XML API.
 roxmltree = "0.21"
-# Reading `%20`-style escapes: an ONVIF camera's scopes. The version `url` already brings, so it adds
-# no second copy; Markdown Viewer's app reads a dropped folder's `file:` URL with it too.
+# Decoding `%20` escapes (ONVIF scopes, a dropped folder's `file:` URL); the version `url` brings.
 percent-encoding = "2"
 
-# PTZ over Dahua DVRIP: JSON calls and the MD5 login hashes the protocol requires; MD5 is also
-# the digest of the login to Dahua's HTTP API.
+# DVRIP's JSON calls, and the MD5 hashes of DVRIP's and Dahua's HTTP logins.
 serde_json = "1"
 md-5 = "0.10"
 
-# Settings: JSON files kept beside the executable, so they are easy to find and edit. confy only
-# writes to the OS config folder, so the files are serialized here and written atomically instead.
+# Everything saved as JSON.
 serde = { version = "1", features = ["derive"] }
 
-# Ids for cameras, groups and views in `data\settings`: GUIDs, so a name is never an id. Random
-# ones (`v4`) are turned on in `crates/ipcamera/core` for every target but the web (see `ids.rs`).
+# Ids for cameras, groups and views; random ones (`v4`) only off the web, in `ipcamera-core`.
 uuid = { version = "1", features = ["serde"] }
 
-# The server's password, kept as a salted hash it can be checked against but not read back from:
-# Argon2id with the crate's defaults, in the PHC text form (`crates/ipcamera/server/src/access.rs`).
+# The server's password, as a salted Argon2id hash.
 argon2 = "0.5"
 
-# The cameras' passwords can't be hashed like that: the app sends each one to its camera. On
-# Windows `cameras.json` keeps them encrypted by DPAPI for the account running the app
-# (`crates/ipcamera/dpapi`), over Microsoft's own bindings. 0.61, the version `fs4` already brings.
+# DPAPI for the cameras' passwords (`ipcamera-dpapi`); the version `fs4` brings.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
-# The encrypted password as text in `cameras.json`. 0.22, the version reqwest and axum already
-# bring.
+# The encrypted passwords as text; the version reqwest and axum bring.
 base64 = "0.22"
 
-# Markdown Viewer's outline: where each heading of a file is, by line, for the raw view to go to
-# (`crates/mdviewer/core/src/outline.rs`). Parsing only: the HTML writer and the command line tool
-# its default features bring are left out.
+# Markdown Viewer's outline and syntax; parsing only, so its default features are off.
 pulldown-cmark = { version = "0.13", default-features = false }
 
-# Markdown Viewer's search across a project (`crates/mdviewer/core/src/search.rs`): the crate nsh's
-# editor finds with, so a query means the same in both and the project's count is the raw view's.
-# It runs in linear time, whatever the query.
+# Markdown Viewer's project search: the crate nsh's editor finds with, so both count the same.
 regex = "1.12"
 
-# Tests only: a folder of its own for each test, with a name no other test or run shares, removed
-# when the test ends. The integration tests in `tests/` can't see a crate's own test helpers, so
-# one crate for all of them keeps a single way of doing it.
+# Tests only: a temporary folder for each test.
 tempfile = "3"
 
-# Snapshots and thumbnails are written as PNGs, and listed with their size in pixels. JPEG is
-# read only: an event's picture comes from the camera as one (a Reolink's `Snap`).
+# PNG snapshots and thumbnails; JPEG is read only, for a camera's event pictures.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-# The free space on the drives the snapshots and videos go to: Windows' `GetDiskFreeSpaceExW`
-# behind a safe call. Only its space query is used, so the file locks of its default `sync`
-# feature stay out.
+# A drive's free space; only its space query, so the default `sync` feature is off.
 fs4 = { version = "1.1", default-features = false }
 
 dp-store = { path = "crates/dp/store" }

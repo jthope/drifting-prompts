@@ -8,7 +8,6 @@ use ipcamera_core::{
     Stream, TileStream, rtsp_url,
 };
 
-// Shared with the web preview, so both refuse the same forms.
 use crate::bridge::{
     BrandInfo, CameraForm, DetectedCamera, DetectionInfo, EventVideoSettings, FoundCamera,
     StreamInfo,
@@ -31,8 +30,7 @@ pub fn event_video_settings(video: &EventVideo) -> EventVideoSettings {
     }
 }
 
-/// The event video settings `settings` hold, within the app's ranges: a blank stream is the
-/// camera's own, and a kind this build doesn't know is left out.
+/// The event video settings `settings` hold, within the app's ranges; unknown kinds are left out.
 pub fn event_video_of(settings: &EventVideoSettings) -> EventVideo {
     EventVideo {
         after_seconds: settings.after_seconds,
@@ -49,8 +47,7 @@ pub fn event_video_of(settings: &EventVideoSettings) -> EventVideo {
     .within_limits()
 }
 
-/// The form filled in from `camera`. A camera that follows Settings → Automation's event video
-/// settings shows the app's defaults for them, which the desktop replaces with the app's own.
+/// The form filled in from `camera`; one following Automation's event video shows the defaults.
 pub fn from_config(camera: &CameraConfig) -> CameraForm {
     let mut form = CameraForm {
         name: camera.name.clone(),
@@ -82,10 +79,6 @@ pub fn from_config(camera: &CameraConfig) -> CameraForm {
     form
 }
 
-/// Gives a form whose camera lists its streams one of them, where it names none yet: the one at
-/// the path the brand, channel and quality make, which is what has played so far, else the first
-/// the camera lists. A path typed by hand stays. The form of a camera that lists none is left
-/// alone.
 fn choose_stream(form: &mut CameraForm) {
     if form.streams.is_empty() || !form.rtsp_path.trim().is_empty() {
         return;
@@ -103,8 +96,7 @@ fn choose_stream(form: &mut CameraForm) {
     form.rtsp_path = chosen.path.clone();
 }
 
-/// What a list shows for a stream: its picture's `size`, its `codec` and its `name`, those that
-/// are known: `1920×1080 · H.264 · Profile003_AutotrackStream`.
+/// What a list shows for a stream: its known size, codec and name.
 pub fn stream_title(size: &str, codec: &str, name: &str) -> String {
     [size, codec, name]
         .into_iter()
@@ -113,7 +105,7 @@ pub fn stream_title(size: &str, codec: &str, name: &str) -> String {
         .join(" · ")
 }
 
-/// A stream's picture size as the lists write it, `1920×1080`; `""` when the camera didn't say.
+/// A stream's picture size, `1920×1080`; `""` when the camera didn't say.
 pub fn size_text(stream: &CameraStream) -> String {
     stream
         .size()
@@ -121,10 +113,8 @@ pub fn size_text(stream: &CameraStream) -> String {
         .unwrap_or_default()
 }
 
-/// Where a stream comes in the lists: by its `lens`, the main lens's first and then each other
-/// lens's in the order `lenses` (each stream's, as listed) first has it, then the largest picture
-/// first, those of an unknown `size` last. A key for `sort_by_key`, which keeps the camera's own
-/// order between equals.
+/// Where a stream comes in the lists: by lens, then the largest picture first, unknown sizes last.
+/// A key for a stable sort, which keeps the camera's own order between equals.
 pub fn stream_order(
     lenses: &[Option<Lens>],
     lens: Option<Lens>,
@@ -146,8 +136,7 @@ pub fn stream_order(
     (rank, pixels.is_none(), Reverse(pixels.unwrap_or(0)))
 }
 
-/// The streams a camera listed, as the form shows them: in the lists' order ([`stream_order`]),
-/// each with its title and lens.
+/// The streams a camera listed, in the lists' order, each with its title and lens.
 pub fn stream_infos(streams: &[CameraStream]) -> Vec<StreamInfo> {
     let lenses: Vec<Option<Lens>> = streams.iter().map(CameraStream::lens).collect();
     let mut ordered: Vec<&CameraStream> = streams.iter().collect();
@@ -200,8 +189,7 @@ pub fn detections() -> Vec<DetectionInfo> {
         .collect()
 }
 
-/// `form` with brand `key`. A port or path still at the old brand's default takes the new one's;
-/// anything the user changed stays. An unknown key leaves the form as it is.
+/// `form` with brand `key`: a port or path still at the old brand's default takes the new one's.
 pub fn with_brand(form: &CameraForm, key: &str) -> CameraForm {
     let Some(brand) = Brand::from_key(key) else {
         return form.clone();
@@ -230,37 +218,34 @@ pub fn with_brand(form: &CameraForm, key: &str) -> CameraForm {
     changed
 }
 
-/// What Detect found, as `ipcamera_core::detect` and the server's `DetectReply` both say it.
+/// What Detect found.
 pub struct Found<'a> {
     /// Who made the camera.
     pub brand: Brand,
-    /// Where its HTTP API answered (its port, and whether it is HTTPS): a Reolink's or a Dahua's.
+    /// Where its HTTP API answered: its port, and whether it is HTTPS.
     pub api: Option<(u16, bool)>,
-    /// For a Dahua: whether its PTZ and light go over that API rather than PTZ over DVRIP.
+    /// For a Dahua: whether PTZ and light go over that API rather than DVRIP.
     pub http_api: bool,
-    /// What it said it is, when it was asked with a login.
+    /// What it said it is, when asked with a login.
     pub device: Option<&'a DeviceInfo>,
-    /// What it said it has, when it was asked with a login.
+    /// What it said it has, when asked with a login.
     pub features: Option<&'a CameraFeatures>,
-    /// Whether it was asked with a password, to tell a Reolink's user to add one.
+    /// Whether it was asked with a password.
     pub asked_with_password: bool,
-    /// Whether its ONVIF events report motion, or it has a light over ONVIF, which turns
-    /// watching it over ONVIF on.
+    /// Whether its ONVIF events report motion, or it has a light over ONVIF.
     pub onvif_events: bool,
-    /// The port ONVIF answered on, which the form takes.
+    /// The port ONVIF answered on.
     pub onvif_port: Option<u16>,
-    /// Why ONVIF told nothing of a camera found another way, said after the rest.
+    /// Why ONVIF told nothing of a camera found another way.
     pub onvif_problem: Option<&'a str>,
-    /// The streams the camera listed, which the form then offers; a camera asked without a
-    /// login lists none, and the form keeps those it had.
+    /// The streams the camera listed; none leaves the form's own.
     pub streams: &'a [CameraStream],
-    /// Whether its ONVIF refused the login, now or before: the form remembers it.
+    /// Whether its ONVIF refused the login, now or before.
     pub onvif_refused: bool,
 }
 
 /// The cameras found on the network, as the form's network search lists them.
 pub fn found_cameras(found: Vec<ipcamera_core::FoundCamera>) -> Vec<FoundCamera> {
-    // A port as the form keeps its numbers, as text; none where the search didn't learn it.
     let text = |port: Option<u16>| port.map(|port| port.to_string()).unwrap_or_default();
     found
         .into_iter()
@@ -276,8 +261,8 @@ pub fn found_cameras(found: Vec<ipcamera_core::FoundCamera>) -> Vec<FoundCamera>
         .collect()
 }
 
-/// What Connect shows in a run that reaches no camera, for the reason `why`: the form as it is,
-/// and nothing found. It answers rather than fails, so such a run can still add a camera.
+/// What Connect shows in a run that reaches no camera: an answer, not a failure, so a camera can
+/// still be added.
 pub fn nothing_to_ask(form: &CameraForm, why: &str) -> DetectedCamera {
     DetectedCamera {
         form: form.clone(),
@@ -362,7 +347,6 @@ pub fn detected(form: &CameraForm, found: Found<'_>) -> DetectedCamera {
         None => "A camera whose ONVIF answers.".to_string(),
     };
     let summary = match onvif_problem {
-        // The camera has been reached another way, so this is a note and reads as one.
         Some(_) if onvif_refused => format!(
             "{summary} Its ONVIF service, which only adds motion events here, didn't take this \
              login and is left alone: many cameras keep a separate account for ONVIF."
@@ -382,11 +366,9 @@ pub fn detected(form: &CameraForm, found: Found<'_>) -> DetectedCamera {
     }
 }
 
-/// The form for a new camera: the usual ports and paths, and `admin` as the username, with no
-/// name, address or password yet.
+/// The form for a new camera: the usual ports and paths, and `admin` as the username.
 pub fn blank() -> CameraForm {
     CameraForm {
-        // Dahua and Amcrest cameras ship with this username, so most new cameras keep it.
         user: "admin".into(),
         ..from_config(&CameraConfig::default())
     }
@@ -394,7 +376,6 @@ pub fn blank() -> CameraForm {
 
 /// The form as a camera's settings, with the defaults for anything left blank or not a number.
 pub fn to_config(form: &CameraForm) -> CameraConfig {
-    // A brand this build doesn't know, from a newer app's form, is no brand in particular.
     let mut camera = CameraConfig::for_brand(Brand::from_key(&form.brand).unwrap_or(Brand::Other));
     camera.name = form.name.trim().to_string();
     camera.host = form.host.trim().to_string();

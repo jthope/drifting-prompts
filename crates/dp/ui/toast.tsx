@@ -1,18 +1,13 @@
-// One-off messages, such as the result of a snapshot: `notify(...)` from
-// anywhere, shown by `<Toaster />`, placed once in the app. A message worth
-// reading once must not outlive its news, so it leaves by itself. One can carry
-// a button, such as an alert's Show, which dismisses it as it acts.
 import { Overlay, signal, Text } from "nsh";
 import { Toast, type ToastEntry, ToastManager, ToastStack } from "nsh/base";
 import { Button } from "./button";
 import { popupSurface } from "./menu";
 import { StatusDot, type StatusTone } from "./status";
 
-/** How long a message stays, in milliseconds. */
+/** In milliseconds. */
 const DURATION = 4000;
-/** How many show at once. */
 const LIMIT = 3;
-/** How often the lifecycle moves on while a message shows, in milliseconds. */
+/** How often the lifecycle moves on, in milliseconds. */
 const TICK = 50;
 
 const manager = new ToastManager();

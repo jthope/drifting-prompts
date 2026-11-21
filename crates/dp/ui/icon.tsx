@@ -16,16 +16,14 @@ export type IconTint =
   | "warning"
   | "info"
   | "destructive"
-  // The theme's chart colors, which each thing takes wherever it shows (`CHART` in `views/model.ts`).
   | "chart-1"
   | "chart-2"
   | "chart-3"
   | "chart-4"
   | "chart-5"
-  // A toolbar button's icon; the app's own themes give it their text's color.
   | "icon";
 
-/** Draws one element as Lucide's SVG does: stroked, never filled. */
+/** Lucide's icons are stroked, never filled. */
 function draw(cx: CanvasRenderingContext2D, element: LucideElement) {
   switch (element.tag) {
     case "path":
@@ -48,11 +46,7 @@ function draw(cx: CanvasRenderingContext2D, element: LucideElement) {
   cx.stroke();
 }
 
-/**
- * A Lucide icon, 16 points by default. Reading the token in `draw` keeps it in
- * step with the appearance. `color` takes the place of the tint for a color a
- * theme gives that no tint names, such as a badge's icon (`Look.badge.icon`).
- */
+/** A Lucide icon; `token` is read in `draw` to keep step with the appearance, and `color` replaces the tint. */
 export function Icon(props: { name: IconName; size?: number; tint?: IconTint; color?: string }) {
   const size = () => props.size ?? 16;
   return (

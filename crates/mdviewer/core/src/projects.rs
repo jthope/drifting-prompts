@@ -1,13 +1,5 @@
-//! Markdown Viewer's projects, saved as `projects.json` beside the executable: the folders opened
-//! as projects, which one is open, and for each the files it has open in tabs and the one in
-//! front.
-//!
-//! [`ProjectStore`] owns the file the way [`crate::ConfigStore`] owns `settings.json`, through
-//! the suite's store (`dp_store`), and [`crate::Saved`] opens the two together.
-//!
-//! A project is known by its folder's path, so opening a folder that is already a project selects
-//! it rather than listing it twice. Its name is the folder's name, read each time, so a renamed
-//! folder shows its new name once it is opened again.
+//! `projects.json`: the folders opened as projects, the one open, and each one's tabs. A project
+//! is known by its folder's path.
 
 use std::path::{Path, PathBuf};
 
@@ -23,9 +15,9 @@ pub(crate) const FILE: &str = "projects.json";
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SavedProjects {
-    /// The project open in the window: its folder. `None` shows New.
+    /// The open project's folder; `None` shows New.
     pub selected: Option<PathBuf>,
-    /// The projects, newest first, as the sidebar lists them.
+    /// The projects, newest first.
     pub projects: Vec<Project>,
 }
 
@@ -35,11 +27,10 @@ pub struct SavedProjects {
 pub struct Project {
     /// The folder.
     pub path: PathBuf,
-    /// The file it had in front last, relative to the folder with `/` between its parts, to open
-    /// again with it.
+    /// The file it had in front last.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_file: Option<String>,
-    /// The files it had open in tabs, in their order, to open again with it.
+    /// The files it had open in tabs, in order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tabs: Vec<Tab>,
 }
@@ -48,12 +39,12 @@ pub struct Project {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Tab {
-    /// The file, relative to the project's folder with `/` between its parts.
+    /// The file, relative to the project's folder.
     pub file: String,
-    /// Pinned: kept first, and left open by closing the others.
+    /// Kept first, and left open by closing the others.
     #[serde(skip_serializing_if = "is_false")]
     pub pinned: bool,
-    /// A preview: the tab the next file opened with a single press takes over, until it is kept.
+    /// The tab the next file opened with a single press takes over.
     #[serde(skip_serializing_if = "is_false")]
     pub preview: bool,
     /// How it shows.
@@ -65,7 +56,7 @@ fn is_false(value: &bool) -> bool {
 }
 
 impl Project {
-    /// The name the sidebar shows: the folder's own, or its whole path for a drive's root.
+    /// The folder's name, or its whole path for a drive's root.
     pub fn name(&self) -> String {
         self.path
             .file_name()
@@ -73,7 +64,7 @@ impl Project {
             .unwrap_or_else(|| self.path.display().to_string())
     }
 
-    /// Whether this is the project of `folder`. The system's paths don't tell case apart.
+    /// Whether this is the project of `folder`.
     pub fn is(&self, folder: &Path) -> bool {
         same_path(&self.path, folder)
     }
@@ -99,21 +90,18 @@ impl Document for SavedProjects {
     }
 }
 
-/// The projects file and the copy of it the app is running with. [`crate::Saved`] opens it.
+/// The projects file and the copy of it the app is running with.
 pub struct ProjectStore {
     file: FileStore<SavedProjects>,
 }
 
 impl ProjectStore {
-    /// Opens the file at `path`, writing nothing: [`crate::Saved`] writes an empty list when it is
-    /// missing.
     pub(crate) fn open(path: PathBuf) -> Self {
         Self {
             file: FileStore::open(path),
         }
     }
 
-    /// The file underneath, for [`crate::Saved`].
     pub(crate) fn file(&self) -> &FileStore<SavedProjects> {
         &self.file
     }
@@ -133,13 +121,12 @@ impl ProjectStore {
         self.file.current()
     }
 
-    /// Bumped by every saved change, so the app can tell when to look again.
+    /// Bumped by every saved change.
     pub fn revision(&self) -> u64 {
         self.file.revision()
     }
 
-    /// Opens `folder` as a project and selects it: a new one goes first in the list, and one that
-    /// is already there moves first, keeping the file it had open. Refuses what isn't a folder.
+    /// Opens `folder` as a project, moved first in the list, and selects it.
     pub fn open_project(&self, folder: &Path) -> Result<(), StoreError> {
         if !folder.is_dir() {
             return Err(StoreError::Invalid(format!(
@@ -180,8 +167,7 @@ impl ProjectStore {
         })
     }
 
-    /// Takes the project of `folder` off the list. The folder and its files stay as they are.
-    /// When it was the one open, the next one opens, or New when it was the last.
+    /// Takes the project of `folder` off the list; if it was open, the next one opens.
     pub fn remove_project(&self, folder: &Path) -> Result<(), StoreError> {
         self.file.update(|saved| {
             let at = saved
@@ -202,8 +188,7 @@ impl ProjectStore {
         })
     }
 
-    /// Remembers the tabs the project of `folder` has open, in their order, and `front`, the
-    /// file in front of them (none with no tabs).
+    /// Remembers the project's tabs in order and `front`, the file in front.
     pub fn set_tabs(
         &self,
         folder: &Path,
@@ -227,8 +212,7 @@ fn not_a_project(folder: &Path) -> StoreError {
     StoreError::NotFound(format!("{} isn't one of the projects.", folder.display()))
 }
 
-/// `folder` without the separator a dropped or typed path can end with (`D:\Notes\`), which would
-/// otherwise name the same folder twice. A drive's root keeps its own (`D:\`).
+/// Drops a trailing separator so a folder isn't listed twice; a drive's root keeps its own (`D:\`).
 fn tidy(folder: &Path) -> PathBuf {
     let text = folder.to_string_lossy();
     let trimmed = text.trim_end_matches(['\\', '/']);
@@ -238,8 +222,7 @@ fn tidy(folder: &Path) -> PathBuf {
     PathBuf::from(trimmed)
 }
 
-/// Whether `a` and `b` name the same folder: compared as written, ignoring a trailing separator,
-/// and on Windows ignoring case and which slash separates the parts.
+/// On Windows, case and slash direction are ignored.
 fn same_path(a: &Path, b: &Path) -> bool {
     let text = |path: &Path| {
         let tidied = tidy(path).to_string_lossy().into_owned();
@@ -260,7 +243,6 @@ mod tests {
 
     use super::*;
 
-    /// A tab of `file`, as it opens.
     fn tab(file: &str) -> Tab {
         Tab {
             file: file.into(),
@@ -268,7 +250,6 @@ mod tests {
         }
     }
 
-    /// Projects in a folder of their own, with two project folders beside them.
     fn store() -> (TempDir, ProjectStore, PathBuf, PathBuf) {
         let dir = TempDir::new().expect("a temporary folder");
         let notes = dir.path().join("notes");
@@ -428,7 +409,6 @@ mod tests {
         assert_eq!(project.tabs, tabs);
         assert_eq!(project.last_file.as_deref(), Some("docs/setup.md"));
 
-        // What a tab doesn't set stays out of the file.
         let text = fs::read_to_string(dir.path().join(FILE)).expect("the file");
         assert_eq!(text.matches("\"pinned\": true").count(), 1, "{text}");
         assert!(!text.contains("\"pinned\": false"), "{text}");

@@ -1,49 +1,22 @@
-// Split's two sides scrolling together, while the header's toggle says so
-// (`scrollTogether` in `model.ts`).
-//
-// The sides can't share a share of their length: a code block, a table or a
-// picture is taller on one side than on the other. They share places instead:
-// the top, each top-level heading, and the end. A heading's place in Raw is
-// where its line is in the editor (`rangeBounds`, its scrolling taken away);
-// on the page it is where its section starts (the rendered view's `tops`).
-// Between two places, a side follows the other in proportion (`follow`), so the
-// two meet at every heading and drift apart at most within a section.
-//
-// Whichever side is scrolled leads, and the other follows it, ignoring its own
-// scrolling for a moment (`FOLLOWING`), so the two never chase each other. The
-// page says when it scrolls; nsh 0.5.1's editor doesn't, so Raw's place is read
-// every `RAW_CHECK_EVERY` while it can be scrolled: while the pointer is over it
-// or it has the keyboard. The places are measured again when a scroll starts
-// after a pause (a fold in Raw moves them), and when either side changes size.
 import type { ScrollRef } from "nsh";
 import type { EditorRef } from "nsh/base";
 
-/** How long a side ignores its own scrolling after following the other's, in milliseconds: its scroll events come a frame or two late. */
+// A side ignores its own scrolling this long after following, since its scroll events come a frame or two late.
 const FOLLOWING = 200;
 
-/**
- * How often Raw's place is read while it can be scrolled, in milliseconds. A
- * workaround: nsh 0.5.1's `Editor` reports no scrolling; an `onScroll` of its
- * own in a later release replaces this.
- */
+/** How often Raw's place is read while it can be scrolled, in milliseconds: nsh's `Editor` reports no scrolling. */
 export const RAW_CHECK_EVERY = 33;
 
-/** How long scrolling may pause before the next scroll measures the places again, in milliseconds. */
+// A scroll after a pause this long measures the places again: a fold in Raw moves them.
 const PAUSE = 400;
 
-/** The places both sides share, in order on each: scroll offsets, the top first and the end last. */
+/** The scroll offsets both sides share, in order: the top first and the end last. */
 export interface Anchors {
   raw: number[];
   page: number[];
 }
 
-/**
- * The places both sides share: the top, each heading found on both (`raw` and
- * `page`, by heading, `undefined` where a side has none, as a heading folded
- * away in Raw), and the ends (`rawEnd`, `pageEnd`, how far each scrolls). A
- * heading out of order with the one before it on either side, or past where
- * either side scrolls to, is left out: it can't be a place both reach.
- */
+/** The places both sides share: the top, each heading both reach in order, and the ends. */
 export function anchorsOf(raw: (number | undefined)[], page: (number | undefined)[], rawEnd: number, pageEnd: number): Anchors {
   const anchors: Anchors = { raw: [0], page: [0] };
   raw.forEach((rawAt, index) => {
@@ -61,7 +34,7 @@ export function anchorsOf(raw: (number | undefined)[], page: (number | undefined
   return anchors;
 }
 
-/** Where scroll offset `at` on one side falls on the other: `from` and `to` are the same places on each, in order; between two, in proportion. */
+/** Where scroll offset `at` on one side falls on the other, in proportion between shared places. */
 export function follow(at: number, from: number[], to: number[]): number {
   if (from.length < 2) return to[0] ?? 0;
   let next = 1;
@@ -71,14 +44,14 @@ export function follow(at: number, from: number[], to: number[]): number {
   return to[next - 1] + (to[next] - to[next - 1]) * share;
 }
 
-/** What the rendered view tells a sync: where its headings' sections start, and how far it scrolls. */
+/** What the rendered view tells a sync. */
 export interface PageSide {
   scroll: ScrollRef;
-  /** Where each of the file's top-level headings starts on the page, as a scroll offset, by heading. */
+  /** Each top-level heading's scroll offset on the page. */
   headingTops: () => (number | undefined)[];
 }
 
-/** What the raw view tells a sync: its editor, the headings' lines and the file's last line. */
+/** What the raw view tells a sync. */
 export interface RawSide {
   editor: EditorRef;
   /** The line each top-level heading is on, from 0. */
@@ -93,17 +66,17 @@ export interface ScrollSync {
   raw(side: RawSide | undefined): void;
   /** The page, once its scroll view is there. */
   page(side: PageSide | undefined): void;
-  /** Whether Raw can be scrolled now: the pointer over it, or the keyboard in it. While it can, its place is read. */
+  /** Whether Raw can be scrolled now; while it can, its place is read. */
   rawActive(active: boolean): void;
-  /** The raw view's height, as it lays out. */
+  /** The raw view's height. */
   rawHeight(height: number): void;
   /** The page scrolled to `offset`, its content `content` tall in a view `height` tall. */
   pageScrolled(offset: number, content: number, height: number): void;
-  /** Something changed that moves the places: the file, a side's width. */
+  /** Something changed that moves the places. */
   remeasure(): void;
-  /** Leave both sides alone for `ms`: the outline is taking them both somewhere. */
+  /** Leave both sides alone for `ms`. */
   pause(ms: number): void;
-  /** Bring the page to where Raw is: the toggle was turned on. */
+  /** Bring the page to where Raw is. */
   align(): void;
   /** Stop reading Raw's place. */
   stop(): void;
@@ -124,7 +97,6 @@ export function createScrollSync(on: () => boolean): ScrollSync {
   let lastSync = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
 
-  /** The places both sides share now, measured in Raw's editor. */
   const measure = async (): Promise<Anchors | null> => {
     const side = raw;
     if (!side || !page) return null;
@@ -139,7 +111,6 @@ export function createScrollSync(on: () => boolean): ScrollSync {
     return anchorsOf(tops, page.headingTops(), rawEnd, pageEnd);
   };
 
-  /** The places, measured again when scrolling starts after a pause. */
   const current = async (): Promise<Anchors | null> => {
     const now = Date.now();
     if (now - lastSync > PAUSE) anchors = null;
@@ -152,7 +123,6 @@ export function createScrollSync(on: () => boolean): ScrollSync {
     return anchors;
   };
 
-  /** Raw's place, read: when it moved by itself, the page follows. */
   const checkRaw = async (force = false) => {
     if (!on() || !raw || !page) return;
     const at = (await raw.editor.scrollOffset()).y;

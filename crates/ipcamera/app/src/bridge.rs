@@ -1,7 +1,4 @@
 //! What TSX sees of the app: the types and functions it imports from `ipcamera/native`.
-//!
-//! This file is the same on every platform. Behind it, `camera` does the work on Windows and
-//! `web_backend` stands in everywhere else, so `App.tsx` never needs to know which one it got.
 
 use std::time::Duration;
 
@@ -15,19 +12,13 @@ use crate::camera as backend;
 use crate::web_backend as backend;
 use crate::{form, library};
 
-/// How often a listener checks for a change. Quick enough that a status reads as immediate, and
-/// the stats only change about once a second anyway.
+/// How often a listener checks for a change.
 const REFRESH_EVERY: Duration = Duration::from_millis(250);
 
-/// How often what the snapshots and videos take is added up for the status bar: their folder
-/// listings, off the main thread. A recording grows by a few megabytes a second, which a number
-/// in gigabytes shows no faster.
+/// How often the media sizes are added up for the status bar.
 const USAGE_CHECK_EVERY: Duration = Duration::from_secs(3);
 
-/// How often the snapshots and videos folders are checked. Files only change there when the user
-/// does something or a camera records, so a second is soon enough, and the check reads only the
-/// folder listing, off the main thread: a folder on a slow drive or a network share can keep a
-/// listing waiting.
+/// How often the snapshots and videos folders are listed.
 const FOLDER_CHECK_EVERY: Duration = Duration::from_secs(1);
 
 /// How a status should read.
@@ -52,8 +43,7 @@ pub struct MediaUsage {
     pub free: f64,
     /// That drive, as Explorer names it (`D:`); `""` when its room can't be told.
     pub drive: String,
-    /// The most the snapshots and videos may hold together (Settings → Automation), in bytes; 0
-    /// for no limit.
+    /// The most the snapshots and videos may hold together, in bytes; 0 for no limit.
     pub limit: f64,
     /// Whether the oldest are deleted to make room at that limit.
     pub make_room: bool,
@@ -72,11 +62,9 @@ pub struct RunningStream {
     pub waiting: bool,
     /// Whether it lost the camera or gave up on it, which its tiles say over the picture.
     pub trouble: StreamTrouble,
-    /// What went wrong, as a sentence, while `trouble` isn't `fine`: `Reconnecting (attempt 3)…`,
-    /// or why it stopped. `""` while it is fine.
+    /// What went wrong, as a sentence, while `trouble` isn't `fine`; `""` while it is.
     pub problem: String,
-    /// When its last picture arrived, in milliseconds since 1970: the one its tiles still show
-    /// while it is in trouble. 0 before its first.
+    /// When its last picture arrived, in milliseconds since 1970; 0 before its first.
     pub last_picture_at: f64,
 }
 
@@ -89,8 +77,7 @@ pub enum StreamTrouble {
     Reconnecting,
     /// It stopped and won't try again by itself: Connect tries again.
     Stopped,
-    /// The camera refused its login, which nothing tries again by itself until the settings
-    /// change.
+    /// The camera refused its login; nothing retries until the settings change.
     Refused,
 }
 
@@ -114,8 +101,7 @@ pub struct CameraState {
     pub name: String,
     /// Who it logs in as and where: `admin@192.0.2.10:554 · ch1 main`.
     pub stream_label: String,
-    /// Whether a stream is running, or trying to. It decides Connect or Disconnect. A stream that
-    /// gave up still counts until Disconnect, and its tiles say so (`RunningStream.trouble`).
+    /// Whether a stream runs or tries to, one that gave up included: Connect or Disconnect.
     pub connected: bool,
     /// Whether it may connect by itself: without a password it waits to be asked.
     pub ready: bool,
@@ -123,13 +109,11 @@ pub struct CameraState {
     pub status: String,
     /// How `status` should read.
     pub tone: StatusTone,
-    /// Size, frame rate and transport of the stream that stands for the camera; empty with no
-    /// stream.
+    /// Size, frame rate and transport of the stream that stands for the camera; `""` with none.
     pub stats: String,
     /// Where the camera is on the network: its host, as its tiles show it (`192.168.1.64`).
     pub address: String,
-    /// Each of its streams that runs, with its numbers, for the tiles that show it; empty where
-    /// the app doesn't draw the picture itself (the web).
+    /// Each of its streams that runs, with its numbers; empty where the app doesn't draw it.
     pub streams: Vec<RunningStream>,
     /// What PTZ last reported.
     pub ptz_status: String,
@@ -143,15 +127,13 @@ pub struct CameraState {
     pub record_problem: String,
     /// Whether something moves in its picture, for a camera the app watches (a Reolink).
     pub motion: bool,
-    /// What its AI sees now, by `DetectionInfo` key (`person`, `vehicle`); empty when nothing,
-    /// or for a camera the app doesn't watch.
+    /// What its AI sees now, by `DetectionInfo` key; empty for nothing or an unwatched camera.
     pub detected: Vec<String>,
     /// Whether it has a spotlight the app can switch (`Cameras.setSpotlight`).
     pub spotlight: bool,
     /// Whether that spotlight is on now.
     pub spotlight_on: bool,
-    /// What it says it is and has, or why watching it failed, as a sentence; `""` for a camera the
-    /// app doesn't watch.
+    /// What it says it is and has, or why watching it failed; `""` for an unwatched camera.
     pub watch_status: String,
 }
 
@@ -174,8 +156,7 @@ pub struct CameraForm {
     pub channel: String,
     /// 0 for the main stream, 1 for the sub stream.
     pub sub_stream: u32,
-    /// The RTSP path: one of `streams`' where the camera lists any, else what was typed, or
-    /// blank for the path the brand, channel and `subStream` make.
+    /// The RTSP path: one of `streams`' or what was typed; blank for the brand's path.
     pub rtsp_path: String,
     /// Force RTSP over TCP.
     pub use_tcp: bool,
@@ -187,64 +168,42 @@ pub struct CameraForm {
     pub dvrip_port: String,
     /// The ONVIF device path.
     pub onvif_path: String,
-    /// The port of the camera's own HTTP API: a Reolink's, which its PTZ, motion and spotlight go
-    /// over, or a Dahua's, which its PTZ and light go over with `httpApi` on.
+    /// The port of the camera's own HTTP API: a Reolink's, or a Dahua's with `httpApi` on.
     pub api_port: String,
     /// Whether that API is HTTPS.
     pub api_https: bool,
-    /// For a Dahua: whether its PTZ and light go over its HTTP API rather than PTZ over DVRIP, as
-    /// a camera without DVRIP (Amcrest's light bulb cameras) needs.
+    /// For a Dahua: whether PTZ and light go over its HTTP API rather than DVRIP.
     pub http_api: bool,
-    /// Whether the app watches the camera's ONVIF events for motion, for a camera that isn't a
-    /// Reolink.
+    /// Whether the app watches its ONVIF events for motion, for a camera that isn't a Reolink.
     pub onvif_events: bool,
-    /// A note under the password field: on the web, which is never told a saved password, that
-    /// leaving it empty keeps the saved one. `""` when there is nothing to say.
+    /// A note under the password field; `""` when there is nothing to say.
     pub password_note: String,
-    /// The streams the camera listed when Detect last asked it with a login, which the form
-    /// offers to choose from; empty until then, and for a camera that lists none. Choosing one
-    /// puts its `path` in `rtspPath`.
+    /// The streams the camera listed when Detect last asked with a login; empty until then.
     pub streams: Vec<StreamInfo>,
-    /// Whether the camera's ONVIF refused this login when Detect asked, where the login works
-    /// another way: Detect then leaves ONVIF alone. The form clears it when the address, the
-    /// login or the ONVIF port or path is typed again.
+    /// Whether the camera's ONVIF refused this login when Detect asked, which then leaves it alone.
     pub onvif_refused: bool,
-    /// Whether the app logs what the camera sees as events, while Settings → Automation logs
-    /// them; on for a new camera. Off, nothing is logged, alerted or saved for it, and it is asked
-    /// what it sees only while it streams, for its badge.
+    /// Whether the app logs what the camera sees as events; on for a new camera.
     pub log_events: bool,
-    /// Whether the camera's event videos are made its own way, `eventVideo`, rather than as
-    /// Settings → Automation says.
+    /// Whether the camera's event videos follow `eventVideo` rather than Settings → Automation.
     pub own_event_video: bool,
-    /// How the camera's event videos are made, with `ownEventVideo`; Settings → Automation's
-    /// without, to start its own from.
+    /// How the camera's event videos are made with `ownEventVideo`; Automation's otherwise.
     pub event_video: EventVideoSettings,
 }
 
-/// How the videos an event saves are made: Settings → Automation's for every camera, or a
-/// camera's own in its place. Out-of-range numbers are brought within the ranges as they are
-/// saved.
+/// How the videos an event saves are made; out-of-range numbers are brought within range on save.
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct EventVideoSettings {
-    /// How long a video keeps recording after the camera last saw something, in seconds, 10 to
-    /// 120: what it sees again sooner continues the same video. 30 until changed.
+    /// Seconds a video keeps recording after the camera last saw something, 10 to 120.
     pub after_seconds: u32,
-    /// How many seconds from before the camera saw something each video starts with, 5 to 30, or
-    /// 0 for none; more than 0 keeps the camera connected while events are recorded. 10 until
-    /// changed.
+    /// Seconds from before the camera saw something each video starts with, 5 to 30, or 0 for none.
     pub before_seconds: u32,
-    /// The longest a video runs before it goes on in a new file, in minutes, up to 60; 0 for no
-    /// limit. 10 until changed.
+    /// Minutes a video runs before it goes on in a new file, up to 60; 0 for no limit.
     pub longest_minutes: u32,
-    /// Whether plain motion keeps a video going between the AI's detections, for a camera whose
-    /// AI tells things apart, for up to two minutes after the last. On until changed.
+    /// Whether plain motion keeps a video going between the AI's detections, for up to two minutes.
     pub motion_continues: bool,
-    /// Which stream the videos record: `own` (the one the camera's settings name), `main`, `sub`,
-    /// or a path the camera listed.
+    /// Which stream the videos record: `own`, `main`, `sub`, or a path the camera listed.
     pub stream: String,
-    /// What the camera has to see for an event to save a video, by `DetectionInfo` key: all of
-    /// them until changed. A camera that knows only motion saves one for motion whatever this
-    /// holds.
+    /// What the camera has to see for a video, by `DetectionInfo` key; motion-only ones ignore it.
     pub kinds: Vec<String>,
 }
 
@@ -253,15 +212,13 @@ pub struct EventVideoSettings {
 pub struct StreamInfo {
     /// What the camera calls it.
     pub name: String,
-    /// Its path, which `CameraForm.rtspPath` takes: an RTSP path, or `flv:` and a Reolink's name
-    /// for one of its FLV streams.
+    /// Its path for `CameraForm.rtspPath`: an RTSP path, or `flv:` and a Reolink's FLV stream.
     pub path: String,
     /// What the camera says of its picture (`3840×2160, H265`); `""` when it says nothing.
     pub detail: String,
     /// What a list shows for it, as `StreamChoice.title` is: its size, codec and name.
     pub title: String,
-    /// The lens it is of, for a camera with more than one (`Tracking lens`); `""` for the main
-    /// lens.
+    /// The lens it is of (`Tracking lens`); `""` for the main lens.
     pub lens: String,
 }
 
@@ -288,13 +245,11 @@ pub struct DetectionInfo {
 /// What `Cameras.detect` found at a camera's address.
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct DetectedCamera {
-    /// The form it was asked with, with the brand and the API's port filled in as found, and
-    /// the streams the camera listed.
+    /// The form it was asked with, filled in with what was found.
     pub form: CameraForm,
     /// What was found, as a sentence: `Reolink RLC-811A, firmware v3.1.0.2368.`
     pub summary: String,
-    /// What the camera has, in words (`Motion`, `Person`, `Spotlight`, `Pan and tilt`); empty
-    /// when it wasn't asked, without a password, or has nothing beyond its stream.
+    /// What the camera has, in words (`Motion`, `Pan and tilt`); empty when unknown or nothing.
     pub features: Vec<String>,
 }
 
@@ -307,16 +262,13 @@ pub struct FoundCamera {
     pub name: String,
     /// Its model, as it says it; `""` when it says none.
     pub model: String,
-    /// The port its ONVIF service is on, as text, as the form keeps its numbers; `""` for a
-    /// device found by its video alone.
+    /// The port its ONVIF service is on, as text; `""` for a device found by its video alone.
     pub onvif_port: String,
     /// The path of its ONVIF service; `""` for a device found by its video alone.
     pub onvif_path: String,
-    /// The port it answers RTSP on, as text; `""` where the search didn't try it or it didn't
-    /// answer.
+    /// The port it answers RTSP on, as text; `""` where it wasn't tried or didn't answer.
     pub rtsp_port: String,
-    /// Whatever else the camera says of itself, each as `Kind: what it says`
-    /// (`MAC: aa:bb:cc:00:11:22`); empty when it says nothing more.
+    /// Whatever else the camera says of itself, as `Kind: what it says` (`MAC: aa:bb:cc:00:11:22`).
     pub details: Vec<String>,
 }
 
@@ -329,9 +281,7 @@ pub struct FormProblem {
     pub message: String,
 }
 
-/// Settings to give several cameras at once, as the Cameras page edits them. A field left out
-/// (`null`) keeps each camera's own. The name and the channel are not here: they are each
-/// camera's own. Numbers stay text, as in `CameraForm`, and a blank one saves the default.
+/// Settings to give several cameras at once; a field left `null` keeps each camera's own.
 #[derive(Clone, Debug, Default, PartialEq, JsObject)]
 pub struct CameraChanges {
     /// The address or host name.
@@ -344,7 +294,7 @@ pub struct CameraChanges {
     pub rtsp_port: Option<String>,
     /// 0 for the main stream, 1 for the sub stream.
     pub sub_stream: Option<u32>,
-    /// The RTSP path, or blank for the Dahua default.
+    /// The RTSP path, or blank for the brand's.
     pub rtsp_path: Option<String>,
     /// Force RTSP over TCP.
     pub use_tcp: Option<bool>,
@@ -376,26 +326,19 @@ pub struct ViewInfo {
     pub id: String,
     /// The name the user gave it.
     pub name: String,
-    /// The key of the `LayoutInfo` its tiles are, in that layout's order; `""` for tiles moved or
-    /// resized to an arrangement of their own.
+    /// The key of the `LayoutInfo` its tiles are; `""` for an arrangement of their own.
     pub layout: String,
     /// Where each tile sits on the view's grid (`Views.grid`), in the order of `tiles`.
     pub cells: Vec<CellInfo>,
-    /// The key of the `FitInfo` a tile shows its picture with until it picks one of its own: what
-    /// a new tile takes.
+    /// The key of the `FitInfo` a tile shows its picture with until it picks its own.
     pub fit: String,
     /// The camera id in each tile, in the order of `cells`; `""` for an empty tile.
     pub tiles: Vec<String>,
-    /// The stream each tile picks, in the same order as `tiles`: the key of one of
-    /// `Cameras.streamChoices`, or `own` for its camera's own; `""` for Auto, which plays the
-    /// stream the size the tile is drawn at calls for (`Cameras.autoStream`), and for an empty
-    /// tile.
+    /// Each tile's stream: a `Cameras.streamChoices` key, `own` for its own, or `""` for Auto.
     pub streams: Vec<String>,
-    /// The key of the `FitInfo` each tile shows its picture with, which the video component is
-    /// given too, in the same order as `tiles`: its own, else the view's `fit`.
+    /// The key of the `FitInfo` each tile shows its picture with: its own, else the view's `fit`.
     pub fits: Vec<String>,
-    /// The camera ids of the tiles past `cells`, which a view keeps for when it has room for them
-    /// again, in order: tile `tiles.length + i` holds `hiddenTiles[i]`; `""` for an empty one.
+    /// The camera ids of the tiles past `cells`, kept for when the view has room; `""` for empty.
     pub hidden_tiles: Vec<String>,
     /// The stream each of `hiddenTiles` shows, as `streams` has it, in the same order.
     pub hidden_streams: Vec<String>,
@@ -408,8 +351,7 @@ pub struct ViewInfo {
 pub struct ShownStream {
     /// The camera's id; `""` for none.
     pub camera: String,
-    /// The stream, as `StreamChoice.key` names it: `""` (or `own`) for the camera's own. Never
-    /// Auto: what Auto plays is one of these.
+    /// The stream, as `StreamChoice.key` names it, `""` or `own` for the camera's own; never Auto.
     pub stream: String,
 }
 
@@ -427,23 +369,17 @@ pub struct DrawnPicture {
 /// One of a camera's streams, as the menus that pick one list it.
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct StreamChoice {
-    /// What a picture is given to play it (`Cameras.setOnScreen`, `liveUrl`): `""` for the
-    /// camera's own, else `main`, `sub`, or the camera's path for it. A tile picks it by saving
-    /// this, except the camera's own, which it saves as `own`, as `""` is Auto there.
+    /// `""` for the camera's own, which a tile saves as `own`; else `main`, `sub`, or a path.
     pub key: String,
-    /// The camera's own name for it (`Profile000_MainStream`, `ext`); `Main stream` or `Sub
-    /// stream` for one at its brand's path that it didn't list; the path for one it named nothing.
+    /// The camera's own name for it; `Main stream`, `Sub stream` or the path where it named none.
     pub name: String,
-    /// What a menu shows for it: its picture's size, its codec and its name, those the camera
-    /// said (`1920×1080 · H.264 · Profile003_AutotrackStream`).
+    /// What a menu shows for it: its size, codec and name, those the camera said.
     pub title: String,
     /// Its picture's size, `1920×1080`; `""` when the camera didn't say.
     pub size: String,
-    /// The lens it is of, for a camera with more than one (`Tracking lens`); `""` for the main
-    /// lens.
+    /// The lens it is of (`Tracking lens`); `""` for the main lens.
     pub lens: String,
-    /// Whether it is the camera's own stream, its default: the one it records, and the one a tile
-    /// on Auto plays where Auto has no sizes to go by.
+    /// Whether it is the camera's own stream: the one it records, and Auto's without sizes.
     pub own: bool,
 }
 
@@ -480,8 +416,7 @@ pub struct GridInfo {
     pub smallest: u32,
 }
 
-/// One tile of a view as its layout is edited, for `Views.arrange`: where it goes on the grid,
-/// and which tile it was.
+/// One tile of a view as its layout is edited, for `Views.arrange`.
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct ArrangedTileInfo {
     /// The first column, from 0.
@@ -492,8 +427,7 @@ pub struct ArrangedTileInfo {
     pub column_span: u32,
     /// How many rows it covers.
     pub row_span: u32,
-    /// The tile it was, from 0, as `ViewInfo.tiles` counts them, so it keeps that tile's camera;
-    /// `null` for a new, empty one.
+    /// The tile it was, from 0, so it keeps that tile's camera; `null` for a new, empty one.
     pub was: Option<u32>,
 }
 
@@ -504,8 +438,7 @@ pub struct FitInfo {
     pub key: String,
     /// What the menu calls it.
     pub title: String,
-    /// Whether it forces the picture to a shape of its own (`1:1` and the rest), which the menu
-    /// lists apart, after the others.
+    /// Whether it forces the picture to a shape of its own (`1:1`), which the menu lists apart.
     pub reshapes: bool,
 }
 
@@ -514,21 +447,15 @@ pub struct FitInfo {
 pub struct SnapshotInfo {
     /// The file's name, which every other call names it by.
     pub name: String,
-    /// Where the file is, as `<Image src>` takes it: an absolute path on the desktop, the
-    /// server's URL for it on the web. The viewer shows it.
+    /// Where the file is, for `<Image src>`: a path on the desktop, the server's URL on the web.
     pub path: String,
-    /// It made small, for `<Image src>` as `path` is: what the gallery shows, since a full picture
-    /// decodes to 8 MB at 1080p. `""` until it has one: a snapshot without one gets it soon after
-    /// it is first listed.
+    /// It made small, which the gallery shows rather than the full picture; `""` until it has one.
     pub thumbnail: String,
-    /// The id of the camera that took it, or `""` when its name doesn't say, as for a PNG put in
-    /// the folder by hand.
+    /// The id of the camera that took it; `""` when its name doesn't say.
     pub camera: String,
-    /// What the camera saw as an event took it, from its name (`vehicle`, `person`, or `motion`
-    /// for a camera that knows only motion); empty for one taken by hand.
+    /// What the camera saw as an event took it (`vehicle`, `motion`); empty for one taken by hand.
     pub tags: Vec<String>,
-    /// The event that took it, by id, while the log has it; `""` otherwise, and always on the
-    /// web, which keeps no log.
+    /// The event that took it, by id, while the log has it; `""` otherwise.
     pub event: String,
     /// When it was taken, in milliseconds since 1970, as `Date` takes it.
     pub taken_at: f64,
@@ -545,15 +472,13 @@ pub struct SnapshotInfo {
 pub struct VideoInfo {
     /// The file's name, which every other call names it by.
     pub name: String,
-    /// Where the file is, as `<Video src>` takes it: an absolute path on the desktop, the
-    /// server's URL for it on the web.
+    /// Where the file is, for `<Video src>`: a path on the desktop, the server's URL on the web.
     pub path: String,
     /// Its first picture, for `<Image src>` as `path` is; `""` while it has none.
     pub thumbnail: String,
     /// The id of the camera that made it, or `""` when its name doesn't say.
     pub camera: String,
-    /// What the camera saw as an event's sighting started it, from its name, as a snapshot's
-    /// `tags`; empty for one someone started.
+    /// What the camera saw as an event started it; empty for one someone started.
     pub tags: Vec<String>,
     /// The event it recorded, by id, while the log has it; `""` otherwise, and always on the web.
     pub event: String,
@@ -582,14 +507,11 @@ pub struct EventInfo {
     pub ongoing: bool,
     /// Whether the camera saw motion during it.
     pub motion: bool,
-    /// What the camera's AI told apart during it, by `DetectionInfo` key (`person`, `vehicle`);
-    /// empty for a camera that knows only motion.
+    /// What the camera's AI told apart during it, by `DetectionInfo` key; empty for motion only.
     pub detected: Vec<String>,
-    /// How many times the camera saw something during it, each after ten seconds of nothing; 1
-    /// for one pass.
+    /// How many times the camera saw something during it, each after ten seconds of nothing.
     pub sightings: u32,
-    /// Its snapshot, as the snapshots page names it; `""` when it took none, or it was deleted
-    /// since.
+    /// Its snapshot, as the snapshots page names it; `""` when it took none or it was deleted.
     pub snapshot: String,
     /// That snapshot, for the viewer's `<Image src>`: an absolute path; `""` without one.
     pub picture: String,
@@ -599,8 +521,7 @@ pub struct EventInfo {
     pub videos: Vec<String>,
 }
 
-/// What each event saves into the snapshots and videos folders, as Settings' Automation section
-/// offers it.
+/// What each event saves into the snapshots and videos folders.
 #[derive(Clone, Copy, Debug, PartialEq, PropEnum)]
 pub enum EventCaptureInfo {
     /// Nothing: the event is only a note in the log.
@@ -613,30 +534,20 @@ pub enum EventCaptureInfo {
     PictureAndVideo,
 }
 
-/// What the app does by itself, and how much media it may keep: Settings' Automation section,
-/// saved in `settings.json`'s `automation`. Sizes are in megabytes of 1,048,576 bytes, as the
-/// system shows them.
+/// What the app does by itself and how much media it may keep; sizes are in MiB.
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct AutomationSettings {
-    /// Whether the app watches every camera it can, on screen or not, and logs what they see on
-    /// the Events page. On until turned off; off, there are no alerts and nothing is saved for
-    /// events either.
+    /// Whether the app watches every camera and logs what they see; off, events save nothing.
     pub log_events: bool,
-    /// What each event saves into the snapshots and videos folders, tagged with what the camera
-    /// saw. A picture until the user picks.
+    /// What each event saves into the snapshots and videos folders, tagged with what was seen.
     pub event_capture: EventCaptureInfo,
-    /// How long after a camera last saw something, in minutes, what it sees still joins the same
-    /// event; 0 for none, when an event ends ten seconds after the camera last saw it. Five until
-    /// the user picks.
+    /// Minutes in which what a camera sees again still joins the same event; 0 for none.
     pub event_window_minutes: u32,
-    /// The most the snapshots and videos may hold together, in megabytes; 0 for no limit. At it
-    /// the app takes no more, and stops what it records.
+    /// The most the snapshots and videos may hold together, in MiB; 0 for no limit.
     pub media_limit_mb: f64,
-    /// The largest a video file may grow, in megabytes, before the recording goes on in a new
-    /// file; 0 for no limit.
+    /// The largest a video file grows before a new one starts, in MiB; 0 for no limit.
     pub video_limit_mb: f64,
-    /// Whether, at the media limit, the oldest snapshots and videos are deleted for good to make
-    /// room for new ones, rather than nothing new being taken. One still recording never is.
+    /// Whether the oldest media are deleted for good at the limit; one still recording never is.
     pub overwrite_oldest: bool,
     /// How the videos events save are made, for every camera that doesn't have its own.
     pub event_video: EventVideoSettings,
@@ -664,12 +575,10 @@ pub struct StorageFolder {
     pub is_default: bool,
 }
 
-/// What can be done with the app's folders where it runs. The desktop has them on this PC; on the
-/// web they are the server's, which a browser can't open or choose.
+/// What can be done with the app's folders where it runs; on the web they are the server's.
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct StorageAbilities {
-    /// What a snapshot's or a recording's menu calls showing the file: `Show in Explorer` on the
-    /// desktop, `Open in a new tab` on the web.
+    /// What a file's menu calls showing it: `Show in Explorer`, or `Open in a new tab` on the web.
     pub reveal_label: String,
     /// Whether a folder can be opened in the system's file manager.
     pub can_open_folder: bool,
@@ -680,8 +589,7 @@ pub struct StorageAbilities {
 /// How full the drive under one of the app's folders is, for the dashboard.
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct DriveSpace {
-    /// The drive, as Explorer names it (`D:`), or the folder's root where there are no drive
-    /// letters (`/`).
+    /// The drive, as Explorer names it (`D:`), or the folder's root without drive letters (`/`).
     pub drive: String,
     /// What is left for the app to fill, in bytes.
     pub free: f64,
@@ -705,8 +613,7 @@ impl Cameras {
         backend::states()
     }
 
-    /// Calls `listener` with every camera's state now and after every change, cameras added and
-    /// deleted included, until the returned function is called or what called this goes.
+    /// Calls `listener` with every camera's state now and after every change.
     pub fn on_states(#[args(states)] listener: Callback<Vec<CameraState>>, cx: CallCx<'_>) -> Stop {
         listen(cx, listener, REFRESH_EVERY, backend::states)
     }
@@ -716,11 +623,7 @@ impl Cameras {
         backend::ready(&id)
     }
 
-    /// Starts the camera's streams the screen shows; nothing happens to one already running, and
-    /// one that gave up (`StreamTrouble.stopped`, `refused`) starts again, as nothing else tries
-    /// it. It also undoes a Disconnect, so the camera connects by itself again when it comes on
-    /// screen. On the web it has the server try the camera again, after its stream gave up or
-    /// though it has no saved password.
+    /// Starts the camera's streams on screen, those that gave up included, and undoes a Disconnect.
     pub async fn connect(id: String) -> Result<(), String> {
         backend::connect(id).await
     }
@@ -730,13 +633,7 @@ impl Cameras {
         backend::disconnect(id).await
     }
 
-    /// Says which streams the screen shows, which it keeps, and which one is selected: each a
-    /// camera's own, or another a tile picks, which is a connection of its own. Streams shown or
-    /// kept connect by themselves when their camera has a password (unless the user disconnected
-    /// it), the rest disconnect, and only `selected` is heard. A kept stream is one the window
-    /// comes back to: the last view's, and the cameras opened on their own since. One no tile
-    /// shows stays connected and its status current, but nothing is decoded or drawn until it is
-    /// shown again. Resolves once they have.
+    /// Says which streams are shown, kept and selected, and resolves once the streams match.
     pub async fn set_on_screen(
         shown: Vec<ShownStream>,
         kept: Vec<ShownStream>,
@@ -760,32 +657,22 @@ impl Cameras {
         form::detections()
     }
 
-    /// `form` with brand `brand`: the ports still at the old brand's defaults take the new one's,
-    /// and what the user typed stays.
+    /// `form` with brand `brand`: ports still at the old brand's defaults take the new one's.
     pub fn with_brand(form: CameraForm, brand: String) -> CameraForm {
         form::with_brand(&form, &brand)
     }
 
-    /// Asks the camera at the form's address which brand it is, without a login, then, for a
-    /// Reolink with a password, logs in once for its model and what it has. `id` is the camera the
-    /// form edits, `""` for a new one: on the web, whose form never holds a saved password, the
-    /// server logs in with the saved one. Resolves with the form filled in from what was found;
-    /// rejects, saying why, when nothing answered or the login was refused. Takes a few seconds.
-    /// A run that reaches no camera (the test picture, a test, the web preview) resolves with
-    /// the form as it is and a summary saying so, since the form adds only a camera that answered.
+    /// Asks the camera at the form's address what it is and fills in the form; `id` is `""` if new.
     pub async fn detect(id: String, form: CameraForm) -> Result<DetectedCamera, String> {
         backend::detect(id, form).await
     }
 
-    /// Searches the network for cameras, logging in to none: those ONVIF's discovery finds, then
-    /// every other device that answers in RTSP. Resolves with those that answered, by address: the desktop's own network, or on the web the server's. Rejects,
-    /// saying why, where nothing can be asked. Takes about three seconds.
+    /// Searches the network for cameras without logging in to any; takes about three seconds.
     pub async fn discover() -> Result<Vec<FoundCamera>, String> {
         backend::discover().await
     }
 
-    /// Switches the camera's spotlight on or off. Rejects, saying why, for a camera without one or
-    /// one that isn't connected.
+    /// Switches the camera's spotlight; rejects a camera without one or one not connected.
     pub async fn set_spotlight(id: String, on: bool) -> Result<(), String> {
         backend::set_spotlight(id, on).await
     }
@@ -795,40 +682,27 @@ impl Cameras {
         backend::add_camera(form).await
     }
 
-    /// The web page that shows the camera's live picture, on `stream` (a key of
-    /// `streamChoices`, or `""` for its own), where the app doesn't draw it itself: the server's
-    /// player on the web. `""` on the desktop, which draws it.
+    /// The page that shows the camera's live picture on `stream`; `""` where the app draws it.
     pub fn live_url(id: String, stream: String) -> String {
         backend::live_url(&id, &stream)
     }
 
-    /// Every stream the camera has, as the menus that pick one list them: its own (its default),
-    /// the main and the sub stream for a camera of a known brand, and those the camera listed when
-    /// Detect asked it, each once however many ways it is reached. The main lens's first, then each
-    /// other lens's, each largest picture first. Empty for an unknown camera.
+    /// Every stream the camera has, once each, as the menus list them; empty for an unknown camera.
     pub fn stream_choices(id: String) -> Vec<StreamChoice> {
         backend::with_library(|saved| library::stream_choices(saved, &id))
     }
 
-    /// The key of the camera's `streamChoices` row that is the same stream as `key` (a tile's
-    /// pick): `""` for its own, whatever `key` calls it, `own` among them. `key` itself for a
-    /// stream none of them is.
+    /// The key of the camera's `streamChoices` row that is the same stream as `key`, else `key`.
     pub fn choice_key(id: String, key: String) -> String {
         backend::with_library(|saved| library::choice_key(saved, &id, &key))
     }
 
-    /// Whether Auto has a choice to make for the camera: streams of more than one size on the
-    /// lens of its own, as it listed them. Where it hasn't, a tile on Auto plays the camera's own,
-    /// whatever its size.
+    /// Whether Auto has a choice for the camera: streams of more than one size on its own lens.
     pub fn auto_picks(id: String) -> bool {
         backend::with_library(|saved| library::auto_picks(saved, &id))
     }
 
-    /// The stream Auto plays for the camera's `pictures` on Auto, each as the stage draws it: the
-    /// key of a `streamChoices` row (`""` for its own), one for all of them, so the camera has one
-    /// connection whichever tiles show it. The smallest stream on the lens of the camera's own
-    /// that none of them shows more than a quarter larger than it is, else the largest; the
-    /// camera's own where Auto has no choice (`autoPicks`) or there are no pictures.
+    /// The `streamChoices` key Auto plays for the camera's `pictures`, one for all of them.
     pub fn auto_stream(id: String, pictures: Vec<DrawnPicture>) -> String {
         backend::with_library(|saved| library::auto_stream(saved, &id, &pictures))
     }
@@ -838,10 +712,7 @@ impl Cameras {
         backend::delete_camera(id).await
     }
 
-    /// Moves the camera to `index` (from 0) among the cameras, which is the order `list`, `states`
-    /// and the sidebar's All cameras show them in; an index past the end moves it to the end.
-    /// Groups keep their own order, and its stream carries on. Rejects an unknown camera, or a file
-    /// that cannot be written, moving nothing.
+    /// Moves the camera to `index` (from 0) among the cameras; past the end moves it to the end.
     pub async fn move_to(id: String, index: u32) -> Result<(), String> {
         backend::move_camera(id, index).await
     }
@@ -851,15 +722,12 @@ impl Cameras {
         backend::with_library(|saved| library::groups_of(saved, &id))
     }
 
-    /// Saves the picture on screen of each of these cameras that is connected, into
-    /// `data\snapshots`; resolves with how many. Rejects, saying why, when none can.
+    /// Saves the picture on screen of each connected camera in `ids`; resolves with how many.
     pub async fn snapshot(ids: Vec<String>) -> Result<u32, String> {
         backend::snapshot(ids).await
     }
 
-    /// Starts recording each of these cameras that is connected, into `data\videos`; resolves
-    /// with how many. Rejects, saying why, when none can. A recording camera stays connected off
-    /// screen until recording stops.
+    /// Starts recording each connected camera in `ids`; resolves with how many.
     pub async fn record(ids: Vec<String>) -> Result<u32, String> {
         backend::record(ids).await
     }
@@ -874,10 +742,7 @@ impl Cameras {
         backend::set_audio(&id, muted, volume)
     }
 
-    /// Starts or changes a PTZ move: each axis is -1 to 1, `speed` 0 to 1. Positive pan is right,
-    /// tilt is up, zoom is in. On the desktop it resolves once the move is queued. On the web it
-    /// sends the move to the server again and again, which stops a move that isn't, and resolves
-    /// once the move is let go (`ptzStop`, or another move).
+    /// Starts or changes a PTZ move: each axis -1 to 1 (right, up, in), `speed` 0 to 1.
     pub async fn ptz_move(
         id: String,
         pan: f64,
@@ -903,22 +768,17 @@ impl Cameras {
         backend::form_problems(&form)
     }
 
-    /// Saves the form; a running stream reconnects with it. Rejects when the file cannot be
-    /// written, which changes nothing.
+    /// Saves the form; a running stream reconnects with it.
     pub async fn save_form(id: String, form: CameraForm) -> Result<(), String> {
         backend::save_form(id, form).await
     }
 
-    /// What stops `changes` being given to several cameras: nothing when they can be. Only the
-    /// fields the changes name are checked, as `formProblems` names them.
+    /// What stops `changes` being given to several cameras; only the fields they name are checked.
     pub fn change_problems(changes: CameraChanges) -> Vec<FormProblem> {
         backend::change_problems(&changes)
     }
 
-    /// Gives every camera in `ids` the changes, in one save; resolves with how many changed.
-    /// Running streams of those that changed reconnect with them; a camera the changes leave as
-    /// it was is neither saved nor restarted. Rejects, changing nothing, when a change has a
-    /// problem, a camera is unknown or the file cannot be written.
+    /// Gives every camera in `ids` the changes in one save; resolves with how many changed.
     pub async fn save_changes(ids: Vec<String>, changes: CameraChanges) -> Result<u32, String> {
         backend::save_changes(ids, changes).await
     }
@@ -935,8 +795,7 @@ impl Snapshots {
         backend::snapshots().await
     }
 
-    /// Calls `listener` whenever a snapshot is added, deleted or rewritten, by this app or
-    /// anything else, until the returned function is called or what called this goes.
+    /// Calls `listener` whenever a snapshot is added, deleted or rewritten.
     pub fn on_change(#[args(revision)] listener: Callback<f64>, cx: CallCx<'_>) -> Stop {
         listen_later(cx, listener, FOLDER_CHECK_EVERY, || async {
             backend::snapshots_revision()
@@ -950,17 +809,14 @@ impl Snapshots {
         backend::delete_snapshot(name).await
     }
 
-    /// Shows the snapshot: its folder in the system's file manager with it selected, or on the
-    /// web the picture in a new tab. `Storage.abilities` says which. Async because opening a tab
-    /// is nsh's to do from a task, not from a plain call.
+    /// Shows the snapshot in its folder, or in a new tab on the web.
     pub async fn reveal(name: String) -> Result<(), String> {
-        backend::reveal_snapshot(&name)
+        backend::reveal_snapshot(&name).await
     }
 
-    /// Opens the snapshots folder in the system's file manager, where `Storage.abilities` says it
-    /// can.
-    pub fn open_folder() -> Result<(), String> {
-        backend::open_snapshots_folder()
+    /// Opens the snapshots folder in the system's file manager, where `Storage.abilities` allows.
+    pub async fn open_folder() -> Result<(), String> {
+        backend::open_snapshots_folder().await
     }
 }
 
@@ -975,39 +831,30 @@ impl Videos {
         backend::videos().await
     }
 
-    /// Calls `listener` whenever a recording is added, deleted or written to, by this app or
-    /// anything else, until the returned function is called or what called this goes.
+    /// Calls `listener` whenever a recording is added, deleted or written to.
     pub fn on_change(#[args(revision)] listener: Callback<f64>, cx: CallCx<'_>) -> Stop {
         listen_later(cx, listener, FOLDER_CHECK_EVERY, || async {
             backend::videos_revision().await.map(|count| count as f64)
         })
     }
 
-    /// Deletes the recording for good: it does not go to the Recycle Bin. One still recording
-    /// is refused.
+    /// Deletes the recording for good; one still recording is refused.
     pub async fn delete(name: String) -> Result<(), String> {
         backend::delete_video(name).await
     }
 
-    /// Shows the recording: its folder in the system's file manager with it selected, or on the
-    /// web the video in a new tab. `Storage.abilities` says which. Async as `Snapshots.reveal` is.
+    /// Shows the recording in its folder, or in a new tab on the web.
     pub async fn reveal(name: String) -> Result<(), String> {
-        backend::reveal_video(&name)
+        backend::reveal_video(&name).await
     }
 
-    /// Opens the videos folder in the system's file manager, where `Storage.abilities` says it
-    /// can.
-    pub fn open_folder() -> Result<(), String> {
-        backend::open_videos_folder()
+    /// Opens the videos folder in the system's file manager, where `Storage.abilities` allows.
+    pub async fn open_folder() -> Result<(), String> {
+        backend::open_videos_folder().await
     }
 }
 
-/// What the cameras saw: the event log in `data\events`, which the desktop app keeps while it runs,
-/// watching every camera it can, on screen or not. An event is what a camera's AI tells apart
-/// (a person, a vehicle), or motion for a camera that knows only motion, from when it came into
-/// view until the camera has seen nothing for Settings → Automation's window (five minutes until
-/// changed): what it sees within it joins the event. What an event saves is in the snapshots and
-/// videos folders, and the event names it.
+/// What the cameras saw: the event log in `data\events`, which the desktop app keeps.
 #[module]
 pub struct Events;
 
@@ -1023,30 +870,25 @@ impl Events {
         backend::events().await
     }
 
-    /// Calls `listener` whenever an event starts, adds to what it saw, saves a file, ends or is
-    /// deleted, until the returned function is called or what called this goes.
+    /// Calls `listener` whenever an event starts, changes, saves a file, ends or is deleted.
     pub fn on_change(#[args(revision)] listener: Callback<f64>, cx: CallCx<'_>) -> Stop {
         listen(cx, listener, REFRESH_EVERY, || {
             backend::events_revision() as f64
         })
     }
 
-    /// Deletes each of the events `ids` that the camera doesn't see now, in one save of the log,
-    /// and for good what each saved, but a recording still being written; resolves with how
-    /// many. One the camera sees now stays: it would come back at its next change.
+    /// Deletes the events in `ids` that have ended, and what each saved; resolves with how many.
     pub async fn delete(ids: Vec<String>) -> Result<u32, String> {
         backend::delete_events(ids).await
     }
 
-    /// Deletes every event the cameras don't see now, and for good what they saved; resolves
-    /// with how many.
+    /// Deletes every event that has ended, and what each saved; resolves with how many.
     pub async fn clear() -> Result<u32, String> {
         backend::clear_events().await
     }
 }
 
-/// What the app does by itself: saving what the cameras see, and keeping the snapshots and
-/// videos within limits. The desktop app does it; the web build doesn't yet.
+/// What the app does by itself: saving what the cameras see, and keeping media within limits.
 #[module]
 pub struct Automation;
 
@@ -1062,28 +904,24 @@ impl Automation {
         backend::automation()
     }
 
-    /// Saves the settings, off the main thread; they apply at once. Rejects, changing nothing,
-    /// when the file can't be written.
+    /// Saves the settings, which apply at once.
     pub async fn save(settings: AutomationSettings) -> Result<(), String> {
         backend::save_automation(settings).await
     }
 
-    /// What the snapshots and videos hold together now, in bytes, read off the main thread.
+    /// What the snapshots and videos hold together now, in bytes.
     pub async fn media_size() -> Result<f64, String> {
         backend::media_size().await
     }
 }
 
-/// Where snapshots and recordings are saved. Each call names the folder as `kind`: `"snapshots"`
-/// or `"videos"`.
+/// Where snapshots and recordings are saved; `kind` is `"snapshots"` or `"videos"`.
 #[module]
 pub struct Storage;
 
 #[module]
 impl Storage {
-    /// Calls `listener` with what the snapshots and videos take, now and whenever it changes,
-    /// adding them up every few seconds off the main thread, until the returned function is
-    /// called or what called this goes.
+    /// Calls `listener` with what the snapshots and videos take, now and whenever it changes.
     pub fn on_usage(#[args(usage)] listener: Callback<MediaUsage>, cx: CallCx<'_>) -> Stop {
         listen_later(cx, listener, USAGE_CHECK_EVERY, || async {
             backend::media_usage().await.ok()
@@ -1100,10 +938,7 @@ impl Storage {
         backend::storage_folder(&kind)
     }
 
-    /// Asks for a folder with the system's dialog and saves `kind` there from now on: the next
-    /// snapshot or recording goes there, and those already saved stay where they are. Resolves
-    /// with where `kind` are saved afterwards, unchanged when the user canceled. Refused for the
-    /// videos while a camera records.
+    /// Picks a folder for `kind` with the system's dialog; videos stay put while a camera records.
     pub async fn choose(kind: String) -> Result<StorageFolder, String> {
         backend::choose_storage(kind).await
     }
@@ -1114,12 +949,11 @@ impl Storage {
     }
 
     /// Opens where `kind` are saved in the system's file manager.
-    pub fn open(kind: String) -> Result<(), String> {
-        backend::open_storage(&kind)
+    pub async fn open(kind: String) -> Result<(), String> {
+        backend::open_storage(&kind).await
     }
 
-    /// How full the drive under `kind`'s folder is: asked of the system, and of the nearest
-    /// folder above it that exists while it hasn't been made yet.
+    /// How full the drive under `kind`'s folder is.
     pub async fn space(kind: String) -> Result<DriveSpace, String> {
         backend::storage_space(kind).await
     }
@@ -1136,14 +970,12 @@ impl Preferences {
         backend::preferences()
     }
 
-    /// Saves the preferences, off the main thread. A failure is silent, because a preference must
-    /// never interrupt what the user is doing.
+    /// Saves the preferences; a failure is silent, so it never interrupts the user.
     pub async fn save(preferences: UiPreferences) {
         backend::save_preferences(preferences).await;
     }
 
-    /// The page the window showed last, which it opens on: `dashboard`, `cameras`, `groups`,
-    /// `snapshots`, `videos`, `events`, `view:<id>` or `camera:<id>`; empty when none was saved.
+    /// The page the window showed last (`dashboard`, `view:<id>`); empty when none was saved.
     pub fn last_page() -> String {
         backend::last_page()
     }
@@ -1153,35 +985,28 @@ impl Preferences {
         backend::alerts()
     }
 
-    /// Saves whether the app shows those messages, off the main thread. A failure is silent, as
-    /// with `save`.
+    /// Saves whether the app shows those messages; a failure is silent.
     pub async fn save_alerts(on: bool) {
         backend::save_alerts(on).await;
     }
 
-    /// Saves the page the window shows, as `last_page` reads it, off the main thread. Of several
-    /// saves under way the newest wins, whichever finishes last. A failure is silent, as with
-    /// `save`.
+    /// Saves the page the window shows; of several saves under way the newest wins.
     pub async fn save_page(page: String) {
         backend::save_page(page).await;
     }
 
-    /// How wide the Events page's table is beside its preview, in points, as it was last dragged
-    /// to; `null` until it is dragged, for its columns' own width.
+    /// How wide the Events page's table was last dragged, in points; `null` until it is.
     pub fn events_table_width() -> Option<f64> {
         backend::events_table_width()
     }
 
-    /// Saves how wide the Events page's table was dragged, as `events_table_width` reads it, off
-    /// the main thread. A failure is silent, as with `save`.
+    /// Saves how wide the Events page's table was dragged; a failure is silent.
     pub async fn save_events_table_width(width: f64) {
         backend::save_events_table_width(width).await;
     }
 }
 
-/// Where the window was left, kept in `settings.json` so it reopens there: `keepWindowPlace` (in
-/// `dp/ui`) hands it to nsh, and saves each new place the window settles in. The web build keeps
-/// none: the browser has its own window.
+/// Where the window was left, kept in `settings.json` so it reopens there.
 #[module]
 pub struct AppWindow;
 
@@ -1192,8 +1017,7 @@ impl AppWindow {
         backend::saved_window()
     }
 
-    /// Saves where the window settled, off the main thread. A failure is silent, as with every
-    /// preference.
+    /// Saves where the window settled; a failure is silent.
     pub async fn save_place(place: WindowPlace) {
         backend::save_window(place).await;
     }
@@ -1210,9 +1034,7 @@ impl Groups {
         backend::with_library(library::groups)
     }
 
-    /// Adds a group with `cameras` in it, in that order, in one save; resolves with its id. A
-    /// camera listed twice goes in once. Rejects a blank name or an unknown camera, adding
-    /// nothing.
+    /// Adds a group with `cameras` in it, in order; resolves with its id. Rejects a blank name.
     pub async fn add(name: String, cameras: Vec<String>) -> Result<String, String> {
         make(Ok(library::add_group(&name, &cameras))).await
     }
@@ -1222,9 +1044,7 @@ impl Groups {
         make(Ok(library::rename_group(&id, &name))).await.map(drop)
     }
 
-    /// Gives the group `name` and `cameras`, in that order, in one save: what its sheet saves. A
-    /// camera listed twice goes in once. Rejects a blank name, an unknown group or an unknown
-    /// camera, changing nothing.
+    /// Gives the group `name` and `cameras`, in that order, in one save.
     pub async fn save(id: String, name: String, cameras: Vec<String>) -> Result<(), String> {
         make(Ok(library::save_group(&id, &name, &cameras)))
             .await
@@ -1238,14 +1058,12 @@ impl Groups {
             .map(drop)
     }
 
-    /// Removes every group in `ids` in one save. Their cameras stay. Rejects an unknown group,
-    /// removing none.
+    /// Removes every group in `ids` in one save; their cameras stay.
     pub async fn remove_many(ids: Vec<String>) -> Result<(), String> {
         make(Ok(library::remove_groups(&ids))).await.map(drop)
     }
 
-    /// Moves the group to `index` (from 0) among the groups, which is the order the sidebar lists
-    /// them in. An index past the end moves it to the end.
+    /// Moves the group to `index` (from 0) among the groups; past the end moves it to the end.
     pub async fn move_to(id: String, index: u32) -> Result<(), String> {
         make(Ok(library::move_group(&id, index))).await.map(drop)
     }
@@ -1306,30 +1124,24 @@ impl Views {
         make(Ok(library::remove_view(&id))).await.map(drop)
     }
 
-    /// Divides the view as the layout, each tile keeping its camera. Tiles the layout has no room
-    /// for keep their cameras, for when the view has room for them again.
+    /// Divides the view as the layout; tiles it has no room for keep their cameras for later.
     pub async fn set_layout(id: String, layout: String) -> Result<(), String> {
         make(library::set_layout(&id, &layout)).await.map(drop)
     }
 
-    /// Moves, resizes, adds and removes the view's tiles at once: `tiles` is every tile it has
-    /// from now on, in order, each keeping the camera of the tile it was. Rejects tiles that
-    /// overlap, leave the grid, or are smaller than `Views.grid` allows.
+    /// Moves, resizes, adds and removes the view's tiles at once: `tiles` is every tile it keeps.
     pub async fn arrange(id: String, tiles: Vec<ArrangedTileInfo>) -> Result<(), String> {
         make(Ok(library::arrange(&id, tiles))).await.map(drop)
     }
 
-    /// Sets how the picture fills tile `index` (from 0), which shows a camera: the key of one of
-    /// `Views.fits`. The tile keeps it as its camera or stream changes.
+    /// Sets how the picture fills tile `index` (from 0): the key of one of `Views.fits`.
     pub async fn set_tile_fit(id: String, index: u32, fit: String) -> Result<(), String> {
         make(library::set_tile_fit(&id, index, &fit))
             .await
             .map(drop)
     }
 
-    /// Shows the camera in tile `index` (from 0) on `stream`, as `ViewInfo.streams` has it: a key
-    /// of `Cameras.streamChoices`, `own` for the camera's own stream, or `""` for Auto; a camera
-    /// of `""` empties the tile.
+    /// Shows the camera in tile `index` on `stream` (a `ViewInfo.streams` key); `""` empties it.
     pub async fn set_tile(
         id: String,
         index: u32,
@@ -1348,8 +1160,7 @@ pub struct Library;
 
 #[module]
 impl Library {
-    /// Calls `listener` after every saved change to the cameras, groups or views, until the returned
-    /// function is called or what called this goes.
+    /// Calls `listener` after every saved change to the cameras, groups or views.
     pub fn on_change(#[args(revision)] listener: Callback<f64>, cx: CallCx<'_>) -> Stop {
         listen(cx, listener, REFRESH_EVERY, || backend::revision() as f64)
     }
@@ -1360,15 +1171,13 @@ impl Library {
     }
 }
 
-/// The server the web build works on, when it has a password. The desktop app keeps its cameras
-/// itself and never asks to sign in.
+/// The server the web build works on, when it has a password; the desktop never asks to sign in.
 #[module]
 pub struct Server;
 
 #[module]
 impl Server {
-    /// Calls `listener` with whether the server wants its password before it answers, now and
-    /// whenever that changes, until the returned function is called or what called this goes.
+    /// Calls `listener` with whether the server wants its password, now and whenever that changes.
     pub fn on_sign_in_needed(#[args(needed)] listener: Callback<bool>, cx: CallCx<'_>) -> Stop {
         listen(cx, listener, REFRESH_EVERY, backend::sign_in_needed)
     }
@@ -1378,8 +1187,7 @@ impl Server {
         backend::signed_in()
     }
 
-    /// Signs in with the server's password. A wrong one is refused in the server's words, and
-    /// the next try has to wait a few seconds.
+    /// Signs in with the server's password; a wrong one is refused, and the next try must wait.
     pub async fn sign_in(password: String) -> Result<(), String> {
         backend::sign_in(password).await
     }
@@ -1390,10 +1198,7 @@ impl Server {
     }
 }
 
-/// Makes a change to the cameras, groups or views where they are kept (the desktop's files, or
-/// the server's on the web), and resolves with the id of what it added, `""` when it added
-/// nothing. A change that couldn't be described, such as an unknown layout, is refused before it
-/// is sent.
+/// Makes a change where the cameras are kept, resolving with the id of what it added or `""`.
 async fn make(change: Result<Change, String>) -> Result<String, String> {
     backend::apply(change?)
         .await

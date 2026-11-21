@@ -1,11 +1,8 @@
-//! Builds a camera's RTSP URL.
-//!
-//! Credentials never go in the URL: the RTSP source repeats the URL in its log lines, which would
-//! write the password into a diagnostic log. `crates/ipcamera/media` hands the login over separately.
+//! Builds a camera's RTSP URL. Credentials never go in it: the RTSP source logs the URL.
 
 use crate::camera_config::{Brand, CameraConfig, Stream};
 
-/// Dahua/Amcrest live path. Amcrest SmartHome cameras ignore the path and accept :554 either way.
+/// Dahua/Amcrest live path.
 pub fn default_path(channel: u32, stream: Stream) -> String {
     format!(
         "/cam/realmonitor?channel={channel}&subtype={}",
@@ -13,8 +10,7 @@ pub fn default_path(channel: u32, stream: Stream) -> String {
     )
 }
 
-/// Reolink's live path, which names neither codec: current firmware serves H.264 and H.265 there.
-/// Older firmware wants `/h264Preview_01_main` or `/h265Preview_01_main`, as an override.
+/// Reolink's live path, for either codec; some firmware needs `/h264Preview_01_main` instead.
 pub fn reolink_path(channel: u32, stream: Stream) -> String {
     let stream = match stream {
         Stream::Main => "main",
@@ -23,8 +19,7 @@ pub fn reolink_path(channel: u32, stream: Stream) -> String {
     format!("/Preview_{channel:02}_{stream}")
 }
 
-/// The path a blank override stands for, by brand. A camera of another brand gets Dahua's, which
-/// is what the app has always sent.
+/// The path a blank override stands for, by brand; any other brand gets Dahua's.
 pub fn path_for(brand: Brand, channel: u32, stream: Stream) -> String {
     match brand {
         Brand::Reolink => reolink_path(channel, stream),
@@ -46,7 +41,6 @@ pub fn build(camera: &CameraConfig) -> String {
     while path.len() > 1 && path.ends_with('/') {
         path.pop();
     }
-    // A bare "/" means the camera answers on the root path, so don't send one at all.
     if path == "/" {
         path.clear();
     }

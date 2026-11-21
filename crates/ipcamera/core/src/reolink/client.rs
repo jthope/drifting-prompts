@@ -1,16 +1,6 @@
-//! Sends [`super`]'s commands to a camera and keeps the login they need.
-//!
-//! The client logs in once and reuses the token until shortly before its lease runs out, then logs
-//! out and in again: a camera allows only a few sessions at once. When the camera forgets a token
-//! early, after a restart say, the client logs in again once and resends the request.
-//!
-//! A refused login is final. The client remembers it and answers every later call with it
-//! without asking the camera again, since each failed login brings the account closer to being
-//! locked. Only a new client, made after the user changed the password, logs in again.
-//!
-//! Calls block, for up to [`TIMEOUT`]: each camera's client belongs on a thread of its own, never on
-//! the window's. HTTPS is the cameras' default, with a certificate each camera signs itself, which
-//! no authority vouches for. The client accepts it without checking, as `reolink_aio` does.
+//! Sends [`super`]'s commands to a camera and keeps the login, renewing the token before its lease
+//! runs out. A refused login is remembered and never retried, since failed logins lock the account.
+//! Calls block; the camera's self-signed certificate is accepted unchecked.
 
 use std::{
     io::Read,
@@ -36,24 +26,16 @@ use crate::{
     ptz::PtzVelocity,
 };
 
-/// How long a request may take before the camera counts as unreachable.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How long Detect waits for an FLV stream's first bytes: one the camera has starts at once, and
-/// one it hasn't is either refused or never answered.
 const FLV_HEAD_WAIT: Duration = Duration::from_secs(3);
 
-/// The most of an FLV stream Detect reads for its head, which is in the first few kilobytes.
 const FLV_HEAD_BYTES: usize = 256 * 1024;
 
-/// How long [`ReolinkClient::answers`] waits: it asks before anyone waits on a camera's answer,
-/// and a camera that answers at all answers in well under this.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// How long before a token's lease runs out the client logs in again, as `reolink_aio` does.
 const RENEW_BEFORE: Duration = Duration::from_secs(300);
 
-/// A token and when to stop using it.
 struct Token {
     name: String,
     renew_at: Instant,
@@ -62,31 +44,27 @@ struct Token {
 /// A logged-in connection to a Reolink camera's HTTP API.
 pub struct ReolinkClient {
     agent: Agent,
-    /// The camera's web server: `https://192.0.2.10:443`.
     base: String,
     url: String,
     user: String,
     password: String,
     token: Option<Token>,
-    /// Why the camera refused a login, which every later call returns without asking it again.
+    /// Returned by every later call without asking the camera again.
     refused: Option<ReolinkError>,
-    /// Whether a PTZ move takes a speed, as [`features`](Self::features) found; until then it
-    /// goes without one, which every camera takes.
+    /// Off until [`features`](Self::features) says so: every camera takes a move without a speed.
     ptz_speed: bool,
 }
 
 impl ReolinkClient {
-    /// Logs in to the API of the camera at `host` on `port`, over HTTPS when `https`, else plain
-    /// HTTP. Makes exactly one login attempt.
+    /// Logs in to the camera's API, with exactly one login attempt.
     pub fn connect(host: &str, port: u16, https: bool, user: &str, password: &str) -> Result<Self> {
         let mut client = Self::new(host, port, https, user, password, TIMEOUT);
         client.login()?;
         Ok(client)
     }
 
-    /// Whether a Reolink camera's API answers at `host` on `port`. It asks without logging in, and
-    /// a Reolink camera answers "please login first", which no other camera says. Never a login,
-    /// so never a failed one. Waits up to [`PROBE_TIMEOUT`].
+    /// Whether a Reolink's API answers at `host` on `port`: asked without a login, only a Reolink
+    /// says "please login first".
     pub fn answers(host: &str, port: u16, https: bool) -> bool {
         let probe = Self::new(host, port, https, "", "", PROBE_TIMEOUT);
         matches!(
@@ -95,7 +73,6 @@ impl ReolinkClient {
         )
     }
 
-    /// A client that hasn't logged in.
     fn new(
         host: &str,
         port: u16,
@@ -105,7 +82,6 @@ impl ReolinkClient {
         timeout: Duration,
     ) -> Self {
         let scheme = if https { "https" } else { "http" };
-        // An IPv6 address goes in brackets in a URL.
         let host = if host.contains(':') {
             format!("[{host}]")
         } else {
@@ -143,7 +119,6 @@ impl ReolinkClient {
         self.ptz_speed = ptz.speed;
         Ok(CameraFeatures {
             motion: motion.is_ok(),
-            // A camera with no AI refuses the command.
             detections: ai.map(|value| read_ai(&value).0).unwrap_or_default(),
             spotlight: has_spotlight(&ability, channel),
             pan_tilt: ptz.pan_tilt,
@@ -151,8 +126,7 @@ impl ReolinkClient {
         })
     }
 
-    /// What the camera sees on `channel`, counted from 1, right now, with its spotlight when
-    /// `spotlight` (a camera without one may refuse to say).
+    /// What the camera sees on `channel`, counted from 1, now; its spotlight only when `spotlight`.
     pub fn activity(&mut self, channel: u32, spotlight: bool) -> Result<CameraActivity> {
         let channel = reolink_channel(channel);
         let mut commands = vec![get_md_state(channel), get_ai_state(channel)];
@@ -170,8 +144,7 @@ impl ReolinkClient {
         })
     }
 
-    /// Starts moving the camera on `channel`, counted from 1, at `velocity`, or stops it when the
-    /// velocity is still. A move lasts until a stop.
+    /// Starts moving the camera on `channel`, counted from 1, until a stop; a still velocity stops.
     pub fn ptz_move(&mut self, channel: u32, velocity: PtzVelocity) -> Result<()> {
         let channel = reolink_channel(channel);
         let Some((op, speed)) = ptz_op(velocity) else {
@@ -179,9 +152,8 @@ impl ReolinkClient {
         };
         let with_speed = self.ptz_speed;
         match self.call_one(ptz_ctrl(channel, op, with_speed.then_some(speed))) {
-            // What the camera says of itself doesn't always settle whether a move takes a speed,
-            // a zoom's least of all: one refused is tried once the other way, and what the camera
-            // took is how the next goes.
+            // The abilities don't always settle whether a move takes a speed: a refused one is
+            // tried once the other way, which then sticks.
             Err(ReolinkError::Refused { .. }) => {
                 self.call_one(ptz_ctrl(channel, op, (!with_speed).then_some(speed)))?;
                 self.ptz_speed = !with_speed;
@@ -191,8 +163,7 @@ impl ReolinkClient {
         }
     }
 
-    /// The streams of `channel`, counted from 1, as the camera lists their RTSP addresses; none
-    /// from a camera without the command.
+    /// The RTSP streams the camera lists for `channel`, counted from 1.
     pub fn streams(&mut self, channel: u32) -> Result<Vec<CameraStream>> {
         match self.call_one(get_rtsp_url(reolink_channel(channel))) {
             Ok(value) => Ok(read_streams(&value)),
@@ -201,13 +172,8 @@ impl ReolinkClient {
         }
     }
 
-    /// The FLV streams of `channel`, counted from 1, that `listed`, the streams the camera listed
-    /// over RTSP, doesn't have: each name Reolink's web server sends a stream under
-    /// ([`super::FLV_STREAMS`]) opened for its first bytes, all at once, and kept where it sends
-    /// H.264, under that name (`ext`), its path `flv:` and the name in the address
-    /// (`flv:channel0_ext.bcs`), with what its head says of its picture. A second lens is listed
-    /// under the first of its names that answers, though some cameras answer to two. None from a
-    /// camera whose abilities don't include FLV.
+    /// The H.264 FLV streams of `channel`, counted from 1, that `listed` (over RTSP) lacks, each
+    /// opened at once for its first bytes, since no reply lists them.
     pub fn flv_streams(
         &mut self,
         channel: u32,
@@ -259,10 +225,8 @@ impl ReolinkClient {
             .collect())
     }
 
-    /// The address of the FLV stream `name` (`channel0_ext.bcs`), with this login's token in it
-    /// rather than the password, for the media code to open. It is a login all the same: never
-    /// print or log it. The camera takes the token only while this client is logged in, and goes
-    /// on sending after it logs out, so open the stream before dropping the client.
+    /// The address of FLV stream `name`, with this login's token: never print or log it. The token
+    /// works only while this client is logged in, so open the stream before dropping the client.
     pub fn flv_url(&mut self, name: &str) -> Result<String> {
         let rtmp_port = match self.call_one(get_net_port()) {
             Ok(net_port) => read_rtmp_port(&net_port),
@@ -277,9 +241,6 @@ impl ReolinkClient {
         ))
     }
 
-    /// What the FLV stream at `request` says of itself in its first bytes; `None` when the
-    /// camera refuses it, hangs up, sends something else or says nothing within
-    /// [`FLV_HEAD_WAIT`]. Reading stops there, which closes the stream.
     fn flv_head(&self, request: &str) -> Option<FlvHead> {
         let mut response = agent(FLV_HEAD_WAIT)
             .get(format!("{}{request}", self.base))
@@ -292,7 +253,6 @@ impl ReolinkClient {
         let mut bytes = Vec::new();
         let mut chunk = [0; 16 * 1024];
         while bytes.len() < FLV_HEAD_BYTES {
-            // The wait running out ends the read like the camera hanging up does.
             let read = body.read(&mut chunk).unwrap_or(0);
             if read == 0 {
                 break;
@@ -305,19 +265,16 @@ impl ReolinkClient {
         read_flv_head(&bytes)
     }
 
-    /// Where the zoom of `channel`, counted from 1, is and how far it goes; `None` for a camera
-    /// that has no zoom position, or doesn't say its range.
+    /// Where the zoom of `channel`, counted from 1, is and how far it goes, when the camera says.
     pub fn zoom_position(&mut self, channel: u32) -> Result<Option<ZoomPosition>> {
         match self.call_one(get_zoom_focus(reolink_channel(channel))) {
             Ok(value) => Ok(read_zoom(&value)),
-            // A camera without the command has no zoom position.
             Err(ReolinkError::Refused { .. } | ReolinkError::Protocol(_)) => Ok(None),
             Err(error) => Err(error),
         }
     }
 
-    /// Zooms `channel`, counted from 1, to `position`, in the camera's own numbers
-    /// ([`zoom_position`](Self::zoom_position)). The lens travels there by itself.
+    /// Zooms `channel`, counted from 1, to `position`, in the camera's own numbers.
     pub fn zoom_to(&mut self, channel: u32, position: i64) -> Result<()> {
         self.call_one(start_zoom(reolink_channel(channel), position))
             .map(drop)
@@ -341,21 +298,17 @@ impl ReolinkClient {
             .map(drop)
     }
 
-    /// Sends one command, and returns its reply.
     fn call_one(&mut self, command: Value) -> Result<Value> {
         self.call(vec![command])?.pop().ok_or_else(missing_reply)?
     }
 
-    /// Sends three commands in one request, and returns their replies.
     fn call_three(&mut self, commands: [Value; 3]) -> Result<[Result<Value>; 3]> {
         self.call(commands.into())?
             .try_into()
             .map_err(|_: Replies| missing_reply())
     }
 
-    /// The camera's own picture of what it sees now, a JPEG at its main stream's size: `Snap`,
-    /// which answers with the picture itself rather than JSON. Logs in again once when the camera
-    /// has forgotten the token, as every call does.
+    /// The camera's own JPEG of what it sees now, from `Snap`.
     pub fn snapshot(&mut self, channel: u32) -> Result<Vec<u8>> {
         let token = self.token()?;
         match self.snap(channel, &token) {
@@ -368,7 +321,6 @@ impl ReolinkClient {
         }
     }
 
-    /// One `Snap` request with `token`.
     fn snap(&self, channel: u32, token: &str) -> Result<Vec<u8>> {
         let asked = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -378,8 +330,7 @@ impl ReolinkClient {
             .get(&self.url)
             .query("cmd", "Snap")
             .query("channel", channel.to_string())
-            // A different value each time, as Reolink's guide has it, so nothing on the way
-            // answers with a picture it kept.
+            // A new value each time, so no cache answers with an old picture.
             .query("rs", asked.to_string())
             .query("token", token)
             .call()
@@ -393,7 +344,6 @@ impl ReolinkClient {
         if (200..300).contains(&status) && picture {
             return response.body_mut().read_to_vec().map_err(cannot_reach);
         }
-        // Anything else is the API's error, in JSON or a short page.
         let text = response.body_mut().read_to_string().map_err(cannot_reach)?;
         Err(match read_replies(&text, 1) {
             Ok(mut replies) => replies
@@ -404,17 +354,13 @@ impl ReolinkClient {
         })
     }
 
-    /// Sends `commands` in one request with the token, logging in first when there is none or it
-    /// is about to run out, and once more when the camera has forgotten it.
-    ///
-    /// Some firmware answers several commands in one request with a single reply, when one of
-    /// them is a command the model doesn't have. Those commands are then sent again one request
-    /// each, so the ones the camera does have are still answered.
+    /// Logs in again once when the camera has forgotten the token. Some firmware answers a request
+    /// with one command it lacks with a single reply, so those are then sent one request each.
     fn call(&mut self, commands: Vec<Value>) -> Result<Replies> {
         let token = self.token()?;
         let replies = match self.send(&commands, Some(&token)) {
             Err(ReolinkError::SessionExpired) => {
-                // The camera dropped the session: it is gone, so there is nothing to log out of.
+                // The session is gone, so there is nothing to log out of.
                 self.token = None;
                 let token = self.token()?;
                 self.send(&commands, Some(&token))
@@ -427,8 +373,6 @@ impl ReolinkClient {
         }
     }
 
-    /// Sends each of `commands` in a request of its own. One the camera can't make sense of is
-    /// that command's failure; anything about the session or the connection fails them all.
     fn one_by_one(&mut self, commands: &[Value]) -> Result<Replies> {
         let token = self.token()?;
         let mut replies = Replies::with_capacity(commands.len());
@@ -443,7 +387,6 @@ impl ReolinkClient {
         Ok(replies)
     }
 
-    /// The token to send, after logging in again if it is about to run out.
     fn token(&mut self) -> Result<String> {
         if let Some(refused) = &self.refused {
             return Err(refused.clone());
@@ -461,7 +404,7 @@ impl ReolinkClient {
             .ok_or_else(missing_reply)
     }
 
-    /// Logs in once. A refusal is remembered, so the camera is never asked again.
+    /// A refusal is remembered, so the camera is never asked again.
     fn login(&mut self) -> Result<()> {
         let attempt = self
             .send(&[login(&self.user, &self.password)], None)
@@ -486,18 +429,14 @@ impl ReolinkClient {
         }
     }
 
-    /// Ends the session, if there is one. The camera ends it by itself when its lease runs out,
-    /// so a failure here changes nothing.
     fn logout(&mut self) {
         if let Some(token) = self.token.take() {
             let _ = self.send(&[logout()], Some(&token.name));
         }
     }
 
-    /// One request: `commands` as a JSON array, with the token in the query string.
     fn send(&self, commands: &[Value], token: Option<&str>) -> Result<Replies> {
         let mut request = self.agent.post(&self.url);
-        // Naming a lone command in the query too is what the guide's examples do.
         if let [only] = commands
             && let Some(name) = only["cmd"].as_str()
         {
@@ -528,16 +467,13 @@ impl ReolinkClient {
     }
 }
 
-/// Ends the session, so the camera's few sessions don't run out while each waits for its lease.
-/// It can wait for up to [`TIMEOUT`], so drop a client on its own thread.
+/// Ends the session, so the camera's few don't run out. It can block for seconds.
 impl Drop for ReolinkClient {
     fn drop(&mut self) {
         self.logout();
     }
 }
 
-/// An agent for the camera's web server that gives up after `timeout`, and accepts the certificate
-/// the camera signs itself, which no authority vouches for.
 fn agent(timeout: Duration) -> Agent {
     let config = Agent::config_builder()
         .tls_config(TlsConfig::builder().disable_verification(true).build())
@@ -548,12 +484,10 @@ fn agent(timeout: Duration) -> Agent {
     Agent::new_with_config(config)
 }
 
-/// A connection that failed, in ureq's words.
 fn cannot_reach(error: ureq::Error) -> ReolinkError {
     ReolinkError::Unreachable(error.to_string())
 }
 
-/// A reply the camera should have sent and didn't.
 fn missing_reply() -> ReolinkError {
     ReolinkError::Protocol("The camera's answer is missing a reply.".into())
 }

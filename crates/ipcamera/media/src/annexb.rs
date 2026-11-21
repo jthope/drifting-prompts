@@ -1,18 +1,10 @@
-//! Reading the compressed video the camera sends: H.264 and H.265 access units in Annex-B form.
+//! H.264 and H.265 access units in Annex-B form: their NAL units, parameter sets and codec string.
 //!
-//! An Annex-B access unit is a run of NAL units, each after a start code (`00 00 01`, or
-//! `00 00 00 01`). A decoder needs the stream's parameter sets before its first keyframe: SPS and
-//! PPS for H.264, and VPS, SPS and PPS for H.265. Cameras send them either in front of every
-//! keyframe or only now and then, so [`ParameterSets`] keeps the newest of each. A recording or a
-//! viewer that starts at a keyframe without them gets them from there.
-//!
-//! [`codec_string`] reads the SPS for the codec string a browser's WebCodecs decoder is configured
-//! with, such as `avc1.42C00A` or `hev1.1.6.L93.B0`.
+//! Some cameras send parameter sets only now and then, so [`ParameterSets`] keeps the newest.
 
 use g2g_core::VideoCodec;
 
-/// The NAL unit types of the parameter sets a decoder needs, in the order they go: SPS and PPS
-/// for H.264, VPS, SPS and PPS for H.265.
+/// The parameter sets' NAL unit types, in the order a decoder needs them.
 pub(crate) fn parameter_set_types(codec: VideoCodec) -> &'static [u8] {
     match codec {
         VideoCodec::H265 => &[32, 33, 34],
@@ -20,7 +12,6 @@ pub(crate) fn parameter_set_types(codec: VideoCodec) -> &'static [u8] {
     }
 }
 
-/// The type of a NAL unit, from its header.
 pub(crate) fn nal_type(codec: VideoCodec, nal: &[u8]) -> Option<u8> {
     let first = *nal.first()?;
     Some(match codec {
@@ -29,7 +20,6 @@ pub(crate) fn nal_type(codec: VideoCodec, nal: &[u8]) -> Option<u8> {
     })
 }
 
-/// The NAL units of an Annex-B access unit, without their start codes.
 pub(crate) fn nal_units(au: &[u8]) -> Vec<&[u8]> {
     let mut starts = Vec::new();
     let mut at = 0;
@@ -56,16 +46,14 @@ pub(crate) fn nal_units(au: &[u8]) -> Vec<&[u8]> {
         .collect()
 }
 
-/// The newest parameter sets the stream has sent, so a file or a viewer can start at a keyframe
-/// that came without them.
 #[derive(Default)]
 pub(crate) struct ParameterSets {
-    /// The newest unit of each type, in [`parameter_set_types`] order.
+    /// In [`parameter_set_types`] order.
     latest: Vec<Option<Vec<u8>>>,
 }
 
 impl ParameterSets {
-    /// Keeps the parameter sets `au` carries, and says whether it carries all of them.
+    /// Keeps the parameter sets `au` carries; true when it carries all of them.
     pub(crate) fn refresh(&mut self, codec: VideoCodec, au: &[u8]) -> bool {
         let types = parameter_set_types(codec);
         self.latest.resize(types.len(), None);
@@ -81,13 +69,11 @@ impl ParameterSets {
         carried.iter().all(|&carries| carries)
     }
 
-    /// Whether every parameter set the codec needs has arrived.
     pub(crate) fn complete(&self, codec: VideoCodec) -> bool {
         self.latest.len() == parameter_set_types(codec).len()
             && self.latest.iter().all(Option::is_some)
     }
 
-    /// `au` with the parameter sets ahead of it.
     pub(crate) fn prepend(&self, au: &[u8]) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(au.len() + 256);
         for nal in self.latest.iter().flatten() {
@@ -98,7 +84,6 @@ impl ParameterSets {
         bytes
     }
 
-    /// The newest SPS, NAL header included.
     fn sps(&self, codec: VideoCodec) -> Option<&[u8]> {
         let slot = match codec {
             VideoCodec::H265 => 1,
@@ -108,21 +93,14 @@ impl ParameterSets {
     }
 }
 
-/// The codec string a WebCodecs decoder is configured with, read from the stream's SPS, or `None`
-/// before an SPS has arrived.
-///
-/// H.264 gives `avc1.` and the SPS's profile, constraint flags and level, as hex. H.265 gives
-/// `hev1.` and its general profile, tier and level (ISO/IEC 14496-15 Annex E): the profile space
-/// letter and profile, the compatibility flags in reverse bit order, the tier letter and level,
-/// then the constraint bytes up to the last one that isn't zero. `hev1` rather than `hvc1`,
-/// because the parameter sets travel in the stream.
+/// The WebCodecs codec string from the stream's SPS: `hev1`, not `hvc1`, since the parameter sets
+/// travel in the stream.
 pub(crate) fn codec_string(codec: VideoCodec, sets: &ParameterSets) -> Option<String> {
     let sps = sets.sps(codec)?;
     match codec {
         VideoCodec::H265 => hevc_codec_string(sps),
         _ => {
-            // After the one-byte header come profile_idc, the constraint flags and level_idc,
-            // none of which can hold an emulation-prevention byte.
+            // These three bytes can't hold an emulation-prevention byte.
             let [_, profile, constraints, level, ..] = *sps else {
                 return None;
             };
@@ -131,11 +109,8 @@ pub(crate) fn codec_string(codec: VideoCodec, sets: &ParameterSets) -> Option<St
     }
 }
 
-/// The `hev1.` codec string of an H.265 SPS, NAL header included.
 fn hevc_codec_string(sps: &[u8]) -> Option<String> {
-    // The general profile, tier and level sit at fixed places after the two-byte header: a byte of
-    // ids and flags, then profile space (2 bits), tier (1) and profile (5), 32 compatibility
-    // flags, 6 constraint bytes and the level (H.265 7.3.2.2 and 7.3.3).
+    // Fixed offsets after the two-byte NAL header (H.265 7.3.2.2 and 7.3.3).
     let rbsp = without_emulation_prevention(sps.get(2..)?);
     let head: &[u8; 13] = rbsp.get(..13)?.try_into().ok()?;
     let space = match head[1] >> 6 {
@@ -158,8 +133,6 @@ fn hevc_codec_string(sps: &[u8]) -> Option<String> {
     Some(codec)
 }
 
-/// A NAL unit's payload with the emulation-prevention bytes taken out: the `03` an encoder puts
-/// after two zero bytes so the payload never looks like a start code.
 fn without_emulation_prevention(payload: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(payload.len());
     let mut zeros = 0;
@@ -198,7 +171,6 @@ mod tests {
 
     #[test]
     fn an_h264_codec_string_comes_from_the_sps() {
-        // The SPS and PPS of a 64 x 64 Constrained Baseline stream, level 1.0.
         let sps: &[u8] = &[
             0x67, 0x42, 0xc0, 0x0a, 0xda, 0x0f, 0xd0, 0x80, 0x00, 0x00, 0x03, 0x00, 0x80, 0x00,
             0x00, 0x1e, 0x47, 0x89, 0x16, 0xa8,
@@ -216,9 +188,6 @@ mod tests {
 
     #[test]
     fn an_h265_codec_string_reads_past_emulation_prevention() {
-        // Main profile, main tier, level 3.1, progressive and frame only. The payload is
-        // 01 01 60 00 00 00 B0 00 00 00 00 00 5D, and an encoder writes its runs of zeros with an
-        // emulation-prevention byte after every second one.
         let vps: &[u8] = &[0x40, 0x01, 0x0c];
         let sps: &[u8] = &[
             0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0xb0, 0x00, 0x00, 0x03, 0x00,

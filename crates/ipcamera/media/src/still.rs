@@ -1,19 +1,6 @@
-//! One picture from a relaying session, decoded when asked: a snapshot, or a recording's
-//! thumbnail.
+//! One picture from a relay, decoded when asked from its pictures since the last keyframe.
 //!
-//! A relay decodes nothing, and decoding every camera all the time would cost the server what
-//! relaying saves. But its [`Feed`](crate::Feed) keeps the pictures since the last keyframe for
-//! late viewers, and those are exactly what decoding the newest picture takes. So a still is a
-//! short graph of its own, built when asked and gone when done:
-//!
-//! ```text
-//! backlog source ! h264parse ! size tap ! <decoder> ! videoconvert ! (BGRA) slot sink
-//! ```
-//!
-//! with the same parser, decoders and sink as a live view ([`crate::pipeline`]), so a still is the
-//! picture the desktop would have shown. It runs on a thread of its own with a runtime of its own,
-//! as a session's graph does, and the caller waits for it while a keyframe interval of pictures
-//! decodes on the CPU.
+//! The caller blocks while a keyframe interval of pictures decodes on the CPU.
 
 use std::{
     future::{Ready, ready},
@@ -42,17 +29,13 @@ use crate::{
     sink::{DisplaySize, SizeTap, SlotSink},
 };
 
-/// Pictures a relay kept, to decode.
 pub(crate) struct Backlog {
-    /// The stream's codec.
     pub(crate) codec: VideoCodec,
-    /// The picture size the stream declared, when it did.
     pub(crate) size: Option<(u32, u32)>,
-    /// The pictures, from a keyframe on.
+    /// From a keyframe on.
     pub(crate) pictures: Vec<Arc<Picture>>,
 }
 
-/// Decodes `backlog`, which starts at a keyframe, and returns the last picture it makes.
 pub(crate) fn decode(backlog: Backlog) -> Result<DecodedFrame> {
     if !backlog.pictures.first().is_some_and(|first| first.keyframe) {
         return Err(failed!("no picture has arrived yet"));
@@ -64,7 +47,6 @@ pub(crate) fn decode(backlog: Backlog) -> Result<DecodedFrame> {
         .map_err(|_| failed!("decoding the picture crashed"))?
 }
 
-/// [`decode`], on this thread.
 fn decode_here(backlog: Backlog) -> Result<DecodedFrame> {
     let frames = FrameSlot::default();
     let graph = build(backlog, frames.clone())?;
@@ -120,8 +102,6 @@ fn build(backlog: Backlog, frames: FrameSlot) -> Result<Graph<GraphNode>> {
     Ok(graph)
 }
 
-/// What the camera's RTSP source would have said of the stream: its codec and, when the stream
-/// declared it, its size. The parser reads the rest from the stream itself.
 fn caps_of(codec: VideoCodec, size: Option<(u32, u32)>) -> Caps {
     match size {
         Some((width, height)) => Caps::CompressedVideo {
@@ -139,7 +119,6 @@ fn caps_of(codec: VideoCodec, size: Option<(u32, u32)>) -> Caps {
     }
 }
 
-/// Plays the pictures a relay kept back into the graph, then ends the stream.
 struct BacklogSource {
     caps: Caps,
     pictures: Vec<Arc<Picture>>,

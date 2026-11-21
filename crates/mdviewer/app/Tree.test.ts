@@ -1,5 +1,3 @@
-// The files panel's views from Rust's flat list (`views/tree.ts`), picking
-// several files, the file a project opens on, and the filter.
 import { expect, test } from "nsh/test";
 import type { FileEntry } from "mdviewer/native";
 import { allFolders, fileList, fileToOpen, fileTree, folderGroups, foldersAbove, matching, openFolders, pickedFiles, ROOT, run, shownFiles } from "./views/tree";
@@ -9,7 +7,7 @@ const file = (path: string): FileEntry => {
   return { path, name: path.slice(at + 1), folder: at < 0 ? "" : path.slice(0, at) };
 };
 
-/** As Rust lists them: in each folder its files, then its folders. */
+// In Rust's order: each folder's files, then its folders.
 const FILES = ["CHANGELOG.md", "README.md", "docs/setup.md", "docs/api/intro.md", "notes/todo.md"].map(file);
 
 test("folders hold their files, then their folders, in the list's order, under the project's own", () => {

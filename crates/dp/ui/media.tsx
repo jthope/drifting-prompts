@@ -1,7 +1,3 @@
-// What pictures and recordings share: the tile a gallery shows each in, at
-// its size or as a row of a list, with the ring that selects it; the small
-// labels over a picture's corner; and the red mark of a recording, which stays
-// red whatever the theme.
 import { type JSX, Text, View } from "nsh";
 import { Toggle, ToggleGroup, Toolbar, ToolbarSeparator } from "nsh/base";
 import { look, OVERLAY } from "./brand";
@@ -12,17 +8,17 @@ import { Press } from "./press";
 
 type Point = { x: number; y: number };
 
-/** Around each tile's picture and caption: the hover fill's room. */
+/** Room around each tile's picture and caption, for the hover fill. */
 export const TILE_PAD = 6;
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
 
-/** A recording's red dot. `pulse` makes it beat, for a line that says something records now; `label` names it for a screen reader. */
+/** A recording's red dot; `pulse` makes it beat. */
 export function LiveDot(props: { pulse?: boolean; label?: string }) {
   return <View accessibilityLabel={props.label} class={`size-2 rounded-full bg-destructive ${props.pulse ? "animate-pulse" : ""}`} />;
 }
 
-/** Says a camera is recording: the red dot and REC, and how long it has run when `length` says. White, for over a picture. */
+/** The red dot and REC, with how long it has run; white, for over a picture. */
 export function RecMark(props: { length?: string }) {
   return (
     <View accessibilityLabel={props.length ? `Recording, ${props.length}` : "Recording"} class="flex-row items-center gap-1">
@@ -34,14 +30,7 @@ export function RecMark(props: { length?: string }) {
   );
 }
 
-/**
- * Covers a picture that isn't live: a dark layer over all of it, so a last
- * picture still drawn under it can't pass for live, and in its middle an icon,
- * a `title`, `text` saying what happened, a quieter `detail` and the way
- * forward (`action`). `compact` is a view's tile, smaller than a camera's own
- * page. A press on it, its button's aside, is the view's it is in, as one on
- * the picture would be.
- */
+/** Covers a picture that isn't live, dark so its last picture can't pass for live, and says what happened. */
 export function PictureNotice(props: { icon: IconName; title?: string; text: string; detail?: string; action?: JSX.Element; compact?: boolean }) {
   const lines = { numberOfLines: 3 };
   return (
@@ -67,7 +56,7 @@ export function PictureNotice(props: { icon: IconName; title?: string; text: str
   );
 }
 
-/** A small dark label over a picture, which presses pass through. `class` places it (`absolute bottom-1.5 right-1.5`). */
+/** A small dark label over a picture, which presses pass through. */
 export function OverlayChip(props: { class?: string; children: JSX.Element }) {
   return (
     <View class={`flex-row items-center gap-1.5 px-1.5 py-0.5 ${OVERLAY.chip} ${props.class ?? ""}`} style={{ pointerEvents: "none" }}>
@@ -76,23 +65,12 @@ export function OverlayChip(props: { class?: string; children: JSX.Element }) {
   );
 }
 
-/**
- * Buttons over a picture (`kind="overlay"`), on the same dark chip as a tile's
- * name, so they read on a bright picture as on a dark one. `class` places it.
- */
+/** Buttons over a picture on a dark chip, so they read on any picture. */
 export function OverlayBar(props: { class?: string; children: JSX.Element }) {
   return <View class={`flex-row items-center ${OVERLAY.chip} ${props.class ?? ""}`}>{props.children}</View>;
 }
 
-/**
- * A picture's toolbar: buttons over it (`kind="overlay"`), the stream it is on
- * (a `Button` of that kind), a switch where one fits (`OverlaySegments`) and
- * lines between them (`OverlaySeparator`), on a dark
- * pill. Its buttons are pills too, one even margin inside it (`OnPill`), so the
- * one at either end follows its curve. It is one stop of the keyboard focus,
- * whose arrow keys move between its items, and a screen reader hears it as one
- * toolbar called `label`. `class` places it.
- */
+/** A picture's toolbar on a dark pill: one focus stop, its items reached by the arrow keys. */
 export function OverlayToolbar(props: { label: string; class?: string; children: JSX.Element }) {
   return (
     <Toolbar accessibilityLabel={props.label} class={`flex-row items-center gap-0.5 p-0.5 ${OVERLAY.toolbar} ${props.class ?? ""}`}>
@@ -106,12 +84,7 @@ export function OverlaySeparator() {
   return <ToolbarSeparator class={`mx-1 h-4 w-px ${OVERLAY.separator}`} />;
 }
 
-/**
- * One choice of a few on a picture's toolbar, as `Segmented` is on a page:
- * toggles in a group, the chosen one solid white with dark ink. `value` is the
- * chosen one, or `""` while none is. An item's `label` is what a screen reader
- * says for it ("Main stream" for "Main").
- */
+/** One choice of a few on a picture's toolbar; `value` is `""` while none is chosen. */
 export function OverlaySegments<T extends string>(props: { items: { value: T; title: string; label: string }[]; value: T | ""; onChange: (value: T) => void }) {
   const on = (value: T) => props.value === value;
   return (
@@ -135,19 +108,11 @@ export function OverlaySegments<T extends string>(props: { items: { value: T; ti
 /** How a gallery shows its files: pictures in three sizes, the small ones without their captions, or a list of rows. */
 export type TileSize = "large" | "medium" | "small" | "list";
 
-/** The keys held at a press. */
 type Keys = { shift: boolean; control: boolean; platform: boolean };
 
-/** How wide a list row's picture is, in points. */
 const LIST_PICTURE = 80;
 
-/**
- * The ring over a picture's corner that puts it in the selection, or takes it
- * out; with Shift, every file from the one last picked. It shows while the
- * pointer is over its tile (`group/tile`), and always while `shown` (anything
- * on the page selected). Hidden, it still takes a press. It lies over the
- * tile's press rather than in it, so pressing it leaves the tile closed.
- */
+/** Lies over the tile's press, not in it, so pressing it leaves the tile closed. */
 function PictureCheck(props: { label: string; testID: string; on: boolean; shown: boolean; onPress: (range: boolean) => void }) {
   return (
     <View
@@ -168,18 +133,7 @@ function PictureCheck(props: { label: string; testID: string; on: boolean; shown
   );
 }
 
-/**
- * A file in a gallery: its picture over its title and a line under it
- * (`detail`), in a `size` the page picks. `picture` fills a 16:9 frame, on
- * black for a video and the muted color for a snapshot (`frame`). A small one
- * leaves the words out; in a list it is a row, with its picture small at the
- * start and `extra` at its end, a checkbox before it.
- *
- * A press goes to `onPress` with the keys held, which opens it or picks it
- * (`Library.press`); its ring or checkbox goes to `onCheck`, true for a range.
- * `selected` fills it as a selected row of a table is, and `selecting` (anything
- * on the page selected) shows every ring. The right button opens its menu.
- */
+/** A file in a gallery, as a picture over its caption or a list row; `onCheck` hears its ring or checkbox. */
 export function MediaTile(props: {
   label: string;
   testID: string;

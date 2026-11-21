@@ -1,7 +1,5 @@
-//! The settings file as a user meets it: a first launch, a hand edit, and a save.
-//!
-//! These go through the crate's public API only, so they also check that the API is usable from
-//! outside — a `pub(crate)` that should have been `pub` fails here and nowhere else.
+//! The settings file as a user meets it, through the public API only: a first launch, a hand edit
+//! and a save.
 
 use std::{
     fs,
@@ -10,7 +8,6 @@ use std::{
 
 use ipcamera_core::config::{Config, ConfigStore};
 
-/// A settings file in a folder of its own, removed when the test ends.
 struct SettingsFolder(tempfile::TempDir);
 
 impl SettingsFolder {
@@ -48,7 +45,6 @@ fn a_first_launch_writes_the_shipped_defaults() {
     assert_eq!(text, defaults_as_json(&Config::default()));
     assert!(config.problem().is_none());
 
-    // Snapshots belong beside it, in `data`, not in the OS profile.
     assert_eq!(
         config.snapshots_dir(),
         temp.path().join("data").join("snapshots")
@@ -60,7 +56,6 @@ fn a_hand_edited_file_is_used_and_missing_fields_keep_their_defaults() {
     let temp = SettingsFolder::new();
     fs::write(
         temp.settings_file(),
-        // Only two fields: everything else has to come from the defaults.
         r#"{ "ui": { "volume": 42.0 }, "storage": { "videos": "clips" } }"#,
     )
     .expect("the hand edit");
@@ -90,7 +85,6 @@ fn a_saved_change_is_on_disk_for_the_next_launch() {
 
     assert_eq!(config.current().storage.snapshots, "shots");
 
-    // A second launch reads the file rather than the defaults.
     let reopened = temp.load();
     assert_eq!(reopened.current().storage.snapshots, "shots");
     assert!(reopened.current().window.maximized);

@@ -1,9 +1,5 @@
-//! Where snapshots and recordings are saved, as Settings changes it.
-//!
-//! The folders are `settings.json`'s `storage`, which `ConfigStore::snapshots_dir` and
-//! `ConfigStore::videos_dir` read each time, so a new folder takes effect at once: the next snapshot
-//! or recording goes there, and the pages list it on their next look at the folder. Files already
-//! saved stay where they are. The dashboard asks how full the drive under each folder is.
+//! Where snapshots and recordings are saved, as Settings changes it. A new folder takes effect at
+//! once; files already saved stay where they are.
 
 use std::path::PathBuf;
 
@@ -12,7 +8,6 @@ use ipcamera_storage::space::{check_writable, space_under};
 use super::{HUB, explorer, off_main};
 use crate::bridge::{DriveSpace, StorageAbilities, StorageFolder};
 
-/// One of the folders the app saves into.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
     Snapshots,
@@ -42,7 +37,6 @@ impl Kind {
         }
     }
 
-    /// What the folder dialog is titled.
     fn title(self) -> &'static str {
         match self {
             Self::Snapshots => "Choose where snapshots are saved",
@@ -50,7 +44,7 @@ impl Kind {
         }
     }
 
-    /// Saves `folder` as this kind's; `""` goes back to the default.
+    /// `""` means the default folder.
     fn save(self, folder: String) -> Result<(), String> {
         HUB.config
             .update(|config| match self {
@@ -60,8 +54,7 @@ impl Kind {
             .map_err(|error| error.to_string())
     }
 
-    /// A recording keeps writing where it started, and the page would stop listing it if the
-    /// folder moved under it, so the videos' folder stays put while anything records.
+    /// A recording keeps writing where it started, so the videos' folder can't move while one runs.
     fn may_move(self) -> Result<(), String> {
         let recording = HUB
             .all()
@@ -82,7 +75,7 @@ impl Kind {
     }
 }
 
-/// The desktop has the folders themselves: Explorer shows them, and the system's dialog picks them.
+/// What the desktop can do with the folders.
 pub fn storage_abilities() -> StorageAbilities {
     StorageAbilities {
         reveal_label: "Show in Explorer".to_string(),
@@ -96,18 +89,16 @@ pub fn storage_folder(kind: &str) -> Result<StorageFolder, String> {
     Kind::named(kind).map(Kind::info)
 }
 
-/// Asks for a folder with the system's dialog and saves `kind` there from now on. A canceled
-/// dialog changes nothing; either way this resolves with where `kind` are saved after it.
+/// Picks a folder with the system's dialog and saves `kind` there; canceling changes nothing.
 pub async fn choose_storage(kind: String) -> Result<StorageFolder, String> {
     let kind = Kind::named(&kind)?;
     kind.may_move()?;
     let start = kind.current();
-    let picked = off_main(move || dp_ui::folder_dialog::pick(kind.title(), &start)).await??;
+    let picked = dp_ui::folders::pick(kind.title(), &start).await?;
     let Some(folder) = picked else {
         return Ok(kind.info());
     };
     check_writable(&folder).map_err(|error| error.to_string())?;
-    // Picking the default folder is the same as going back to it.
     let saved = if folder == kind.default_folder() {
         String::new()
     } else {
@@ -125,15 +116,12 @@ pub fn reset_storage(kind: &str) -> Result<StorageFolder, String> {
     Ok(kind.info())
 }
 
-/// Opens where `kind` are saved in Explorer, making the folder first if it isn't there yet.
-pub fn open_storage(kind: &str) -> Result<(), String> {
-    explorer::open_folder(&Kind::named(kind)?.current())
+/// Opens where `kind` are saved in Explorer, making the folder if it is missing.
+pub async fn open_storage(kind: &str) -> Result<(), String> {
+    explorer::open_folder(&Kind::named(kind)?.current()).await
 }
 
-/// How full the drive under `kind`'s folder is. The folder is made only by the first snapshot or
-/// recording saved there, so until then the nearest folder above it that exists stands in: it is on
-/// the same drive. Asking the drive can wait on it (a network drive, a disk spinning up), so it
-/// runs off the main thread.
+/// How full the drive under `kind`'s folder is, off the main thread since a drive can be slow.
 pub async fn storage_space(kind: String) -> Result<DriveSpace, String> {
     let folder = Kind::named(&kind)?.current();
     let space = off_main(move || space_under(&folder))

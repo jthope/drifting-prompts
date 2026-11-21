@@ -1,17 +1,6 @@
-//! What IP Camera's dashboard shows in the screenshots: two weeks of made-up events from the four
-//! cameras, each with its snapshot and its video, and a few snapshots taken by hand.
-//!
-//! Each camera keeps habits of its own: people and parcels at the front door by day, cars in the
-//! driveway as people leave and come home, animals in the backyard around dawn and dusk, and plain
-//! motion at the side gate by night, so the busiest hours and the week's heatmap have a shape. The
-//! dashboard counts by the local clock, so the hours are placed with this machine's offset from
-//! UTC, which Windows gives. The same seed gives the same events, placed back from the time of
-//! the run, and none later than it.
-//!
-//! The files are only what the pages read: names, sizes and times. A snapshot is its camera's
-//! picture, hard-linked rather than copied, with its thumbnail beside it. A video is an empty file
-//! of the size a recording that long would have, sparse so it takes no room on the drive, last
-//! written when it ended, which is where its length comes from; it has its camera's thumbnail too.
+//! Made-up events for IP Camera's dashboard screenshots: two weeks from the four cameras, with
+//! their files. Hours are local, as the dashboard counts them; a video is an empty sparse file of
+//! a recording's size, last written when it ended.
 
 use std::{
     fs,
@@ -23,27 +12,21 @@ use std::{
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-/// How many days back the events go: the dashboard's 7 and 14 days.
 const DAYS: i64 = 14;
 
-/// A recording's bytes a second: a 1080p main stream at about 3.5 Mbit/s.
 const BYTES_A_SECOND: u64 = 440_000;
 
-/// The seed the events come from.
 const SEED: u64 = 0x5eed_cafe_f00d_d00d;
 
-/// What a camera tends to see, and when.
 struct Habit {
-    /// How many events it sees a day, at least and at most.
     per_day: (u64, u64),
-    /// The local hours they start in; an hour twice is twice as likely.
+    /// Local hours they start in; an hour listed twice is twice as likely.
     hours: &'static [i64],
-    /// What its AI tells apart in an event, one of these at a time, each in the order the app
-    /// lists detections; none for a camera that knows only motion.
+    /// One of these at a time, each in the order the app lists detections; none for motion only.
     saw: &'static [&'static [&'static str]],
 }
 
-/// Each camera's habits, in the order of the screenshots' cameras.
+/// In the screenshots' cameras' order.
 const HABITS: [Habit; 4] = [
     // The front door.
     Habit {
@@ -81,9 +64,7 @@ const HABITS: [Habit; 4] = [
     },
 ];
 
-/// Writes the events' files and a few snapshots taken by hand into `snapshots` and `videos`, from
-/// the cameras' pictures in `pictures` (`<name>.png`, and `thumbnails/<name>.png`), and returns
-/// `events.json`. `cameras` are each camera's id and name, in [`HABITS`]' order.
+/// Writes the events' files and returns `events.json`; `cameras` are in [`HABITS`]' order.
 pub fn seed(
     cameras: &[(String, &str)],
     pictures: &Path,
@@ -113,7 +94,7 @@ pub fn seed(
                 let sightings = random.between(1, 2);
                 let millisecond = random.below(1000);
                 let start = local - offset;
-                // Kept to the past: a whole event, ended a second or more before now.
+                // Only whole events, ended before now.
                 if start + seconds as i64 >= now {
                     continue;
                 }
@@ -140,7 +121,6 @@ pub fn seed(
             }
         }
 
-        // A snapshot or two someone took by day.
         for _ in 0..random.below(3) {
             let (id, name) = random.pick(cameras);
             let start =
@@ -160,7 +140,6 @@ pub fn seed(
     Ok(json!({ "version": 1, "events": events }))
 }
 
-/// The camera `name`'s picture as the snapshot `file` in `snapshots`, with its thumbnail.
 fn save_snapshot(pictures: &Path, name: &str, snapshots: &Path, file: &str) -> Result<()> {
     link(&pictures.join(format!("{name}.png")), &snapshots.join(file))?;
     link(
@@ -169,7 +148,6 @@ fn save_snapshot(pictures: &Path, name: &str, snapshots: &Path, file: &str) -> R
     )
 }
 
-/// The video `file` in `videos`, `seconds` long from `start`, with the camera `name`'s thumbnail.
 fn save_video(
     pictures: &Path,
     name: &str,
@@ -180,8 +158,7 @@ fn save_video(
 ) -> Result<()> {
     let path = videos.join(file);
     fs::File::create(&path).with_context(|| format!("couldn't write {}", path.display()))?;
-    // Sparse, its size takes no room. Without it, it would still be quick to make: Windows
-    // doesn't write the zeros, though it sets the room aside.
+    // Sparse, so the size takes no room; if that fails, Windows still writes no zeros.
     let _ = Command::new("fsutil")
         .args(["sparse", "setflag"])
         .arg(&path)
@@ -199,14 +176,12 @@ fn save_video(
     )
 }
 
-/// `to` as another name of `from`, or a copy where a link can't be made.
 fn link(from: &Path, to: &Path) -> Result<()> {
     fs::hard_link(from, to)
         .or_else(|_| fs::copy(from, to).map(|_| ()))
         .with_context(|| format!("couldn't write {}", to.display()))
 }
 
-/// This machine's offset from UTC now, in seconds, as the system gives it; 0 where it can't be read.
 fn local_offset() -> i64 {
     let offset = Command::new("powershell")
         .args([
@@ -226,7 +201,7 @@ fn local_offset() -> i64 {
     })
 }
 
-/// A small generator of numbers that look random, the same for the same seed (xorshift64*).
+/// xorshift64*: the same numbers for the same seed.
 struct Random(u64);
 
 impl Random {
@@ -237,7 +212,6 @@ impl Random {
         self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
     }
 
-    /// From 0 up to `count`, not including it.
     fn below(&mut self, count: u64) -> u64 {
         self.next() % count.max(1)
     }
@@ -247,7 +221,6 @@ impl Random {
         low + self.below(high - low + 1)
     }
 
-    /// One of `items`.
     fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
         &items[self.below(items.len() as u64) as usize]
     }
@@ -303,7 +276,6 @@ mod tests {
                 seconds * BYTES_A_SECOND
             );
         }
-        // The side gate knows only motion, and its files say so.
         assert!(events.iter().any(|event| {
             event["camera"] == "cam3"
                 && event["snapshot"].as_str().unwrap().ends_with(".motion.png")

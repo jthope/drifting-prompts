@@ -1,4 +1,4 @@
-//! Tests of [`Change`]: each one applied to a library on disk, and refused in the form's words.
+//! Tests of [`Change`], each applied to a library in memory.
 
 use super::*;
 use crate::{camera_config::InvalidCamera, library::Snapshot};
@@ -13,7 +13,6 @@ fn porch() -> CameraConfig {
     }
 }
 
-/// A library with one camera, in the first view.
 fn library() -> (Library, CameraId) {
     let library = Library::in_memory(vec![porch()]);
     let id = library.cameras()[0].id.clone();
@@ -53,7 +52,6 @@ fn cameras_are_added_updated_and_deleted() {
         InvalidCamera::NoAddress.message()
     );
 
-    // A client that was never told the password sends none, and asks to keep it.
     library
         .apply(&Change::UpdateCameras {
             cameras: vec![CameraUpdate {
@@ -176,7 +174,6 @@ fn a_camera_moves_among_the_cameras_and_its_groups_keep_their_order() {
         "no camera `gone`"
     );
 
-    // The web build sends it as JSON, and the server makes it on its own library.
     let change: Change = serde_json::from_str(&format!(
         r#"{{"change":"move_camera","id":"{yard}","index":0}}"#
     ))
@@ -308,7 +305,6 @@ fn views_are_added_divided_filled_and_removed() {
     );
     assert_eq!(library.views()[1].name, "Night watch");
     assert_eq!(library.views()[1].fit, Fit::ALL[1]);
-    // An empty tile has no picture to fit.
     assert!(
         library
             .apply(&Change::SetTileFit {

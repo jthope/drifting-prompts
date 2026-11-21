@@ -1,31 +1,26 @@
-//! Why a snapshot, a recording or a thumbnail could not be found, written or deleted:
-//! [`StorageError`].
-//!
-//! Each reads as a sentence, which the app shows as it is. The cases are kept apart so a caller
-//! can tell them apart without reading the sentence: the server answers a file that is not there
-//! differently from a disk that failed.
+//! Why a file on disk could not be found, written or deleted: [`StorageError`].
 
 use std::{fmt, io, path::PathBuf};
 
 /// Why the files on disk could not do what was asked.
 #[derive(Debug)]
 pub enum StorageError {
-    /// The name is not one of that kind's files: it is a path, or another kind of file.
+    /// The name is not one of that kind's files: a path, or another kind.
     NotThisKind {
         /// The name asked for.
         name: String,
         /// What it was asked for as: "snapshot", "recording", "thumbnail".
         noun: &'static str,
     },
-    /// The file is not there, or not there yet, as the sentence says.
+    /// The file is not there, or not yet; the sentence says which.
     Missing(String),
-    /// No folder above this one exists, so it is on no drive this PC has.
+    /// No folder above this one exists.
     NoDrive(PathBuf),
-    /// The picture to save is empty, or could not be made into a PNG, as the sentence says.
+    /// The picture is empty or could not be made a PNG; the sentence says why.
     BadPicture(String),
     /// The disk refused.
     Io {
-        /// What was being done, or the path it was done to: the sentence's start.
+        /// What was being done, or the path: the sentence's start.
         what: String,
         /// What the system reported.
         source: io::Error,
@@ -33,7 +28,6 @@ pub enum StorageError {
 }
 
 impl StorageError {
-    /// An [`Io`](Self::Io) failure of `what`, for `map_err`.
     pub(crate) fn io(what: impl Into<String>) -> impl FnOnce(io::Error) -> Self {
         let what = what.into();
         move |source| Self::Io { what, source }
@@ -65,5 +59,4 @@ impl std::error::Error for StorageError {
     }
 }
 
-/// What this crate's functions return.
 pub(crate) type Result<T, E = StorageError> = std::result::Result<T, E>;

@@ -1,11 +1,3 @@
-// The editor for several cameras at once, in the dialog a camera's own settings
-// open in, with the same parts and fields but the name, the channel and what
-// the camera has, which are each camera's own. A field shows what the cameras
-// share, or says they differ. One changed here goes to every one of them when
-// the changes are applied, in one save; one left alone keeps each camera's own,
-// and its undo button puts a changed one back that way. The password is never
-// shown: typing one gives them all the same. A camera's own event videos (its
-// Events part) are each camera's to set in its own dialog.
 import { computed, effect, signal, Text, untracked } from "nsh";
 import { type CameraChanges, Cameras } from "ipcamera/native";
 import { Button, CheckField, EditorDialog, FieldRow, FormSection, IconButton, notify, SelectField, TextField } from "../../../dp/ui";
@@ -14,15 +6,11 @@ import { refresh } from "./model";
 import { changesToSave, commonOf, reload, type SharedField, saved } from "./roster";
 import { CAMERA_SECTIONS, type CameraSection, markProblems } from "./settings";
 
-/** The settings that are text, in `CameraChanges`. */
 type TextName = { [K in SharedField]: CameraChanges[K] extends string | null | undefined ? K : never }[SharedField];
-/** The settings that are on or off. */
 type Switch = "useTcp" | "autoReconnect";
 
-/** What a select shows while the cameras' streams differ and none is chosen for them all. */
 const KEEP = "keep";
 
-/** The parts of a camera's settings that several cameras can share: not what each has, nor its own event videos, which each camera's dialog gives it. */
 const SECTIONS = CAMERA_SECTIONS.filter((section) => section.value !== "features" && section.value !== "events");
 
 const STREAMS = [
@@ -30,20 +18,17 @@ const STREAMS = [
   { value: "1", title: "Sub stream (lighter, lower latency)" },
 ];
 
-/** "Porch, Yard and Driveway", "Porch, Yard and 4 others". */
 function namesOf(names: string[]): string {
   if (names.length <= 3) return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
   return `${names.slice(0, 2).join(", ")} and ${names.length - 2} others`;
 }
 
 export function BulkDialog() {
-  /** What the user changed, by field; a field not here keeps each camera's own. */
   const edits = signal<CameraChanges>({});
   const saving = signal(false);
-  /** Why the last save failed. It stays until the next try, rather than closing as if it had worked. */
   const failure = signal("");
 
-  /** The cameras being edited, kept after the dialog closes until it opens for others. */
+  /** Kept after the dialog closes, until it opens for others. */
   const editingIds = signal<string[]>([]);
   const cameras = computed(() => {
     const ids = new Set(editingIds());
@@ -58,8 +43,7 @@ export function BulkDialog() {
   const section = signal<CameraSection>("connection");
   const sections = computed(() => markProblems(SECTIONS, problems()));
 
-  // Each opening starts with nothing changed, which is what makes closing discard the edits, and on
-  // the first part.
+  // Each opening starts with nothing changed, which is what makes closing discard the edits.
   effect(() => {
     const ids = bulkEditing();
     if (ids === null) return;
@@ -76,7 +60,6 @@ export function BulkDialog() {
   const save = () => {
     if (saving() || nothing()) return;
     if (problems().length > 0) {
-      // Return in a field while a part has something to fix shows the first such part.
       const unfixed = sections().first;
       if (unfixed) section.set(unfixed);
       return;
@@ -103,14 +86,12 @@ export function BulkDialog() {
     const { [field]: _, ...rest } = edits();
     edits.set(rest);
   };
-  /** The button that puts a changed field back to each camera's own. */
   const Undo = (undo: { field: keyof CameraChanges; label: string }) => (
     <If when={edited(undo.field)}>
       <IconButton icon="undo-2" size="small" label={`Keep each camera's ${undo.label.toLowerCase()}`} onPress={() => keep(undo.field)} />
     </If>
   );
 
-  /** A text field: what is typed, else what the cameras share; blank with a placeholder when they differ. */
   const Entry = (entry: { label: string; name: TextName; numeric?: boolean; wide?: boolean }) => {
     const differs = () => common()[entry.name] === undefined;
     return (
@@ -123,14 +104,12 @@ export function BulkDialog() {
         numeric={entry.numeric}
         action={<Undo field={entry.name} label={entry.label} />}
         class={entry.wide ? undefined : "min-w-0 flex-1"}
-        // Emptied while they differ, it goes back to each keeping its own, as it started.
         onChange={(value) => (differs() && value === "" ? keep(entry.name) : set(entry.name, value))}
         onSubmit={save}
       />
     );
   };
 
-  /** A setting that is on or off, a dash while the cameras differ. */
   const Toggle = (toggle: { label: string; name: Switch }) => (
     <CheckField
       label={toggle.label}
@@ -170,7 +149,6 @@ export function BulkDialog() {
         </>
       }
     >
-      {/* Over every part, so which cameras a change reaches stays in view. */}
       <Text class="text-sm text-muted-foreground">
         {`What you change here goes to ${namesOf(cameras().map((each) => each.name))}. Names and channels stay each camera's own.`}
       </Text>

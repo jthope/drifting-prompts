@@ -1,7 +1,3 @@
-// What the videos page shows: the recordings from Rust, how they are filtered,
-// sorted and grouped, and what can be done with them. Like `snapshots.ts`,
-// these are module-level signals, so the header's menus and count, the page
-// and the player share them.
 import { computed, createAnimatedValue, signal } from "nsh";
 import { type VideoInfo, Videos } from "ipcamera/native";
 import { confirmDelete, notify } from "../../../dp/ui";
@@ -15,11 +11,11 @@ export const videos = signal<VideoInfo[]>([]);
 export const loaded = signal(false);
 /** The recording open in the player, by its file name. */
 export const playing = signal<string | null>(null);
-/** How the page is narrowed, sorted and grouped: by day until the user picks. */
+/** How the page is narrowed, sorted and grouped. */
 export const videoLibrary = libraryOf(videos, (video) => video.startedAt, "day");
 export const { filtered, clearFilters, visible, sections, ordered } = videoLibrary;
 
-/** The page's scroll offset, fed natively by its list: the totals fade with it, and the header's count fades in. */
+/** The page's scroll offset, fed natively by its list. */
 export const videosScroll = createAnimatedValue(0);
 
 let reading = 0;
@@ -38,7 +34,7 @@ export function reload() {
 
 const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
 
-/** When a recording started, as its tile says it: as much as its section's title doesn't. */
+/** When a recording started, as much as its section's title doesn't say. */
 export const startedLabel = videoLibrary.timeLabel;
 
 /** When a recording started, in full, for the player. */
@@ -93,11 +89,7 @@ export async function deleteVideo(video: VideoInfo): Promise<boolean> {
   }
 }
 
-/**
- * Asks, then deletes `list` for good, one after another: one that fails says
- * why, and the rest still go. Those still recording can't be deleted, so they
- * stay, and the question says so. What was deleted leaves the selection.
- */
+/** Asks, then deletes `list` for good, one after another, so a failure stops none of the rest; those still recording stay. */
 export async function deleteVideos(list: VideoInfo[]) {
   const done = list.filter((video) => !video.recording);
   const busy = list.length - done.length;
@@ -132,11 +124,7 @@ export function revealVideo(video: VideoInfo) {
 }
 
 export function openVideosFolder() {
-  try {
-    Videos.openFolder();
-  } catch (error) {
-    failed(error);
-  }
+  Videos.openFolder().catch(failed);
 }
 
 /** What a recording's menu offers, on the page and in the player. */
@@ -167,5 +155,5 @@ export const totals = computed(() => {
   };
 });
 
-/** Whether any recording is still being written, shown or not. While one is, the page reads the folder again on a timer. */
+/** Whether any recording is still being written, shown or not. */
 export const anyRecording = computed(() => videos().some((video) => video.recording));

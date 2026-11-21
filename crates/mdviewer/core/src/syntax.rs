@@ -1,14 +1,5 @@
-//! What each part of a Markdown file's text is, for the raw view to color: its headings, its
-//! emphasis, its code, its links and where they go, its lists' and quotes' markers, its code
-//! blocks and its front matter, and Markdown's own punctuation around them (a heading's `#`s,
-//! `**`, backticks, a link's brackets, a fence, a table's pipes), which the raw view quiets so
-//! the words stand out.
-//!
-//! pulldown-cmark reads the file as the outline does ([`crate::summarize`]), and its offsets say
-//! where each part is. A part's punctuation is what its range holds outside its content: a
-//! strong's `**` lie before its first word and after its last, a link's `](…)` after its text.
-//! The marks are in the raw view's terms, a line and a column in UTF-16 code units, as the
-//! editor counts them; they may nest (a strong in a heading) and come in the order they start.
+//! What each part of a Markdown file's text is, for the raw view to color. Marks are lines and
+//! UTF-16 columns, as the editor counts them; they may nest and come in the order they start.
 
 use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 use std::ops::Range;
@@ -16,36 +7,35 @@ use std::ops::Range;
 /// What a part of a Markdown file is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarkKind {
-    /// Markdown's own punctuation: a heading's `#`s, `**` and `_`, backticks, a link's brackets,
-    /// a fence, a table's pipes and its rule under the head.
+    /// Markdown's own punctuation.
     Punctuation,
     /// A heading's text.
     Heading,
-    /// Strong text, between its `**`.
+    /// Strong text.
     Strong,
-    /// Emphasized text, between its `*` or `_`.
+    /// Emphasized text.
     Emphasis,
-    /// Struck-through text, between its `~~`.
+    /// Struck-through text.
     Strikethrough,
-    /// Code in text (or a formula), between its backticks.
+    /// Code in text, or a formula.
     Code,
     /// A link's text, or a picture's.
     Link,
     /// Where a link or a picture goes.
     Url,
-    /// A list item's marker, a task's box, a quote's `>`, a thematic break, a footnote's label.
+    /// A list, task, quote, thematic break or footnote marker.
     Marker,
-    /// A quote's text, after its `>`.
+    /// A quote's text.
     Quote,
-    /// A code block's lines, whole: a band behind them.
+    /// A code block's whole lines.
     CodeBlock,
     /// The language a fence names.
     Language,
-    /// The front matter, `---` to `---` at the top: the file's data.
+    /// The front matter.
     FrontMatter,
 }
 
-/// A place in a file's text: a line and the UTF-16 code units before it on its line, both from 0.
+/// A place in a file's text: a line and a UTF-16 column, both from 0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Place {
     /// The line, from 0.
@@ -65,15 +55,13 @@ pub struct Mark {
     pub end: Place,
 }
 
-/// A span (strong, emphasis, struck through, a link, a picture) while its content is read: its
-/// whole range, and the content's so far.
 struct Open {
     tag: Span,
     range: Range<usize>,
     content: Option<Range<usize>>,
 }
 
-/// The spans whose punctuation lies around their content.
+/// The spans whose punctuation is what their range holds outside their content.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Span {
     Strong,
@@ -84,7 +72,7 @@ enum Span {
     Image,
 }
 
-/// Every part of Markdown `text` that the raw view colors, in the order they start.
+/// Every part of Markdown `text` that the raw view colors.
 pub fn marks(text: &str) -> Vec<Mark> {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_FOOTNOTES
@@ -97,7 +85,6 @@ pub fn marks(text: &str) -> Vec<Mark> {
     let mut open: Vec<Open> = Vec::new();
 
     for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
-        // Whatever a span holds widens its content, the spans around it too.
         let widen = |open: &mut Vec<Open>, range: &Range<usize>| {
             for span in open.iter_mut() {
                 let content = span.content.get_or_insert(range.clone());
@@ -149,7 +136,6 @@ pub fn marks(text: &str) -> Vec<Mark> {
                     _ => None,
                 };
                 if let Some(tag) = span {
-                    // A span inside another is part of its content.
                     widen(&mut open, &range);
                     open.push(Open {
                         tag,
@@ -193,12 +179,10 @@ pub fn marks(text: &str) -> Vec<Mark> {
             end: places.of(range.end),
         })
         .collect();
-    // By where they start, the one around another first.
     marks.sort_by_key(|mark| (mark.start, std::cmp::Reverse(mark.end)));
     marks
 }
 
-/// A finished span's marks: its content, and the punctuation around it.
 fn close(text: &str, done: Open, found: &mut Vec<(MarkKind, Range<usize>)>) {
     let range = done.range;
     let content = done.content.unwrap_or(range.start..range.start);
@@ -206,7 +190,6 @@ fn close(text: &str, done: Open, found: &mut Vec<(MarkKind, Range<usize>)>) {
         Span::Heading => {
             let line = trimmed(text, range.clone());
             if text[line.clone()].starts_with('#') {
-                // ATX: the `#`s before the text, and any closing ones after it.
                 let hashes =
                     text[line.clone()].len() - text[line.clone()].trim_start_matches('#').len();
                 found.push((MarkKind::Punctuation, line.start..line.start + hashes));
@@ -215,7 +198,6 @@ fn close(text: &str, done: Open, found: &mut Vec<(MarkKind, Range<usize>)>) {
                     trimmed(text, content.end.min(line.end)..line.end),
                 ));
             } else {
-                // Setext: the `===` or `---` line under the text.
                 let under = text[content.end..line.end]
                     .find(|c: char| !c.is_whitespace())
                     .map_or(line.end, |at| content.end + at);
@@ -224,13 +206,11 @@ fn close(text: &str, done: Open, found: &mut Vec<(MarkKind, Range<usize>)>) {
             found.push((MarkKind::Heading, content));
         }
         Span::Link(true) => {
-            // `<https://…>`: the address is the text.
             found.push((MarkKind::Punctuation, range.start..content.start));
             found.push((MarkKind::Url, content.clone()));
             found.push((MarkKind::Punctuation, content.end..range.end));
         }
         Span::Link(false) | Span::Image => {
-            // `[text](url "title")`, `[text][label]`, `[text]`, or a picture's `![…](…)`.
             let opening = if done.tag == Span::Image { 2 } else { 1 };
             let text_start = (range.start + opening).min(range.end);
             let content = if content.start < text_start {
@@ -267,7 +247,6 @@ fn close(text: &str, done: Open, found: &mut Vec<(MarkKind, Range<usize>)>) {
     }
 }
 
-/// Code in text or a formula: its backticks or dollar signs, and what is between them.
 fn fenced_inline(text: &str, range: Range<usize>) -> Vec<(MarkKind, Range<usize>)> {
     let source = &text[range.clone()];
     let Some(fence) = source.chars().next().filter(|c| *c == '`' || *c == '$') else {
@@ -285,7 +264,6 @@ fn fenced_inline(text: &str, range: Range<usize>) -> Vec<(MarkKind, Range<usize>
     ]
 }
 
-/// A list item's marker (`-`, `*`, `+`, `1.`, `1)`) where the item starts.
 fn list_marker(text: &str, start: usize) -> Option<(MarkKind, Range<usize>)> {
     let rest = &text[start..];
     let indent = rest.len() - rest.trim_start_matches([' ', '\t']).len();
@@ -300,7 +278,6 @@ fn list_marker(text: &str, start: usize) -> Option<(MarkKind, Range<usize>)> {
     Some((MarkKind::Marker, at..at + length))
 }
 
-/// A footnote definition's label, `[^1]:`, where it starts.
 fn label(text: &str, start: usize) -> Option<(MarkKind, Range<usize>)> {
     let rest = &text[start..];
     let indent = rest.len() - rest.trim_start_matches(' ').len();
@@ -308,7 +285,6 @@ fn label(text: &str, start: usize) -> Option<(MarkKind, Range<usize>)> {
     Some((MarkKind::Marker, start + indent..start + end))
 }
 
-/// A quote's `>`s at the start of each of its lines, nested ones too, and its text after them.
 fn quote(text: &str, range: &Range<usize>, found: &mut Vec<(MarkKind, Range<usize>)>) {
     for line in lines(text, range.clone()) {
         let mut at = line.start;
@@ -327,7 +303,6 @@ fn quote(text: &str, range: &Range<usize>, found: &mut Vec<(MarkKind, Range<usiz
     }
 }
 
-/// A code block: a band behind its lines, and a fenced one's fences and the language it names.
 fn code_block(
     text: &str,
     range: &Range<usize>,
@@ -363,7 +338,6 @@ fn code_block(
     }
 }
 
-/// A table's pipes, and the rule under its head.
 fn table(text: &str, range: &Range<usize>, found: &mut Vec<(MarkKind, Range<usize>)>) {
     for (index, line) in lines(text, range.clone()).into_iter().enumerate() {
         if index == 1 {
@@ -380,7 +354,6 @@ fn table(text: &str, range: &Range<usize>, found: &mut Vec<(MarkKind, Range<usiz
     }
 }
 
-/// The lines `range` covers, each without its line break.
 fn lines(text: &str, range: Range<usize>) -> Vec<Range<usize>> {
     let mut lines = Vec::new();
     let mut start = range.start;
@@ -394,7 +367,6 @@ fn lines(text: &str, range: Range<usize>) -> Vec<Range<usize>> {
     lines
 }
 
-/// `range` without the whitespace and line breaks at its ends.
 fn trimmed(text: &str, range: Range<usize>) -> Range<usize> {
     let source = &text[range.clone()];
     let start = range.start + (source.len() - source.trim_start().len());
@@ -402,7 +374,6 @@ fn trimmed(text: &str, range: Range<usize>) -> Range<usize> {
     start..end.max(start)
 }
 
-/// Where each byte offset of a text is, as a line and a UTF-16 column.
 struct Places<'a> {
     text: &'a str,
     starts: Vec<usize>,
@@ -430,7 +401,6 @@ impl<'a> Places<'a> {
 mod tests {
     use super::*;
 
-    /// The marks of `text`, each as its kind and the text it covers.
     fn parts(text: &str) -> Vec<(MarkKind, String)> {
         let lines: Vec<&str> = text.split('\n').collect();
         marks(text)
@@ -594,7 +564,6 @@ mod tests {
             .iter()
             .find(|mark| mark.kind == Code)
             .expect("the code");
-        // `é` is one unit and the emoji two, then a space and the backtick.
         assert_eq!(code.start, Place { line: 0, column: 5 });
     }
 }

@@ -1,17 +1,3 @@
-// Tabs of two kinds. A page header's tabs (`PageTabs`, in `collapsing.tsx`'s
-// bar, where they stay in reach however far the page scrolls): plain names,
-// the selected one underlined in the theme's line along the banner's bottom
-// edge. And the tabs over a reader (`FileTabs`), one for each file open, as an
-// editor has them: the file's name alone, pinned ones first, a preview in
-// italics, a pin and a close button beside the name (the pin always on a
-// pinned tab, both on the one in front and on the one under the pointer), a
-// right-click menu, dragged along the strip to another place (`reorder.tsx`),
-// and how many matches a search found in each. The tab in front is a card of
-// the document's color with rounded top corners, which joins the breadcrumbs
-// under the strip (`breadcrumbs.tsx`); the one under the pointer takes the
-// theme's hover in the same shape, and the others are text on the strip,
-// apart by a little room. A tab can hold something else, with an icon of its
-// own (a search's results).
 import { type JSX, Scroll, Text, View } from "nsh";
 import { Tab, Tabs } from "nsh/base";
 import { EdgeLine, look, solid } from "./brand";
@@ -45,27 +31,22 @@ export function PageTabs<T extends string>(props: { items: readonly { value: T; 
 export type FileTab = {
   /** What the app knows it by (the file's path). */
   id: string;
-  /** What it says: the file's name. */
+  /** The file's name. */
   name: string;
-  /**
-   * Its folder, beside another file of the same name, or `""`. Not drawn on
-   * the tab: a screen reader says it, and so does the hint while the pointer
-   * rests on the tab.
-   */
+  /** Its folder, beside another file of the same name, or `""`; said, not drawn. */
   detail: string;
   /** Kept first, its pin always shown. */
   pinned: boolean;
-  /** Whether it can be pinned, with a pin beside its close button; true unless said (a search's results can't be). */
+  /** Whether it can be pinned; true unless said. */
   pinnable?: boolean;
-  /** The preview, which the next file opened takes over: its name in italics. */
+  /** The preview, which the next file opened takes over. */
   preview: boolean;
-  /** How many matches a search found in the file, shown after its name; 0 or absent for none. */
+  /** How many matches a search found in it; 0 or absent for none. */
   count?: number;
-  /** Its icon, for a tab that holds something other than a file (a search's results); a file's by default. */
+  /** Its icon, for a tab holding something other than a file. */
   icon?: IconName;
 };
 
-/** One tab of `FileTabs`. */
 function FileTabView(props: {
   tab: FileTab;
   selected: boolean;
@@ -79,7 +60,7 @@ function FileTabView(props: {
   const count = () => props.tab.count ?? 0;
   const said = () =>
     `${props.tab.name}${props.tab.detail === "" ? "" : `, in ${props.tab.detail}`}${props.tab.pinned ? ", pinned" : ""}${props.tab.preview ? ", preview" : ""}${count() === 0 ? "" : `, ${count()} ${count() === 1 ? "match" : "matches"}`}`;
-  /** The classes of a button shown only while the tab is in front or under the pointer: it keeps its room while hidden, so the tab keeps its width. */
+  /** Hidden by opacity, so the tab keeps its width. */
   const shownOnHover = () => (props.selected ? "" : "opacity-0 group-hover:opacity-100");
   return (
     <Tab
@@ -90,11 +71,10 @@ function FileTabView(props: {
       style={props.selected ? { backgroundImage: solid(look().tiers.document) } : {}}
       onPress={() => props.onSelect(id())}
     >
-      {/* The theme's line along the top, clear of the rounded corners. */}
       <If when={props.selected}>
         <View class={`absolute inset-x-1.5 top-0 h-0.5 rounded-full ${look().tabs.indicator}`} />
       </If>
-      {/* The name takes its own presses, which say how many: a double press keeps a preview. A test finds it as `id:tab:<id>`. */}
+      {/* Takes its own presses, for their count; a test finds it as `id:tab:<id>`. */}
       <View
         testID={`tab:${id()}`}
         class="min-w-0 shrink flex-row items-center gap-1.5"
@@ -112,7 +92,6 @@ function FileTabView(props: {
       </View>
       <View class="flex-row items-center">
         <If when={props.tab.pinnable ?? true}>
-          {/* Pinned, the pin is the tab's state, always shown and in the icons' own ink; unpinned, it is quieter. */}
           <View class={props.tab.pinned ? "" : shownOnHover()}>
             <IconButton
               icon="pin"
@@ -131,7 +110,6 @@ function FileTabView(props: {
   );
 }
 
-/** The tabs of `FileTabs` in order, each draggable along its row. */
 function TabList(props: {
   tabs: FileTab[];
   selected: string;
@@ -166,22 +144,7 @@ function TabList(props: {
   );
 }
 
-/**
- * The tabs over a reader, one for each open file, at the top of the document's
- * island (`Island`), in a strip as tall as a `PaneHeader` beside it and in a
- * tool pane's color, so the strip lines up with the panes' headers. The tabs
- * stand on the strip's bottom edge, shorter than it: `selected` is the one in
- * front, a card of the document's color with the theme's line along its top,
- * one with the breadcrumbs under it (`crumbs`, the way to what it shows), which
- * the document follows under a panel's line. A press brings a tab to the front
- * (`onSelect`), a double press keeps a preview (`onKeep`), its pin pins or
- * unpins it (`onPin`, with the state asked for), its close button or the menu
- * closes it (`onClose`, `menu`), and a drag along its row moves it (`onMove`),
- * within the indexes `within` gives. `start` and `end` go before and after the
- * tabs (a hidden pane's button), beside the last row. Tabs that don't fit
- * scroll sideways in one row, or with `wrap` take more rows, the strip growing
- * to hold them; there a tab is dragged along its own row only.
- */
+/** The tabs over a reader, one per open file, scrolling in one row or wrapping with `wrap`. */
 export function FileTabs(props: {
   tabs: FileTab[];
   selected: string;
@@ -221,7 +184,7 @@ export function FileTabs(props: {
   const crumbs = () => props.crumbs ?? [];
   return (
     <View>
-      {/* Room above the tabs, so a row of them is as tall as the strip: 8 points and a 28-point tab make 36. */}
+      {/* `pt-2` and a 28-point tab make the strip's 36 points. */}
       <View class={`${wrap() ? "min-h-9" : "h-9"} flex-row items-stretch`} style={{ backgroundImage: solid(look().tiers.tool) }}>
         <EdgeLine edge="bottom" place="panel" />
         {props.start}

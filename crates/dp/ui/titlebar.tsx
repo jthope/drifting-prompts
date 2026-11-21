@@ -2,15 +2,7 @@ import { type JSX, View } from "nsh";
 import { titleBar } from "nsh/desktop";
 import { look } from "./brand";
 
-/**
- * The app's title bar, or what stands in for it over the whole window (a
- * snapshot's viewer, a video's player): pressing anything but a control drags
- * the window, and a double click maximizes it. The system's window buttons sit
- * over its right end, so it leaves them room. It is the theme's title bar color,
- * with no line under it: the color alone parts it from what it tops.
- * `class` adds to it (its left padding). It wraps rather than hiding anything,
- * so every control is still there in a narrow window.
- */
+/** The app's title bar: pressing anything but a control drags the window; it leaves the window's buttons room. */
 export function TitleBar(props: { class?: string; children: JSX.Element }) {
   return (
     <View

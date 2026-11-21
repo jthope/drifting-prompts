@@ -1,15 +1,12 @@
-//! Tests of the web build's backend: the preview, and a copy of a pretend server's library,
-//! held to the desktop's contract.
+//! Tests of the web build's backend, held to the desktop's contract.
 
 use super::*;
 use ipcamera_core::Snapshot;
 
-/// What camera `id` is doing, as `states` reports it.
 fn state(id: &str) -> Result<CameraState, String> {
     Ok(state_of(&camera(id)?))
 }
 
-/// A form that passes the desktop's checks.
 fn filled(name: &str) -> CameraForm {
     CameraForm {
         name: name.to_string(),
@@ -18,18 +15,15 @@ fn filled(name: &str) -> CameraForm {
     }
 }
 
-/// The page's revision, without starting the task that checks the server, which needs nsh's
-/// engine.
+/// Reads the revision without starting the server check, which needs nsh's engine.
 fn page_revision() -> u64 {
     WEB.with(|web| web.borrow().revision())
 }
 
-/// The camera the preview starts with.
 fn first() -> String {
     list()[0].id.clone()
 }
 
-/// Adds a camera in the preview's memory, as `add_camera` does there; returns its id.
 fn add_here(form: &CameraForm) -> String {
     make_here(&Change::AddCamera {
         camera: form::to_config(form),
@@ -38,7 +32,6 @@ fn add_here(form: &CameraForm) -> String {
     .added_id()
 }
 
-/// Gives cameras the changes in the preview's memory, as `save_changes` does there.
 fn save_many_here(ids: &[String], changes: &CameraChanges) -> Result<u32, String> {
     let Some((change, changed)) = with_library(|saved| library::save_changes(saved, ids, changes))?
     else {
@@ -48,7 +41,6 @@ fn save_many_here(ids: &[String], changes: &CameraChanges) -> Result<u32, String
     Ok(changed.len() as u32)
 }
 
-/// Makes this thread's page hold `cameras` as the server at `address` would send them.
 fn served_by(address: &str, cameras: Vec<CameraConfig>) -> Vec<String> {
     let saved = Library::in_memory(cameras);
     let ids = saved
@@ -439,7 +431,6 @@ fn a_camera_with_no_saved_password_waits_until_someone_connects_it() {
     assert!(!waiting.connected && !waiting.ready);
     assert_eq!(waiting.status, NO_PASSWORD);
 
-    // Someone pressed Connect, and the server's stream of it runs: it has no password.
     WEB.with(|web| {
         web.borrow_mut().status.cameras = vec![CameraStatus {
             id: CameraId::from(ids[0].as_str()),
@@ -480,11 +471,10 @@ fn a_server_that_turns_the_page_away_is_signed_in_to_again() {
     let needed = || WEB.with(|web| web.borrow().sign_in_needed);
     assert!(!needed());
 
-    // No key yet, and the server wants one.
     WEB.with(|web| web.borrow_mut().turned_away(None));
     assert!(needed());
 
-    // Signed in since: an answer to a request sent before that changes nothing.
+    // An answer to a request sent before signing in changes nothing.
     WEB.with(|web| {
         let mut web = web.borrow_mut();
         web.key = Some("new".into());
@@ -493,10 +483,9 @@ fn a_server_that_turns_the_page_away_is_signed_in_to_again() {
     });
     assert!(!needed() && signed_in());
 
-    // The server no longer knows the key: restarted, or the session ran out.
     WEB.with(|web| web.borrow_mut().turned_away(Some("new")));
     assert!(needed() && !signed_in());
-    // It answered, though, so it doesn't count towards being out of reach.
+    // It answered, so it doesn't count towards being out of reach.
     for _ in 0..OUT_OF_REACH_AFTER {
         WEB.with(|web| {
             let mut web = web.borrow_mut();

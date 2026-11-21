@@ -1,11 +1,5 @@
-//! The camera groups: `data\settings\groups.json`.
-//!
-//! A group is a name and a list of camera ids, nothing more. This store never looks at the cameras
-//! themselves, so a group edit can never change a camera or restart a stream. Putting a camera in a
-//! group a second time does nothing, and removing it from one group leaves it in the others.
-//!
-//! [`Library`](crate::library::Library) is what checks a camera exists before it goes in a group,
-//! and what clears out ids of cameras that were deleted.
+//! The camera groups: `data\settings\groups.json`. This store never checks that a camera exists;
+//! [`Library`](crate::library::Library) does.
 
 use std::{collections::HashSet, path::PathBuf};
 
@@ -35,8 +29,6 @@ impl Document for GroupFile {
         Some(&mut self.version)
     }
 
-    /// A group added by hand may have no id, or a copy of another's, and may list a camera twice
-    /// or a blank id. Each group gets an id of its own, and each camera is listed once.
     fn repair(&mut self) -> bool {
         let mut changed = give_unique_ids(&mut self.groups);
         for group in &mut self.groups {
@@ -68,22 +60,19 @@ impl GroupStore {
     /// The file's name inside `data\settings`.
     pub const FILE: &'static str = "groups.json";
 
-    /// Opens the groups saved at `path`. A missing file means no groups, and nothing is written
-    /// until the first change.
+    /// Opens the groups saved at `path`; a missing file means no groups.
     pub fn open(path: impl Into<PathBuf>) -> Self {
         Self {
             file: FileStore::open(path.into()),
         }
     }
 
-    /// No groups, and no file: changes are kept in memory only.
     pub(crate) fn in_memory() -> Self {
         Self {
             file: FileStore::in_memory(),
         }
     }
 
-    /// `groups`, ids and all, and no file: a copy whose changes are kept in memory only.
     pub(crate) fn holding(groups: Vec<CameraGroup>) -> Self {
         Self {
             file: FileStore::holding(GroupFile {
@@ -93,7 +82,7 @@ impl GroupStore {
         }
     }
 
-    /// Every group, in the order they are shown.
+    /// Every group, in order.
     pub fn list(&self) -> Vec<CameraGroup> {
         self.file.read(|file| file.groups.clone())
     }
@@ -103,7 +92,7 @@ impl GroupStore {
         self.file.read(|file| find(&file.groups, id).cloned())
     }
 
-    /// The groups `camera` is in, in the order they are shown.
+    /// The groups `camera` is in, in order.
     pub fn groups_of(&self, camera: &CameraId) -> Vec<GroupId> {
         self.file.read(|file| {
             file.groups
@@ -114,18 +103,13 @@ impl GroupStore {
         })
     }
 
-    /// Adds an empty group at the end and returns its id: the tests' shorthand for
-    /// [`add_with`](Self::add_with), which the app uses.
+    /// Adds an empty group at the end and returns its id.
     #[cfg(test)]
     pub fn add(&self, name: &str) -> Result<GroupId, StoreError> {
         self.add_with(name, Vec::new())
     }
 
-    /// Adds a group at the end with `cameras` in it, in that order, in one save, and returns its
-    /// id. A camera listed twice goes in once.
-    ///
-    /// This store cannot tell whether the cameras exist, so the app goes through
-    /// [`Library::add_group`](crate::library::Library::add_group), which checks.
+    /// Adds a group at the end with `cameras`, each once, in one save, and returns its id.
     pub fn add_with(&self, name: &str, cameras: Vec<CameraId>) -> Result<GroupId, StoreError> {
         let name = required_name::<GroupId>(name)?;
         let cameras = camera_list(cameras)?;
@@ -141,7 +125,7 @@ impl GroupStore {
         Ok(id)
     }
 
-    /// Renames group `id`. Its cameras stay as they are.
+    /// Renames group `id`.
     pub fn rename(&self, id: &GroupId, name: &str) -> Result<(), StoreError> {
         let name = required_name::<GroupId>(name)?;
         self.change_group(id, |group| {
@@ -150,11 +134,7 @@ impl GroupStore {
         })
     }
 
-    /// Gives group `id` a name and `cameras`, in that order, in one save: what a group's sheet
-    /// saves. A camera listed twice goes in once. Writes nothing when the group already is so.
-    ///
-    /// As with [`add_with`](Self::add_with), the app goes through
-    /// [`Library::update_group`](crate::library::Library::update_group), which checks the cameras.
+    /// Gives group `id` a name and `cameras`, each once, in one save.
     pub fn update(
         &self,
         id: &GroupId,
@@ -170,9 +150,7 @@ impl GroupStore {
         })
     }
 
-    /// Removes every group in `ids` in one save. Their cameras are not touched: they stay in the
-    /// camera list and in every other group. An unknown id removes none of them, so the file never
-    /// holds half of a change.
+    /// Removes every group in `ids` in one save; an unknown id removes none.
     pub fn remove_many(&self, ids: &[GroupId]) -> Result<(), StoreError> {
         self.file.update(|file| {
             if let Some(unknown) = ids.iter().find(|id| find(&file.groups, id).is_none()) {
@@ -183,8 +161,7 @@ impl GroupStore {
         })
     }
 
-    /// Moves group `id` to `index` among the groups, which is where the sidebar lists it. An index
-    /// past the end moves it to the end.
+    /// Moves group `id` to `index` among the groups, or to the end past it.
     pub fn move_group(&self, id: &GroupId, index: usize) -> Result<(), StoreError> {
         self.file.update(|file| {
             let from = position(&file.groups, id)?;
@@ -195,10 +172,7 @@ impl GroupStore {
         })
     }
 
-    /// Puts `camera` at the end of group `id`. A camera already in it stays where it is.
-    ///
-    /// This store cannot tell whether the camera exists, so the app goes through
-    /// [`Library::add_to_group`](crate::library::Library::add_to_group), which checks.
+    /// Puts `camera` at the end of group `id`, unless it is already in it.
     pub fn add_camera(&self, id: &GroupId, camera: &CameraId) -> Result<(), StoreError> {
         if camera.is_empty() {
             return Err(no_camera_id());
@@ -211,7 +185,7 @@ impl GroupStore {
         })
     }
 
-    /// Takes `camera` out of group `id` only. It stays in every other group and in the camera list.
+    /// Takes `camera` out of group `id` only.
     pub fn remove_camera(&self, id: &GroupId, camera: &CameraId) -> Result<(), StoreError> {
         self.change_group(id, |group| {
             group.cameras.retain(|listed| listed != camera);
@@ -219,18 +193,16 @@ impl GroupStore {
         })
     }
 
-    /// Takes `camera` out of every group, for when it is deleted. Writes nothing if it is in none.
+    /// Takes `camera` out of every group.
     pub fn forget_camera(&self, camera: &CameraId) -> Result<(), StoreError> {
         self.keep_cameras(|listed| listed != camera)
     }
 
-    /// Takes out every camera `known` doesn't contain: ones deleted since, or a hand edit's typo.
-    /// Writes nothing when every camera is known.
+    /// Takes out every camera `known` doesn't contain.
     pub fn prune(&self, known: &HashSet<CameraId>) -> Result<(), StoreError> {
         self.keep_cameras(|camera| known.contains(camera))
     }
 
-    /// Takes every camera `keep` refuses out of every group, in one save; none when it keeps all.
     fn keep_cameras(&self, keep: impl Fn(&CameraId) -> bool) -> Result<(), StoreError> {
         self.file.update(|file| {
             for group in &mut file.groups {
@@ -240,7 +212,6 @@ impl GroupStore {
         })
     }
 
-    /// Makes `change` to group `id`, or says there is no such group.
     fn change_group(
         &self,
         id: &GroupId,
@@ -251,7 +222,6 @@ impl GroupStore {
     }
 }
 
-/// `cameras` as a group lists them: each once, in the order first given, or why they can't be.
 fn camera_list(cameras: Vec<CameraId>) -> Result<Vec<CameraId>, StoreError> {
     let mut seen = HashSet::new();
     let mut list = Vec::with_capacity(cameras.len());

@@ -1,11 +1,5 @@
-//! PTZ through Dahua's HTTP API (`ptz.cgi`), for a Dahua camera with `http_api` on: one whose
-//! DVRIP port is closed, as Amcrest's light bulb cameras', or that has a light the API switches.
-//! A move starts with the codes and speeds DVRIP takes ([`DahuaCommand`]) and lasts until its
-//! stop.
-//!
-//! The probe logs in once and asks what the PTZ does, on the channel counted from 0 and then
-//! from 1, since firmware differs; a camera that won't say is driven from 0, and its first refused
-//! move tries 1. A refused login is final: the client remembers it and sends nothing after it.
+//! PTZ through Dahua's HTTP API, a move lasting until its stop. Firmware counts the channel from 0
+//! or from 1: one that won't say which is driven from 0, and its first refused move tries 1.
 
 use std::{thread, time::Duration};
 
@@ -19,18 +13,16 @@ use crate::{
 pub struct DahuaHttpPtz {
     camera: CameraConfig,
     client: Option<DahuaHttp>,
-    /// The channel as `ptz.cgi` counts it.
     channel: u32,
-    /// Whether the camera said which numbering it takes; if not, a refused move tries the other.
     channel_known: bool,
     last: Option<DahuaCommand>,
-    /// Whether the camera refused the login, which is never tried again.
+    /// A refused login is never tried again.
     refused: bool,
     status: String,
 }
 
 impl DahuaHttpPtz {
-    /// A client for `camera`'s HTTP API. It logs in on the first [`Driver::probe`].
+    /// A client for `camera`'s HTTP API, logging in on the first probe.
     pub fn new(camera: &CameraConfig) -> Self {
         Self {
             camera: camera.clone(),
@@ -43,8 +35,6 @@ impl DahuaHttpPtz {
         }
     }
 
-    /// The logged-in client, logging in when there is none; `None` after a refused login or a
-    /// camera that didn't answer, with the status saying which.
     fn client(&mut self) -> Option<&mut DahuaHttp> {
         if self.refused {
             return None;
@@ -72,7 +62,6 @@ impl DahuaHttpPtz {
         self.client.as_mut()
     }
 
-    /// Says why a call failed, and forgets a connection that broke or a login that was refused.
     fn failed(&mut self, error: DahuaHttpError) {
         self.status = format!("Dahua HTTP API PTZ: {error}");
         match error {
@@ -85,9 +74,8 @@ impl DahuaHttpPtz {
         }
     }
 
-    /// Sends a start of `command`, or its stop; whether the camera took it. A broken connection
-    /// gets one more try on a new login, and a camera that never said its channel numbering gets
-    /// one try on the other.
+    /// A broken connection gets one more try on a new login, and an unknown channel numbering one
+    /// try on the other.
     fn send(&mut self, start: bool, command: DahuaCommand) -> bool {
         for attempt in 1..=2 {
             let channel = self.channel;
@@ -164,7 +152,6 @@ impl Driver for DahuaHttpPtz {
         let Some(command) = DahuaCommand::from_velocity(velocity) else {
             return true;
         };
-        // A new start replaces the move before it, as over DVRIP.
         self.last = Some(command);
         self.send(true, command)
     }
@@ -175,7 +162,6 @@ impl Driver for DahuaHttpPtz {
         };
         for attempt in 1..=3 {
             if self.send(false, command) {
-                // Stopped: the stop as the session ends has nothing left to stop.
                 self.last = None;
                 return true;
             }

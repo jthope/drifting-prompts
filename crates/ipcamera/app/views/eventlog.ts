@@ -1,9 +1,3 @@
-// What the events page and the alerts show: what the cameras saw, from Rust's
-// event log, how the page narrows, sorts and groups it, which event its preview
-// shows, and the message each new event brings. Like `recordings.ts`, these are module-level signals, so the
-// header's menus and count, the page and the alerts share them. Unlike the
-// videos, the log is followed while the app runs, whatever the page, so an
-// event is told as it starts.
 import { computed, createAnimatedValue, signal } from "nsh";
 import { type EventInfo, Events, Preferences } from "ipcamera/native";
 import { confirmDelete, notify } from "../../../dp/ui";
@@ -11,28 +5,20 @@ import { failed, type MenuEntries } from "./actions";
 import { cameraMenuEntry, cameraName, countLabel, libraryOf, menuOf } from "./library";
 import { cameraOf, detectionsLabel, show } from "./model";
 
-/**
- * An event as the page lists it: the library knows its items by `name`, its
- * Tag filter by what the camera saw (`motion` for a camera that knows only
- * motion), and its narrowing to one event by `event`, its own id.
- */
+/** An event as the page lists it, known by `name` and `event` (its id), tagged with what the camera saw. */
 export type EventItem = EventInfo & { name: string; tags: string[]; event: string };
 
 /** Every event, newest first, as Rust last read it. */
 export const events = signal<EventItem[]>([]);
-/** Whether the first read has arrived, so the page doesn't say there are none while it reads. */
+/** Whether the first read has arrived, so the page doesn't say there are none meanwhile. */
 export const loaded = signal(false);
-/** How the page is narrowed, sorted, grouped and shown: by day, as a table (the List size), until the user picks. */
+/** How the page is narrowed, sorted, grouped and shown. */
 export const eventLibrary = libraryOf(events, (event) => event.startedAt, "day", "list");
 export const { filtered, clearFilters, visible, sections, ordered } = eventLibrary;
 /** The event whose picture is open in the viewer, by its id. */
 export const viewing = signal<string | null>(null);
 
-/**
- * The event the table's preview shows, by its id, as a press of its row or Up
- * and Down picked it; `null` until one is picked. One that no longer shows
- * (filtered out, deleted, folded away) leaves it to the first that does.
- */
+/** The event the preview shows, by id, as picked; `null` until one is. */
 export const current = signal<string | null>(null);
 
 /** The events the table shows rows for, in its order: those of folded sections left out. */
@@ -49,7 +35,7 @@ export const previewed = computed(() => {
   return list.find((event) => event.name === current()) ?? list[0] ?? null;
 });
 
-/** Moves the preview `by` rows, as Up and Down do, staying at the ends. Returns the event it moved to, or `null` where it didn't move. */
+/** Moves the preview `by` rows, returning the event it moved to, or `null` where it didn't. */
 export function stepPreview(by: number): string | null {
   const list = shownRows();
   const at = list.findIndex((event) => event.name === previewed()?.name);
@@ -59,13 +45,13 @@ export function stepPreview(by: number): string | null {
   return next.name;
 }
 
-/** The page's scroll offset, fed natively by its list, as the videos page's is. */
+/** The page's scroll offset, fed natively by its list. */
 export const eventsScroll = createAnimatedValue(0);
 
-/** Whether this app keeps an event log: the desktop does; the web build has none yet. */
+/** Whether this app keeps an event log. */
 export const kept = Events.kept();
 
-/** Whether a new event brings a message, as Settings says. */
+/** Whether a new event brings a message. */
 export const alertsOn = signal(Preferences.alerts());
 
 /** Turns the messages on or off, and saves it. */
@@ -95,15 +81,10 @@ export function followEvents() {
   if (kept) Events.onChange(() => reload());
 }
 
-/** The events already told, and those the log held as the app opened, by id. */
 const told = new Set<string>();
 let firstRead = true;
 
-/**
- * A message for each event in `list` that has started since the last read
- * and is still going on: what the camera sees and where, with a button that
- * shows the camera. What the log held as the app opened is no news.
- */
+/** Tells each new event still going on; what the log held as the app opened is no news. */
 function tellNew(list: EventItem[]) {
   const fresh = list.filter((event) => !told.has(event.id));
   for (const event of fresh) told.add(event.id);
@@ -126,7 +107,7 @@ export function whatLabel(event: EventInfo): string {
   return event.detected.length > 0 ? detectionsLabel(event.detected) : "Motion";
 }
 
-/** When an event started, as its tile says it: as much as its section's title doesn't. */
+/** When an event started, as much as its section's title doesn't say. */
 export const startedLabel = eventLibrary.timeLabel;
 
 const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
@@ -134,7 +115,7 @@ const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "l
 /** When an event started, in full. */
 export const startedInFull = (event: EventInfo) => longDate.format(new Date(event.startedAt));
 
-/** How long the camera saw an event, from its start to the last time it saw it: `38 s`, `2 min 48 s`, `1 h 5 min`; `Going on now` while it sees it. */
+/** How long the camera saw an event: `38 s`, `2 min 48 s`; `Going on now` while it sees it. */
 export function lastedLabel(event: EventInfo): string {
   if (event.ongoing) return "Going on now";
   const seconds = Math.max(0, Math.round((event.endedAt - event.startedAt) / 1000));
@@ -162,12 +143,7 @@ export function savedLabel(event: EventInfo): string {
   return [picture, videos].filter((part) => part !== "").join(" and ");
 }
 
-/**
- * Deletes the event, and for good what it saved, asking first when it saved
- * anything: the question names the files, which go from the snapshots and
- * videos pages too. One that saved nothing goes without asking, as it is only a
- * note of what was seen. Resolves true once it is gone.
- */
+/** Deletes the event and what it saved, asking first when it saved anything; resolves true once it is gone. */
 export async function deleteEvent(event: EventInfo): Promise<boolean> {
   const saved = savedLabel(event);
   if (saved !== "") {
@@ -188,12 +164,7 @@ export async function deleteEvent(event: EventInfo): Promise<boolean> {
   }
 }
 
-/**
- * Deletes `list` with what they saved, in one go, asking first for more than
- * one, or for one that saved files, as its own Delete does. Those the camera
- * sees now stay, and the question says so. What was deleted leaves the
- * selection.
- */
+/** Deletes `list` with what they saved, asking first as `deleteEvent` does; those still going on stay. */
 export async function deleteEvents(list: EventItem[]) {
   const ended = list.filter((event) => !event.ongoing);
   const going = list.length - ended.length;
@@ -202,7 +173,6 @@ export async function deleteEvents(list: EventItem[]) {
     return;
   }
   if (ended.length === 1 && going === 0) {
-    // One alone asks as its own Delete does: only when it saved files.
     if (await deleteEvent(ended[0])) eventLibrary.selected.set(eventLibrary.selected().filter((name) => name !== ended[0].name));
     return;
   }

@@ -1,9 +1,3 @@
-// The Groups page's rows, search, filters, order and selection, on cameras and
-// groups made up here.
-//
-// `App.test.tsx` drives the page itself, over the one camera a test run starts
-// with. These read `views/grouplist.ts` directly, which is all the logic the
-// table shows, so they can have as many groups as they like.
 import { expect, test } from "nsh/test";
 import type { CameraState, GroupInfo } from "ipcamera/native";
 import {
@@ -57,11 +51,6 @@ function state(id: string, name: string, more: Partial<CameraState> = {}): Camer
   };
 }
 
-/**
- * Five cameras: two connected, one recording, one in trouble and waiting for
- * its password, one in no group; and four groups, one of them empty, listed
- * in the order they were made.
- */
 function seed() {
   states.set([
     state("a", "Camera 10", { connected: true, tone: "ok" }),
@@ -74,7 +63,6 @@ function seed() {
     { id: "outside", name: "Outside", cameras: ["c", "d"] },
     { id: "recorder", name: "Recorder 10", cameras: ["a", "b"] },
     { id: "spare", name: "Spare", cameras: [] },
-    // A camera deleted since is not shown, nor counted.
     { id: "front", name: "Recorder 2", cameras: ["gone", "c"] },
   ];
   groups.set(made);
@@ -145,7 +133,6 @@ test("the filters narrow by camera and by status, and clear together", () => {
 test("a column title sorts one way, then the other, then back to the sidebar's order", () => {
   seed();
   sortBy("name");
-  // Numbers in names go by their value.
   expect(names(shown())).toEqual(["Outside", "Recorder 2", "Recorder 10", "Spare"]);
   sortBy("name");
   expect(names(shown())).toEqual(["Spare", "Recorder 10", "Recorder 2", "Outside"]);
@@ -154,7 +141,6 @@ test("a column title sorts one way, then the other, then back to the sidebar's o
   expect(names(shown())).toEqual(["Outside", "Recorder 10", "Spare", "Recorder 2"]);
 
   sortBy("cameras");
-  // Equal ones keep the sidebar's order.
   expect(names(shown())).toEqual(["Spare", "Recorder 2", "Outside", "Recorder 10"]);
 });
 

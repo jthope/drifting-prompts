@@ -1,15 +1,4 @@
-//! Snapshots: writing a frame, or a camera's own JPEG, to a PNG, and finding the ones saved.
-//!
-//! How a snapshot is named, found and listed it shares with a recording, in `saved_file`:
-//! `snapshot-1762560000-<camera id>.png`, tagged with what the camera saw when an event took it
-//! (`snapshot-1762560000-<camera id>.vehicle.png`), and its thumbnail too, in `thumbnail`, which
-//! the gallery shows in place of the picture. What is its own is writing the PNG, reading each
-//! one's size in pixels for the gallery, and making the thumbnails a snapshot lacks: one whose
-//! thumbnail could not be written with it, or put in the folder by hand.
-//!
-//! An event's snapshot is the camera's own picture where it hands one out (a Reolink's `Snap`, a
-//! JPEG the size of its main stream), written as a PNG like any other, at its full size, so the
-//! snapshots folder holds one kind of file.
+//! Snapshots: a frame, or a camera's own JPEG, written as a PNG with its thumbnail, and listed.
 
 use std::{
     fs::{File, OpenOptions},
@@ -28,7 +17,6 @@ use crate::{
     thumbnail,
 };
 
-/// The folders a thread is making thumbnails in ([`fill_thumbnails_soon`]).
 static FILLING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 /// A snapshot in the folder.
@@ -38,13 +26,13 @@ pub struct Saved {
     pub name: String,
     /// Where it is, absolute.
     pub path: PathBuf,
-    /// Its thumbnail, when it has one yet ([`fill_thumbnails_soon`]).
+    /// Its thumbnail, when it has one yet.
     pub thumbnail: Option<PathBuf>,
     /// The id of the camera that took it; `None` when the name doesn't say.
     pub camera: Option<String>,
-    /// What the camera saw as an event took it, from its name; empty for one taken by hand.
+    /// What the camera saw, for one an event took; empty for one taken by hand.
     pub tags: Vec<String>,
-    /// When it was taken, in milliseconds since 1970: from its name, else when the file was written.
+    /// When it was taken, in ms since 1970: from its name, else when the file was written.
     pub taken_ms: u64,
     /// Its size on disk.
     pub bytes: u64,
@@ -52,11 +40,7 @@ pub struct Saved {
     pub size: Option<(u32, u32)>,
 }
 
-/// Writes one frame from `camera` into `folder` as a PNG, creating the folder if it is missing, and
-/// its thumbnail.
-///
-/// This reads the decoded bytes rather than anything a GPU holds, so a snapshot is the picture the
-/// camera sent, not a re-read of a window.
+/// Writes one frame from `camera` into `folder` as a PNG, with its thumbnail.
 pub fn write_snapshot(
     folder: &Path,
     frame: &DecodedFrame,
@@ -66,8 +50,7 @@ pub fn write_snapshot(
     write_tagged(folder, frame, stamp, camera, &[])
 }
 
-/// Writes one frame as [`write_snapshot`] does, its name tagged with `tags`: what the camera saw,
-/// for an event's snapshot.
+/// Writes one frame as [`write_snapshot`] does, its name tagged with `tags`.
 pub fn write_tagged(
     folder: &Path,
     frame: &DecodedFrame,
@@ -83,8 +66,7 @@ pub fn write_tagged(
     write_picture(folder, &thumbnail::rgba_of(frame)?, stamp, camera, tags)
 }
 
-/// Writes the camera's own picture, `jpeg`, as a snapshot at its full size, with its thumbnail,
-/// its name tagged with `tags`: for an event's snapshot from a camera that hands one out.
+/// Writes the camera's own JPEG as a snapshot at its full size, its name tagged with `tags`.
 pub fn write_from_jpeg(
     folder: &Path,
     jpeg: &[u8],
@@ -98,8 +80,6 @@ pub fn write_from_jpeg(
     write_picture(folder, &picture, stamp, camera, tags)
 }
 
-/// Writes `picture` into `folder` as a PNG, creating the folder if it is missing, and its
-/// thumbnail.
 fn write_picture(
     folder: &Path,
     picture: &RgbaImage,
@@ -111,20 +91,16 @@ fn write_picture(
     let (path, file) = create(folder, stamp, camera, tags)?;
 
     if let Err(error) = write_png(file, picture.as_raw(), picture.width(), picture.height()) {
-        // Half a picture is no snapshot.
         let _ = std::fs::remove_file(&path);
         return Err(error);
     }
-    // The snapshot is saved either way: one whose thumbnail failed gets it from the picture later.
+    // A missing thumbnail is made from the picture later.
     let _ = thumbnail::save(&path, picture);
     Ok(path)
 }
 
-/// A new, empty file for a snapshot `camera` takes at `stamp`, in seconds, tagged with `tags`.
-///
-/// A second snapshot in the same second takes the next second, as a recording does, so none is
-/// written over. Not a suffix such as `-2`: everything after the stamp is read back as the camera.
-/// Each name is claimed by creating its file, so two snapshots taken at once never share one.
+/// A taken second moves on to the next, not to a `-2` suffix, which would read back as the camera;
+/// creating the file claims the name.
 fn create(folder: &Path, stamp: u64, camera: &str, tags: &[&str]) -> Result<(PathBuf, File)> {
     let mut stamp = stamp;
     loop {
@@ -137,7 +113,6 @@ fn create(folder: &Path, stamp: u64, camera: &str, tags: &[&str]) -> Result<(Pat
     }
 }
 
-/// Encodes the picture into `file` as a PNG, closing the file when done.
 fn write_png(file: File, rgba: &[u8], width: u32, height: u32) -> Result<()> {
     let mut out = BufWriter::new(file);
     image::write_buffer_with_format(
@@ -153,7 +128,7 @@ fn write_png(file: File, rgba: &[u8], width: u32, height: u32) -> Result<()> {
         .map_err(StorageError::io("the snapshot could not be written"))
 }
 
-/// Every PNG in `folder`, newest first. A folder that isn't there yet has none.
+/// Every PNG in `folder`, newest first.
 pub fn list(folder: &Path) -> Vec<Saved> {
     let mut found: Vec<Saved> = SNAPSHOT
         .entries(folder)
@@ -162,7 +137,6 @@ pub fn list(folder: &Path) -> Vec<Saved> {
             size: image::image_dimensions(&entry.path).ok(),
             thumbnail: thumbnail::existing(&entry.path),
             bytes: entry.metadata.len(),
-            // One put in the folder by hand is dated by when it was written.
             taken_ms: entry
                 .stamp_ms
                 .unwrap_or_else(|| saved_file::unix_ms(entry.metadata.modified())),
@@ -180,8 +154,7 @@ pub fn list(folder: &Path) -> Vec<Saved> {
     found
 }
 
-/// A number that changes whenever a PNG in `folder`, or a thumbnail of one, is added, removed or
-/// rewritten.
+/// Changes whenever a PNG in `folder`, or its thumbnail, is added, removed or written.
 pub fn revision(folder: &Path) -> u64 {
     saved_file::revision(
         &[folder.to_path_buf(), folder.join(thumbnail::FOLDER)],
@@ -198,8 +171,7 @@ pub fn delete(folder: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Makes the thumbnail of each snapshot in `folder` that has none, from the picture itself, one at
-/// a time, and says how many it made. A picture that can't be read is left without one.
+/// Makes the thumbnail of each snapshot in `folder` that has none; returns how many it made.
 pub fn fill_thumbnails(folder: &Path) -> usize {
     let mut made = 0;
     for entry in SNAPSHOT.entries(folder) {
@@ -212,8 +184,7 @@ pub fn fill_thumbnails(folder: &Path) -> usize {
     made
 }
 
-/// Runs [`fill_thumbnails`] on a thread of its own, unless one already is for `folder`. Each
-/// thumbnail it writes changes [`revision`], so a gallery showing the folder picks it up.
+/// Runs [`fill_thumbnails`] on a thread of its own, unless one already is for `folder`.
 pub fn fill_thumbnails_soon(folder: PathBuf) {
     let done = |folder: &PathBuf| {
         FILLING
@@ -246,7 +217,6 @@ mod tests {
 
     use super::*;
 
-    /// Three by two pixels of B, G, R, A, which is what a decoded frame holds.
     fn frame() -> DecodedFrame {
         DecodedFrame {
             width: 3,
@@ -257,7 +227,6 @@ mod tests {
 
     #[test]
     fn a_snapshot_is_written_into_its_folder_as_a_png_named_for_its_camera() {
-        // A folder that does not exist yet, so this covers creation as well as naming.
         let temp = TempDir::new().unwrap();
         let folder = temp.path().join("snapshots");
         let path = write_snapshot(&folder, &frame(), 12345, "3f2a-9c").expect("it should write");
@@ -462,7 +431,6 @@ mod tests {
         let folder = TempDir::new().unwrap();
         let written = write_snapshot(folder.path(), &frame(), 1, "a").unwrap();
         let thumbnails = folder.path().join("thumbnails");
-        // One whose thumbnail went missing, and one put there by hand.
         std::fs::remove_file(thumbnails.join("snapshot-1-a.png")).unwrap();
         std::fs::copy(&written, folder.path().join("Holiday.PNG")).unwrap();
         std::fs::write(folder.path().join("snapshot-2-a.png"), "not a picture").unwrap();

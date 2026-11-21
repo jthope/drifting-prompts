@@ -1,4 +1,3 @@
-// What the buttons and menus do, shared by every place that offers them.
 import { signal } from "nsh";
 import { Cameras, type CameraState, type FitInfo, type GroupInfo, Groups, type StreamChoice, type ViewInfo, Views } from "ipcamera/native";
 import { askName, confirmDelete, type MenuEntries, notify, popupMenu } from "../../../dp/ui";
@@ -15,11 +14,6 @@ export function failed(error: unknown) {
   notify(String(message ?? error), "warn");
 }
 
-/**
- * Makes a change, saying why when it fails, then reads the library again so it
- * shows at once. Resolves with whether it was made. Changes are saved where the
- * cameras are kept, a file or the server, so they always take a moment.
- */
 async function attempt(change: () => Promise<unknown>): Promise<boolean> {
   try {
     await change();
@@ -37,7 +31,7 @@ export function toggleConnection(camera: CameraState) {
   (camera.connected ? Cameras.disconnect(camera.id) : Cameras.connect(camera.id)).catch(failed);
 }
 
-/** Starts again the camera's streams that gave up, which nothing else tries again. */
+/** Starts again the camera's streams that gave up. */
 export function tryAgain(camera: CameraState) {
   Cameras.connect(camera.id).catch(failed);
 }
@@ -47,42 +41,29 @@ export function toggleSpotlight(camera: CameraState) {
   Cameras.setSpotlight(camera.id, !camera.spotlightOn).catch(failed);
 }
 
-/**
- * Saves the picture of every connected camera on screen, as Record records
- * them, and says how that went.
- */
+/** Saves the picture of every connected camera on screen. */
 export function takeSnapshots() {
   snapshot(onScreen());
 }
 
-/** Saves camera `camera`'s picture, from the toolbar over it. */
+/** Saves camera `camera`'s picture. */
 export function takeSnapshotOf(camera: string) {
   snapshot([camera]);
 }
 
-/** Saves the pictures of `cameras` that are connected, and says how that went. */
 function snapshot(cameras: string[]) {
   Cameras.snapshot(cameras)
-    // The files' names carry the cameras' ids, which say nothing to the user: the gallery is
-    // where they see them.
     .then((count) => notify(count === 1 ? "Snapshot saved. Find it under Snapshots." : `Saved ${count} snapshots. Find them under Snapshots.`, "ok"))
     .catch(failed);
 }
 
-/**
- * Records every connected camera on screen, or stops every recording. One
- * switch for them all, so a recording can always be stopped from where the
- * user is, even after leaving the cameras it records.
- */
+/** Records every connected camera on screen, or stops every recording. */
 export function toggleRecording() {
   if (recording()) stopRecording();
   else record(onScreen());
 }
 
-/**
- * Records `camera`, from the toolbar over its picture, or while it records
- * stops every recording: the same one switch as Record's, for one camera.
- */
+/** Records `camera`, or while it records stops every recording. */
 export function toggleRecordingOf(camera: CameraState) {
   if (camera.recording) stopRecording();
   else record([camera.id]);
@@ -132,11 +113,7 @@ export function editCameras(ids: string[]) {
   else if (ids.length > 1) bulkEditing.set(ids);
 }
 
-/**
- * Puts a camera the settings dialog just added where it was asked for. Added
- * from the Cameras page, it stays there, selected; from anywhere else, it
- * shows on its own.
- */
+/** Puts a camera the settings dialog just added where it was asked for. */
 export function cameraAdded(id: string, tile?: TileTarget) {
   refresh();
   if (tile) attempt(() => Views.setTile(tile.view, tile.index, id, ""));
@@ -158,7 +135,7 @@ export async function deleteCamera(camera: CameraState) {
     .catch(failed);
 }
 
-/** Asks for a name and makes a group, with `cameras` in it, in order, in one save. */
+/** Asks for a name and makes a group of `cameras`. */
 export async function newGroup(...cameras: string[]) {
   const name = await askName({ title: "New group", label: "Name", action: "Create" });
   if (name === null) return;
@@ -171,7 +148,7 @@ export type GroupEditing = { group: string | null };
 /** The group the dialog is open for, or `null` while it is closed. */
 export const groupEditing = signal<GroupEditing | null>(null);
 
-/** Opens a group's dialog, with its name and its cameras; `null` opens it for a new group. */
+/** Opens a group's dialog; `null` opens it for a new group. */
 export function editGroup(id: string | null) {
   groupEditing.set({ group: id });
 }
@@ -182,7 +159,6 @@ export function groupAdded(id: string) {
   if (page().kind === "groups") groupListing.pick(id, "only");
 }
 
-/** "1 camera", "3 cameras". */
 const cameraCount = (count: number) => (count === 1 ? "1 camera" : `${count.toLocaleString()} cameras`);
 
 /** "1 group", "3 groups". */
@@ -212,15 +188,9 @@ export async function deleteCameras(cameras: CameraState[]) {
   }
 }
 
-/**
- * Adds a copy of each of `cameras` (`copyOf`): the same settings and groups
- * on the next channel its address doesn't use, which is how a recorder's
- * cameras are set up one after another. Made on the Cameras page, the copies
- * are selected, ready to rename or change together; anywhere else the page
- * stays as it is. Stops at the first that can't be made.
- */
+/** Adds a copy of each of `cameras` on the next channel its address doesn't use; stops at the first that can't be made. */
 export async function duplicateCameras(cameras: { id: string }[]) {
-  // Every camera as it is now, the copies joining as they are made, so two copies of one recorder take two channels.
+  // The copies join as they are made, so two copies of one recorder take two channels.
   const taken: Taken[] = states().flatMap((camera) => {
     try {
       return [Cameras.form(camera.id)];
@@ -257,11 +227,7 @@ export function setGroup(cameras: { id: string }[], group: GroupInfo, out: boole
   });
 }
 
-/**
- * The groups, each checked when every one of `cameras` is in it, and saying
- * how many are when only some are: choosing one puts them all in it, or takes
- * them all out when they all were. Then a way to make a group of them.
- */
+/** The groups as a menu for `cameras`, each checked when all of them are in it, then New group. */
 export function groupChoices(cameras: { id: string }[]): MenuEntries {
   const all = cameras.length;
   const choices = groups().map((group) => {
@@ -275,7 +241,7 @@ export function groupChoices(cameras: { id: string }[]): MenuEntries {
   return [...choices, choices.length > 0 && { type: "separator" as const }, { label: "New group…", onSelect: () => newGroup(...cameras.map((camera) => camera.id)) }];
 }
 
-/** What the Cameras page's selection offers, in its bar's menu and on a selected row's right press. */
+/** What the Cameras page's selection offers. */
 export function selectionMenu(cameras: CameraState[]): MenuEntries {
   return [
     { label: `Edit ${cameraCount(cameras.length)}…`, onSelect: () => editCameras(cameras.map((camera) => camera.id)) },
@@ -312,12 +278,7 @@ export async function deleteGroups(list: GroupInfo[]) {
   if (sure && (await attempt(() => Groups.removeMany(list.map((group) => group.id))))) notify(`Deleted ${groupCount(list.length)}.`, "ok");
 }
 
-/**
- * Adds a copy of each of `list`: the same cameras, in the same order, named
- * after it with "copy" ("Outside copy", "Outside copy 2"), at the end. Made on
- * the Groups page, the copies are selected, ready to rename or change. Stops
- * at the first that can't be made.
- */
+/** Adds a copy of each of `list`, named with "copy"; stops at the first that can't be made. */
 export async function duplicateGroups(list: GroupInfo[]) {
   const taken = groups().map((group) => group.name);
   const made: { id: string; name: string }[] = [];
@@ -342,11 +303,7 @@ export function moveGroup(group: GroupInfo, index: number) {
   return attempt(() => Groups.moveTo(group.id, index));
 }
 
-/**
- * Moves camera `id` to `index` among the cameras: the order All cameras shows,
- * and the one every list of cameras starts from. Resolves with whether it
- * moved, once the list shows it.
- */
+/** Moves camera `id` to `index` among the cameras; resolves with whether it moved. */
 export function moveCamera(id: string, index: number) {
   return attempt(() => Cameras.moveTo(id, index));
 }
@@ -377,12 +334,7 @@ export function setMember(list: GroupInfo[], camera: string, out: boolean) {
   });
 }
 
-/**
- * The cameras, each checked when every one of `list` holds it, and saying in
- * how many when only some do: choosing one puts it in them all, or takes it
- * out of them all when they all held it. The other way round from
- * `groupChoices`.
- */
+/** The cameras as a menu for groups `list`, each checked when every group holds it. */
 export function memberChoices(list: GroupInfo[]): MenuEntries {
   const all = list.length;
   if (states().length === 0) return [{ label: "No cameras yet", disabled: true }];
@@ -396,7 +348,7 @@ export function memberChoices(list: GroupInfo[]): MenuEntries {
   });
 }
 
-/** What the Groups page's selection offers on a selected row's right press, as its bar does. */
+/** What the Groups page's selection offers. */
 export function groupSelectionMenu(list: GroupInfo[]): MenuEntries {
   return [
     { label: "Cameras", submenu: memberChoices(list) },
@@ -437,7 +389,7 @@ export function setLayout(view: ViewInfo, layout: string) {
   return attempt(() => Views.setLayout(view.id, layout));
 }
 
-/** Sets how tile `index`'s picture fills it: a key of `Views.fits`. The tile keeps it as its camera or stream changes. */
+/** Sets how tile `index`'s picture fills it: a key of `Views.fits`. */
 export function setTileFit(view: ViewInfo, index: number, fit: string) {
   return attempt(() => Views.setTileFit(view.id, index, fit));
 }
@@ -447,11 +399,7 @@ export function setTile(view: ViewInfo, index: number, camera: string, stream = 
   return attempt(() => Views.setTile(view.id, index, camera, stream));
 }
 
-/**
- * An empty tile's Add camera: the cameras to show in it, or with none yet, the
- * new camera's form at once, rather than a menu holding only "New camera…".
- * `open` shows the menu (`MenuOpener`'s).
- */
+/** An empty tile's Add camera: the cameras' menu, or with none yet the new camera's form. */
 export function addToTile(view: ViewInfo, index: number, open: (items: MenuEntries) => void) {
   if (states().length === 0) newCamera({ view: view.id, index });
   else open(cameraChoices(view, index));
@@ -467,7 +415,7 @@ export function cameraChoices(view: ViewInfo, index: number): MenuEntries {
   ];
 }
 
-/** How a picture fills its place (`fit`, a key of `Views.fits`), and what picking another does: a tile's `tileFit`, or the page's `pageFit`. */
+/** How a picture fills its place (a key of `Views.fits`), and what picking another does. */
 export type FitChoice = { fit: string; pick: (fit: string) => void };
 
 /** How tile `index` of `view` fills its tile, which the tile saves when another is picked. */
@@ -480,12 +428,7 @@ export function pageFit(camera: string): FitChoice {
   return { fit: pageFitOf(camera), pick: (fit) => setPageFit(camera, fit) };
 }
 
-/**
- * A picture's stream as its menus pick it: what it picks (`current`, `""` for
- * Auto, `own` for its camera's own), what it plays (`played`, a key of
- * `Cameras.streamChoices`, `undefined` while Auto has yet to pick), and what
- * picking another does: a tile's `tileStream`, or the page's `pageStream`.
- */
+/** A picture's stream pick (`""` for Auto, `own` for its own), what it plays, and how to pick another. */
 export type StreamPick = { current: string; played: string | undefined; pick: (stream: string) => void };
 
 /** The stream tile `index` of `view` picks and plays, which the tile saves when another is picked. */
@@ -499,25 +442,13 @@ export function pageStream(camera: string, current: string): StreamPick {
   return { current, played: playedOnItsOwn(camera, current), pick: (stream) => show({ kind: "camera", id: camera, stream }) };
 }
 
-/**
- * Every fit, the picture's own checked (`choice.fit`): those that work from the
- * picture's own shape (Original, Fill, Stretch), then, apart, those that force
- * a shape on it. Picking one goes to `choice.pick`.
- */
+/** Every fit, the picture's own checked: those that keep its shape, then those that force one. */
 export function fitMenu(choice: FitChoice): MenuEntries {
   const entry = (fit: FitInfo) => ({ label: fit.title, checked: fit.key === choice.fit, onSelect: () => choice.pick(fit.key) });
   return [...fits.filter((fit) => !fit.reshapes).map(entry), { type: "separator" as const }, ...fits.filter((fit) => fit.reshapes).map(entry)];
 }
 
-/**
- * What a camera's live picture offers, wherever the stage shows it: on its own,
- * and in a view's tile, whose menu has these among what the tile itself offers.
- * `stream` is the stream it picks and plays, and how it picks another: the
- * page's for a camera on its own, the tile's in a view; `fit`, how it fills its
- * place, the same way. Connect or Disconnect is the toolbar's, for a narrow
- * picture whose toolbar leaves it out. Something a picture's menu should do
- * goes here, so both get it.
- */
+/** What a camera's live picture offers, on its own and in a view's tile. */
 export function pictureMenu(camera: string, stream: StreamPick, fit: FitChoice): MenuEntries {
   const state = states().find((each) => each.id === camera);
   return [
@@ -528,16 +459,12 @@ export function pictureMenu(camera: string, stream: StreamPick, fit: FitChoice):
   ];
 }
 
-/** What camera `camera`'s picture offers where it fills the stage on its own, picking `stream`: `pictureMenu`, whose Stream and Fit change the page's. */
+/** What camera `camera`'s picture offers where it fills the stage on its own. */
 export function cameraPageMenu(camera: string, stream: string): MenuEntries {
   return pictureMenu(camera, pageStream(camera, stream), pageFit(camera));
 }
 
-/**
- * Which of camera `camera`'s streams (`Cameras.streamChoices`) a picture on
- * `stream` (`""` for the camera's own) shows, whichever way `stream` reaches it;
- * `undefined` for one the camera no longer has.
- */
+/** Which of `camera`'s streams a picture on `stream` shows; `undefined` for one the camera no longer has. */
 export function shownChoice(camera: string, stream: string): StreamChoice | undefined {
   const key = Cameras.choiceKey(camera, stream);
   return Cameras.streamChoices(camera).find((choice) => choice.key === key);
@@ -549,22 +476,13 @@ export function streamLabel(camera: string, stream: string): string {
   return shown?.size || shown?.name || stream;
 }
 
-/** What a picture's stream picker shows for its pick (`StreamPick`): on Auto, `Auto` and what it plays (`Auto · 896×512`), else the stream it picked (`streamLabel`). */
+/** What a picture's stream picker shows for its pick: `Auto · 896×512` on Auto, else `streamLabel`'s. */
 export function pickLabel(camera: string, stream: StreamPick): string {
   if (stream.current !== "") return streamLabel(camera, stream.current);
   return stream.played === undefined ? "Auto" : `Auto · ${streamLabel(camera, stream.played)}`;
 }
 
-/**
- * Every way camera `camera`'s picture can pick its stream: Auto first, with
- * what it plays while it is on it, then each of the camera's streams
- * (`Cameras.streamChoices`) once with its size, its codec and its name,
- * largest first, its own marked as its default; under a heading for each lens
- * where it has more than one. The picture's pick (`stream.current`) is
- * checked, and `stream.pick` takes the one chosen: `""` for Auto, `own` for the
- * camera's own. A stream it picked that the camera no longer has stays listed,
- * checked.
- */
+/** Every stream a picture of `camera` can pick, Auto first, then each under its lens; one it no longer has stays listed. */
 export function streamMenu(camera: string, stream: StreamPick): MenuEntries {
   const choices = Cameras.streamChoices(camera);
   const auto = stream.current === "";
@@ -588,7 +506,7 @@ export function streamMenu(camera: string, stream: StreamPick): MenuEntries {
   return entries;
 }
 
-/** What a tile's menu offers: what it shows, then what its camera's picture offers anywhere (`pictureMenu`), the tile's stream among it. */
+/** What a tile's menu offers. */
 export function tileMenu(view: ViewInfo, index: number): MenuEntries {
   const current = view.tiles[index] ?? "";
   const filled = current !== "";
@@ -601,11 +519,7 @@ export function tileMenu(view: ViewInfo, index: number): MenuEntries {
   ];
 }
 
-/**
- * What a camera's menu offers, wherever it is listed. `group` is the group it
- * is listed under. Moving it is in the cameras' own order, which only the
- * sidebar's All cameras shows, so only that list asks for it (`canMove`).
- */
+/** What a camera's menu offers; `group` is the group it is listed under, `canMove` adds moving it. */
 export function cameraMenu(camera: CameraState, group?: GroupInfo, canMove = false): MenuEntries {
   const index = states().findIndex((each) => each.id === camera.id);
   const last = states().length - 1;
@@ -624,11 +538,7 @@ export function cameraMenu(camera: CameraState, group?: GroupInfo, canMove = fal
   ];
 }
 
-/**
- * What a group's menu offers, in the sidebar and on the Groups page. Moving
- * it is in the sidebar's order, so the page leaves it out (`canMove`) while
- * its table is sorted otherwise.
- */
+/** What a group's menu offers; `canMove` adds moving it in the sidebar's order. */
 export function groupMenu(group: GroupInfo, canMove = true): MenuEntries {
   const index = groups().findIndex((each) => each.id === group.id);
   return [
@@ -652,7 +562,7 @@ export function viewMenu(view: ViewInfo): MenuEntries {
   ];
 }
 
-/** Opens a menu of `items` at `at`, an event's `pagePosition`: the system's, or a drawn one in a browser (`popupMenu`). A button's menu opens with `MenuOpener` instead. */
+/** Opens a menu of `items` at `at`, an event's `pagePosition`. */
 export function popup(items: MenuEntries, at?: { x: number; y: number }) {
   popupMenu(items, at);
 }

@@ -7,9 +7,8 @@ license = "MIT"
 
 [workspace]
 
-# The root workspace's lints, said again here because this crate is a workspace of its own and so
-# cannot inherit them. `unsafe_code` is not forbidden: the Win32, COM and Direct2D calls live here.
-# Instead every `unsafe` block must say why it is sound, in a `// SAFETY:` comment.
+# The root workspace's lints, repeated: a workspace of its own cannot inherit them. `unsafe` is
+# allowed for the Win32 calls, each with a `// SAFETY:` comment.
 [lints.rust]
 missing_docs = "warn"
 
@@ -18,41 +17,29 @@ all = "warn"
 mod_module_files = "warn"
 undocumented_unsafe_blocks = "warn"
 
-# The decoders are optimized even in debug builds, `nsh run` included, by the repository's
-# `.cargo/config.toml`: nsh builds through a workspace of its own, which never reads this file's
-# profiles.
+# No profiles here: nsh builds through a workspace of its own, so `.cargo/config.toml` optimizes
+# the decoders.
 
 [dependencies]
-nsh-core = "0.5.1"
-nsh-base = "0.5.1"
-# The server's answers on the web, read into `ipcamera_core::api`'s types. Both are in the build
-# already, through `ipcamera-core`.
+nsh-core = "0.6.1"
+nsh-base = "0.6.1"
+# The server's answers on the web, read into `ipcamera_core::api`'s types.
 serde = "1"
 serde_json = "1"
-# The cameras, groups and views, on every platform. The web preview keeps them in memory with the
-# desktop's own rules and checks (`Library::in_memory`), so the two can't drift apart. Nothing in
-# it streams or draws, and on the web it makes its ids without JavaScript glue (`ids.rs`).
+# The cameras, groups and views, with the desktop's rules on the web too.
 ipcamera-core = { path = "../core" }
-# What the suite's apps share to look alike: the theme files and the `Themes` module that draws
-# them, where the window was left, and the folder picker and Explorer. Its styled TSX
-# controls sit beside it, imported by path.
+# The suite's themes, window place and folder calls.
 dp-ui = { path = "../../dp/ui" }
 
-# The live picture is a Direct2D component, so its code and everything it needs build under
-# `cfg(windows)`. That also keeps the camera stack out of the web build: a browser cannot open an
-# RTSP connection, and the media crate plays sound through WASAPI.
+# Desktop only: the live picture is Direct2D, and a browser cannot open RTSP.
 [target.'cfg(windows)'.dependencies]
-nsh-platform-windows = { version = "0.5.1", default-features = false }
+nsh-platform-windows = { version = "0.6.1", default-features = false }
 ipcamera-media = { path = "../media" }
-# Snapshots and recordings on disk, by the same rules the server keeps: their names, PNGs,
-# thumbnails, and the free space on the drives they go to. The web build asks the server instead.
+# Snapshots and recordings on disk; the web build asks the server instead.
 ipcamera-storage = { path = "../storage" }
-# The pictures that stand in for cameras by name under the test pattern (`IPCAMERA_PICTURES`, for
-# the READMEs' screenshots), read from PNGs. Already in the build through `ipcamera-storage`, at
-# the root workspace's version.
+# The test pattern's stand-in pictures (`IPCAMERA_PICTURES`); version follows the root workspace's.
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-# Tests only: a folder of its own for each test, removed when it ends. The root workspace uses the
-# same crate for the same reason.
+# A temporary folder for each test.
 [dev-dependencies]
 tempfile = "3"

@@ -1,8 +1,3 @@
-// What the search works out (`views/search.ts`): where each scope looks, the
-// drop-down's rows and the files panel's tree of results, which match F3 steps
-// to across the files, how the status bar says where the reader is, the
-// outline's counts, Raw's marks beside the lines, and the page's highlights,
-// the one the reader is on among them.
 import { expect, test } from "nsh/test";
 import { TextView, type TextViewInline } from "nsh/base";
 import type { HeadingInfo, MarkInfo, MatchInfo, SearchResults } from "mdviewer/native";
@@ -33,7 +28,6 @@ import {
   stepFrom,
 } from "./views/search";
 
-/** A match on one line, from `start` to `end`, its line's text `excerpt`. */
 const at = (line: number, start: number, end: number, excerpt = ""): MatchInfo => ({
   startLine: line,
   startColumn: start,
@@ -48,13 +42,11 @@ const heading = (level: number, title: string, line: number): HeadingInfo => ({ 
 
 const NOTES = "D:\\notes";
 
-/** Results with `counts` matches in each file named, in that order, all in project `project`. */
 function results(counts: Record<string, number>, project = NOTES): SearchResults {
   const files = Object.entries(counts).map(([path, count]) => ({ project, path, matches: Array.from({ length: count }, (_, index) => at(index, 0, 1)) }));
   return { files, total: files.reduce((sum, file) => sum + file.matches.length, 0), truncated: false, problem: "" };
 }
 
-/** `one` and `two` together, as a search of several projects gives them. */
 function both(one: SearchResults, two: SearchResults): SearchResults {
   return { ...one, files: [...one.files, ...two.files], total: one.total + two.total };
 }
@@ -217,7 +209,6 @@ test("the page reads the query as Raw does: as written, in any case, or as a pat
   expect(pagePattern(null)).toBe(null);
 });
 
-/** The highlights of `inlines`, as their text and color, in order. */
 function highlights(inlines: TextViewInline[]): [string, string][] {
   const found: [string, string][] = [];
   for (const each of inlines) {

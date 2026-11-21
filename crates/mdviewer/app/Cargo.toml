@@ -8,8 +8,7 @@ license = "MIT"
 
 [workspace]
 
-# The root workspace's lints, said again here because this crate is a workspace of its own and so
-# cannot inherit them. It has no `unsafe` of its own: the Win32 calls it needs are `dp-ui`'s.
+# The root workspace's lints, repeated: a workspace of its own cannot inherit them.
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
@@ -19,18 +18,15 @@ all = "warn"
 mod_module_files = "warn"
 
 [dependencies]
-nsh-core = "0.5.1"
-nsh-base = "0.5.1"
-# What the suite's apps share to look alike: the theme files and the `Themes` module that draws
-# them, where the window was left, and on Windows the folder picker and Explorer. Its styled TSX
-# controls sit beside it, imported by path.
+nsh-core = "0.6.1"
+nsh-base = "0.6.1"
+# The suite's themes, window place and folder calls.
 dp-ui = { path = "../../dp/ui" }
-# The projects and settings, the Markdown files in a project, and a file's outline.
+# Projects, settings, files, outline and search.
 mdviewer-core = { path = "../core" }
-# A dropped folder's `file:` URL has its `%20`-style escapes read (`dropped.rs`). IP Camera's core
-# reads an ONVIF camera's scopes with the same.
+# Decodes a dropped folder's `file:` URL.
 percent-encoding = "2"
 
-# Tests only: a folder of its own for each test, removed when it ends.
+# A temporary folder per test.
 [dev-dependencies]
 tempfile = "3"

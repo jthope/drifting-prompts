@@ -28,11 +28,7 @@ export function StatusLine(props: { tone: StatusTone; text: string; class?: stri
   );
 }
 
-/**
- * One item of the window's status bar: an icon in its color (or `mark` in its
- * place) and a short text, which opens what it counts. `label` says both, for
- * a screen reader. It hovers as a quiet button does in the theme shown.
- */
+/** One item of the window's status bar: an icon and a short text, which opens what it counts. */
 export function StatusItem(props: { icon?: IconName; tint?: IconTint; mark?: JSX.Element; text: string; label: string; onPress: () => void }) {
   return (
     <Press label={props.label} scale={1} class={`h-6 flex-row items-center gap-1.5 rounded-md px-1.5 ${look().buttons.ghost.frame}`} onPress={props.onPress}>
@@ -46,10 +42,7 @@ export function StatusItem(props: { icon?: IconName; tint?: IconTint; mark?: JSX
   );
 }
 
-/**
- * A status bar item that only says something, with nothing to open: an icon
- * in its color and a short text, as `StatusItem` draws them, at rest.
- */
+/** A status bar item that only says something, with nothing to open. */
 export function StatusText(props: { icon?: IconName; tint?: IconTint; text: string }) {
   return (
     <View class="h-6 flex-row items-center gap-1.5 px-1.5">
@@ -61,10 +54,7 @@ export function StatusText(props: { icon?: IconName; tint?: IconTint; text: stri
   );
 }
 
-/**
- * A meter's fill, as the dots' are kept: in a table, where nsh's check of class
- * names, which doesn't know the app's own `warning` token, leaves it alone.
- */
+/** In a table, which nsh's class check, not knowing the app's `warning` token, leaves alone. */
 const meterFills = { ok: "bg-chart-1", warn: "bg-warning" };
 
 /** A small bar filled to `value`, 0 to 1: in the first chart color, or the warning color when `warn`. */

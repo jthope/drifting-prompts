@@ -1,8 +1,4 @@
-//! Plain decoded pictures, and the slot that holds the newest one.
-//!
-//! Nothing here knows about the UI or glass2glass. A frame is bytes and a size; turning it into
-//! something the renderer can paint is the UI's business, which keeps GPU types out of the
-//! pipeline crate.
+//! Decoded pictures as plain bytes, and the slot that holds the newest one.
 
 use std::sync::{
     Arc, Mutex,
@@ -11,11 +7,7 @@ use std::sync::{
 
 use ipcamera_core::sync::LockExt;
 
-/// One decoded picture, in the order the pipeline hands it over.
-///
-/// The bytes are B, G, R, A per pixel, tightly packed with no row padding — a Direct2D bitmap
-/// takes exactly this order as `DXGI_FORMAT_B8G8R8A8_UNORM`, so the UI copies it without touching
-/// a pixel.
+/// One decoded picture: B, G, R, A per pixel, tightly packed with no row padding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodedFrame {
     /// The picture's width, in pixels.
@@ -27,12 +19,7 @@ pub struct DecodedFrame {
 }
 
 impl DecodedFrame {
-    /// Copies the top-left `width` × `height` of a BGRA picture `source_rows` rows tall into a
-    /// tightly packed frame.
-    ///
-    /// The row stride is whatever `data` divides into `source_rows`, so a converter that pads
-    /// rows and one that does not both work, and so does a decoder whose picture is larger than
-    /// the one the stream declares. `None` for an empty size, or a size the data cannot hold.
+    /// The top-left `width` × `height` of a BGRA picture `source_rows` rows tall, any row stride.
     pub fn from_bgra_rows(data: &[u8], source_rows: u32, width: u32, height: u32) -> Option<Self> {
         let (columns, rows, source_rows) = (width as usize, height as usize, source_rows as usize);
         if columns == 0 || rows == 0 || rows > source_rows {
@@ -55,8 +42,7 @@ impl DecodedFrame {
         })
     }
 
-    /// The same pixels as R, G, B, A, fully opaque: the order an image file wants, since PNG has
-    /// no BGRA. A snapshot and a recording's thumbnail are written from this.
+    /// The same pixels as opaque R, G, B, A, since PNG has no BGRA.
     pub fn to_rgba(&self) -> Vec<u8> {
         let mut rgba = Vec::with_capacity(self.bgra.len());
         for pixel in self.bgra.as_chunks::<4>().0 {
@@ -66,11 +52,7 @@ impl DecodedFrame {
     }
 }
 
-/// The newest decoded frame, shared between the pipeline thread and the UI.
-///
-/// Writers replace the contents; readers take whatever is current. Because there is only one
-/// slot, a repaint that falls behind drops frames instead of showing stale ones in order. The
-/// number of frames offered is counted alongside, so the UI can report how many were never drawn.
+/// The newest decoded frame: one slot, so a repaint that falls behind drops frames.
 #[derive(Clone, Default)]
 pub struct FrameSlot {
     current: Arc<Mutex<Option<Arc<DecodedFrame>>>>,
@@ -78,7 +60,7 @@ pub struct FrameSlot {
 }
 
 impl FrameSlot {
-    /// Replaces the frame with `frame`, and counts it as offered.
+    /// Replaces the frame, and counts it as offered.
     pub fn store(&self, frame: Arc<DecodedFrame>) {
         *self.current.locked() = Some(frame);
         self.produced.fetch_add(1, Ordering::Relaxed);
@@ -89,13 +71,12 @@ impl FrameSlot {
         self.current.locked().clone()
     }
 
-    /// How many frames the pipeline has offered since this slot was created.
+    /// How many frames have been offered since this slot was created.
     pub fn produced(&self) -> u64 {
         self.produced.load(Ordering::Relaxed)
     }
 
-    /// Empties the slot, so nothing is drawn until the next frame: a stopped stream's last picture
-    /// doesn't linger.
+    /// Empties the slot, so a stopped stream's last picture doesn't linger.
     pub fn clear(&self) {
         *self.current.locked() = None;
     }
@@ -129,7 +110,6 @@ mod tests {
 
     #[test]
     fn padded_rows_are_packed_tightly() {
-        // Two pixels a row, padded to 12 bytes, with the padding marked 9.
         let mut data = Vec::new();
         for row in 0..2u8 {
             data.extend_from_slice(&[row; 8]);
@@ -143,7 +123,6 @@ mod tests {
 
     #[test]
     fn a_coded_picture_is_cropped_to_the_declared_size() {
-        // A 3 x 3 coded picture, each pixel's bytes its row and column, shown as 2 x 2.
         let data: Vec<u8> = (0..3u8)
             .flat_map(|row| (0..3u8).flat_map(move |column| [row * 10 + column; 4]))
             .collect();

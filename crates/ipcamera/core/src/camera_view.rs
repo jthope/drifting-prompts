@@ -1,26 +1,5 @@
-//! A view: a saved arrangement of camera tiles, such as "Outside" in a 2 × 2 grid.
-//!
-//! This is what security viewers call a saved view or a split: where each tile sits on the
-//! stage, the camera in each tile, and a [`Fit`] (how each picture fills its tile). Tiles refer
-//! to cameras by id, like groups do, so a camera's details stay in one place.
-//!
-//! A tile's place is a [`Cell`] on a grid of [`GRID`] columns and rows over the stage: any size
-//! from [`SMALLEST_SPAN`] cells each way up, anywhere, so long as no two tiles overlap
-//! ([`check_arrangement`]). The splits security viewers offer, even grids and a large tile with
-//! small ones beside it, are [`Layout`]s: a view starts as one, and can be set to one again, but
-//! is then moved and resized tile by tile ([`ArrangedTile`]). Each fits the grid exactly, as 12
-//! shares out evenly in 1, 2, 3 and 4. On a 16:9 stage, a tile as many cells wide as tall is
-//! 16:9 too, the shape most cameras send.
-//!
-//! A tile that picks no stream is on Auto: the app plays whichever of its camera's streams the
-//! size it is drawn at calls for, a small one in a grid of small tiles and a large one where the
-//! same camera fills the stage, and [`Fit::enlargement`] is how it tells. A tile can also pick one
-//! of the camera's streams for good ([`TileStream`]), its own among them. Only the stream is the
-//! tile's; the address, the login and everything else stay the camera's
-//! ([`CameraConfig::with_stream`](crate::CameraConfig::with_stream)).
-//!
-//! A tile can also pick its own [`Fit`], since the tiles of one view come in every shape: a tall
-//! one stretched, a wide one filled. A tile that picks none shows the view's.
+//! A view: a saved arrangement of camera tiles on a [`GRID`] × [`GRID`] grid, each tile a camera
+//! by id, which of its streams and how its picture fills it. A [`Layout`] is a preset arrangement.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 
@@ -32,7 +11,7 @@ use crate::{
 /// How many columns, and how many rows, a view's grid has. Every [`Layout`] fits it exactly.
 pub const GRID: u8 = 12;
 
-/// The fewest columns or rows a tile covers, so none is too small to make out.
+/// The fewest columns or rows a tile covers.
 pub const SMALLEST_SPAN: u8 = 2;
 
 /// One view.
@@ -41,14 +20,13 @@ pub const SMALLEST_SPAN: u8 = 2;
 pub struct CameraView {
     /// What the view is found by; the name can change and repeat.
     pub id: ViewId,
-    /// The name the sidebar shows.
+    /// The view's name.
     pub name: String,
     /// Where each tile sits on the [`GRID`], in the order of `tiles`.
     pub cells: Vec<Cell>,
-    /// How the picture fills a tile that picks no fit of its own ([`ViewTile::fit`]).
+    /// How the picture fills a tile that picks no fit of its own.
     pub fit: Fit,
-    /// What each tile shows, in the order of `cells`. `None` is an empty tile. Tiles past the
-    /// count of `cells` keep their cameras for when the view has room for them again.
+    /// What each tile shows (`None` is empty); those past `cells` are kept for when there is room.
     pub tiles: Vec<Option<ViewTile>>,
 }
 
@@ -61,26 +39,23 @@ impl CameraView {
         tiles
     }
 
-    /// What each tile past its `cells` holds, kept for when the view has room for them again: the
-    /// tile after the last shown one first.
+    /// The tiles kept past its `cells`.
     pub fn hidden_tiles(&self) -> Vec<Option<ViewTile>> {
         self.tiles.iter().skip(self.cells.len()).cloned().collect()
     }
 
-    /// The layout its tiles are, when they are one of [`Layout::ALL`] exactly, in its order;
-    /// `None` for tiles moved or resized to an arrangement of their own.
+    /// The layout its tiles are exactly, in order; `None` for an arrangement of their own.
     pub fn layout(&self) -> Option<Layout> {
         Layout::matching(&self.cells)
     }
 
-    /// How `tile`'s picture fills it: its own fit, else the view's, which an empty tile has too.
+    /// How `tile`'s picture fills it: its own fit, else the view's.
     pub fn fit_of(&self, tile: Option<&ViewTile>) -> Fit {
         tile.and_then(|tile| tile.fit).unwrap_or(self.fit)
     }
 }
 
-/// Why `cells` can't be a view's tiles, as a sentence for the user; `Ok` when they can: at least
-/// one, each on the [`GRID`] and at least [`SMALLEST_SPAN`] each way, and no two overlapping.
+/// Why `cells` can't be a view's tiles, as a sentence for the user.
 pub fn check_arrangement(cells: &[Cell]) -> Result<(), String> {
     if cells.is_empty() {
         return Err("A view needs at least one tile.".to_string());
@@ -114,33 +89,27 @@ pub fn check_arrangement(cells: &[Cell]) -> Result<(), String> {
     Ok(())
 }
 
-/// One tile of a view as its layout is edited: where it goes, and which of the view's tiles it
-/// was, by index, so it keeps that tile's camera; `None` for a new, empty one.
+/// One tile of a view as its layout is edited: where it goes, and which tile it was.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArrangedTile {
     /// Its place on the [`GRID`].
     pub cell: Cell,
-    /// The tile it was, from 0, counting the view's kept tiles past its cells too.
+    /// The tile it was, from 0, counting kept tiles too; `None` for a new, empty one.
     #[serde(default)]
     pub was: Option<usize>,
 }
 
-/// What one tile of a view shows: a camera, which of its streams, and how its picture fills it.
-///
-/// Saved as the camera's id alone when the tile picks neither a stream (it is on Auto) nor a fit
-/// (it shows the view's), and otherwise as `{ "camera": "<id>", "stream": "sub", "fit": "fill" }`,
-/// with only what it picks.
+/// What one tile shows. Saved as the camera's id alone when it picks no stream and no fit.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ViewTile {
     /// The camera, by id.
     pub camera: CameraId,
-    /// The stream it shows; `None` for Auto, which plays the one the size it is drawn at calls for.
+    /// The stream it shows; `None` for Auto, picked by the size it is drawn at.
     pub stream: Option<TileStream>,
-    /// How the picture fills the tile; `None` for the view's fit ([`CameraView::fit_of`]).
+    /// How the picture fills the tile; `None` for the view's fit.
     pub fit: Option<Fit>,
 }
 
-/// A tile showing `camera` on Auto, with the view's fit.
 impl From<CameraId> for ViewTile {
     fn from(camera: CameraId) -> Self {
         Self {
@@ -169,7 +138,6 @@ impl Serialize for ViewTile {
     }
 }
 
-/// A tile as `views.json` can hold it: a camera's id, or the camera with a stream, a fit or both.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum SavedTile {
@@ -183,7 +151,7 @@ enum SavedTile {
     },
 }
 
-/// A blank stream, from a hand edit, reads as Auto, and a blank or unknown fit as the view's.
+/// A blank stream reads as Auto, and a blank or unknown fit as the view's.
 impl<'de> Deserialize<'de> for ViewTile {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(match SavedTile::deserialize(deserializer)? {
@@ -202,24 +170,18 @@ impl<'de> Deserialize<'de> for ViewTile {
 }
 
 /// The stream a tile picks, in place of Auto.
-///
-/// Saved by [`key`](Self::key): `own`, `main` or `sub`, or the path itself.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TileStream {
-    /// The stream the camera's settings name, whichever that is then.
+    /// The stream the camera's settings name.
     Own,
-    /// The main or the sub stream at the path the camera's brand and channel give (Dahua's
-    /// `subtype`, Reolink's `Preview_01_sub`), so it follows the camera's channel when that
-    /// changes.
+    /// The main or sub stream at the brand's path for the camera's channel.
     Brand(Stream),
-    /// A path the camera listed when Detect asked it (`CameraConfig::streams`), as
-    /// `rtsp_path_override` takes it: an RTSP path, query included, or `flv:` and the name of one
-    /// of a Reolink's FLV streams ([`StreamPath`](crate::StreamPath)).
+    /// A path the camera listed, as `rtsp_path_override` takes it.
     Path(String),
 }
 
 impl TileStream {
-    /// What `views.json` and the app call it: `own`, `main`, `sub`, or the path.
+    /// `own`, `main`, `sub`, or the path.
     pub fn key(&self) -> &str {
         match self {
             Self::Own => "own",
@@ -239,9 +201,8 @@ impl TileStream {
         }
     }
 
-    /// The stream a picture given `key` plays, as one camera's connections are told apart: `None`
-    /// for the camera's own, whether `key` is blank or `own`, so both are one connection. Auto is
-    /// never played as such: the app has picked a stream for it by then.
+    /// The stream `key` plays; `None` for the camera's own, blank or `own`, so both share a
+    /// connection.
     pub fn played(key: &str) -> Option<Self> {
         Self::from_key(key).filter(|stream| *stream != Self::Own)
     }
@@ -253,7 +214,7 @@ impl Serialize for TileStream {
     }
 }
 
-/// A blank stream is refused: where there may be none, it is an `Option`, and none is left out.
+/// A blank stream is refused: a missing one is an `Option`.
 impl<'de> Deserialize<'de> for TileStream {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let key = String::deserialize(deserializer)?;
@@ -261,8 +222,7 @@ impl<'de> Deserialize<'de> for TileStream {
     }
 }
 
-/// One tile's place on a grid, counted from the top left in whole grid cells: a view's [`GRID`],
-/// or a [`Layout`]'s own smaller one.
+/// One tile's place on a grid, in whole cells from the top left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cell {
     /// The first column, from 0.
@@ -295,9 +255,7 @@ impl Cell {
     }
 }
 
-/// A way to divide a view, which it starts as and can be set to again. These are the splits
-/// security viewers offer: even grids, and a large tile with small ones along one or two sides
-/// for the camera that matters most.
+/// A preset way to divide a view.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Layout {
     /// One tile filling the view.
@@ -324,7 +282,7 @@ pub enum Layout {
 }
 
 impl Layout {
-    /// Every layout, in the order the picker shows them.
+    /// Every layout, in order.
     pub const ALL: [Layout; 10] = [
         Layout::One,
         Layout::Two,
@@ -361,7 +319,7 @@ impl Layout {
             .find(|layout| layout.key() == key.trim())
     }
 
-    /// What the picker calls it.
+    /// Its display name.
     pub fn title(self) -> &'static str {
         match self {
             Self::One => "Single",
@@ -391,8 +349,7 @@ impl Layout {
         }
     }
 
-    /// Where each tile goes. The large tile, when there is one, comes first, then the rest from
-    /// the top left, a row at a time.
+    /// Where each tile goes: the large tile first, then the rest a row at a time.
     pub fn cells(self) -> Vec<Cell> {
         let (columns, rows) = self.grid();
         let large = match self {
@@ -422,8 +379,7 @@ impl Layout {
         self.cells().len()
     }
 
-    /// Where each tile goes on a view's [`GRID`], in the order of [`cells`](Self::cells): each
-    /// of its own columns and rows made the share of the 12 it takes.
+    /// Where each tile goes on a view's [`GRID`], in the order of [`cells`](Self::cells).
     pub fn on_grid(self) -> Vec<Cell> {
         let (columns, rows) = self.grid();
         let (wide, tall) = (GRID / columns, GRID / rows);
@@ -454,8 +410,7 @@ impl Serialize for Layout {
     }
 }
 
-/// A layout this build doesn't know, from a hand edit or a newer app, reads as the default rather
-/// than making the whole file unreadable.
+/// An unknown layout reads as the default rather than making the file unreadable.
 impl<'de> Deserialize<'de> for Layout {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let key = String::deserialize(deserializer)?;
@@ -486,7 +441,7 @@ pub enum Fit {
 }
 
 impl Fit {
-    /// Every fit, in the order the picker shows them.
+    /// Every fit, in order.
     pub const ALL: [Fit; 8] = [
         Fit::Original,
         Fit::Fill,
@@ -498,7 +453,7 @@ impl Fit {
         Fit::NineBySixteen,
     ];
 
-    /// The name saved in `views.json`, which is also what the video component is given.
+    /// The name saved in `views.json`.
     pub fn key(self) -> &'static str {
         match self {
             Self::Original => "original",
@@ -517,7 +472,7 @@ impl Fit {
         Self::ALL.into_iter().find(|fit| fit.key() == key.trim())
     }
 
-    /// What the picker calls it.
+    /// Its display name.
     pub fn title(self) -> &'static str {
         match self {
             Self::Original => "Original",
@@ -539,15 +494,12 @@ impl Fit {
         }
     }
 
-    /// How many times its own size a `picture` is drawn in a `room` this fit fills, both in
-    /// pixels, on the side it is enlarged the most: under 1 where it is drawn smaller than it is.
-    /// Auto plays the smallest stream this keeps close to 1.
+    /// How many times its own size a `picture` is drawn in a `room`, on the side enlarged most.
     pub fn enlargement(self, picture: (f32, f32), room: (f32, f32)) -> f32 {
         let (across, down) = (room.0 / picture.0, room.1 / picture.1);
         match self {
             Self::Original => across.min(down),
             Self::Fill | Self::Stretch => across.max(down),
-            // Reshaped to the ratio, then fitted like `Original`: as large as the room allows.
             forced => {
                 let shape = forced.aspect().unwrap_or(picture);
                 let scale = (room.0 / shape.0).min(room.1 / shape.1);
@@ -563,7 +515,7 @@ impl Serialize for Fit {
     }
 }
 
-/// As for [`Layout`], an unknown fit reads as the default.
+/// An unknown fit reads as the default.
 impl<'de> Deserialize<'de> for Fit {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let key = String::deserialize(deserializer)?;
@@ -798,7 +750,6 @@ mod tests {
             .map(|tile| view.fit_of(tile.as_ref()))
             .collect();
         assert_eq!(fits, [Fit::Stretch, Fit::Fill, Fit::NineBySixteen]);
-        // An empty tile has nothing of its own: the view's.
         assert_eq!(view.fit_of(None), Fit::Stretch);
     }
 
@@ -851,15 +802,12 @@ mod tests {
     #[test]
     fn a_pictures_enlargement_is_on_the_side_its_fit_stretches_most() {
         let hd = (1920.0, 1080.0);
-        // A 16:9 picture in a square room: Original fits its width, Fill its height.
         assert_eq!(Fit::Original.enlargement(hd, (960.0, 960.0)), 0.5);
         assert_eq!(Fit::Fill.enlargement(hd, (960.0, 960.0)), 960.0 / 1080.0);
         assert_eq!(Fit::Stretch.enlargement(hd, (960.0, 960.0)), 960.0 / 1080.0);
-        // Twice its size in a room twice as large, whichever fit.
         for fit in [Fit::Original, Fit::Fill, Fit::Stretch, Fit::SixteenByNine] {
             assert_eq!(fit.enlargement(hd, (3840.0, 2160.0)), 2.0, "{fit:?}");
         }
-        // Square in a wide room: a 1080 x 1080 box, which stretches the picture's height only.
         assert_eq!(Fit::Square.enlargement(hd, (1920.0, 1080.0)), 1.0);
         assert_eq!(
             Fit::Square.enlargement((640.0, 480.0), (1920.0, 1080.0)),

@@ -9,8 +9,7 @@ description = "IP Camera's snapshots and recordings on disk, for the desktop app
 [lints]
 workspace = true
 
-# Files, not pipelines: `media` for the decoded picture a snapshot or a thumbnail is written from,
-# `image` to write it as a PNG, and `fs4` for how full the drive under a folder is.
+# `media` for decoded pictures, `image` to write PNGs, `fs4` for a drive's free space.
 [dependencies]
 ipcamera-media.workspace = true
 image.workspace = true

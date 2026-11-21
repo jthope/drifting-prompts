@@ -1,25 +1,7 @@
-//! Who may use the server: its password, and the sessions of those who gave it.
+//! Who may use the server: its password, kept as a salted Argon2 hash, and in-memory sessions.
 //!
-//! A server with no password asks for none, and answers this machine as before. One with a
-//! password (`ipcamera-server --set-password`) answers nothing but its pages' own files and
-//! `/api/session` until a request comes with a session's key:
-//!
-//! - `GET /api/session` says whether a password is needed and whether the request's key is good.
-//! - `POST /api/session` takes the password and answers with a new session's key.
-//! - `DELETE /api/session` ends the request's session.
-//!
-//! A key goes with a request as `Authorization: Bearer <key>`, or as `?key=<key>` where the
-//! browser makes the request itself and no header can be set: a tile's player, its WebSocket, a
-//! picture, a file opened in a tab. Keys in addresses are why every answer asks the browser to
-//! send no `Referer`.
-//!
-//! The password is kept in `settings.json` as a salted Argon2 hash (`server`), never as itself,
-//! and is read when the server starts. A session is a random key held in memory: it ends when it
-//! hasn't been used for [`SESSION_LASTS`], when it is signed out, or with the server. After a
-//! wrong password the next try waits [`WAIT_AFTER_WRONG`], which makes guessing slow.
-//!
-//! This keeps other programs and users on this machine out. It is not yet enough to listen on the
-//! network with: the password and the keys would cross it in the clear, which needs HTTPS first.
+//! A key can come as `?key=` where the browser makes the request itself, which is why no answer
+//! sends a `Referer`. The password and keys cross in the clear, so this is for this machine only.
 
 use std::{
     collections::HashMap,
@@ -45,30 +27,21 @@ use ipcamera_core::{
 
 use crate::Server;
 
-/// How long a session lasts after its last request.
 const SESSION_LASTS: Duration = Duration::from_secs(12 * 60 * 60);
 
-/// How long the next try waits after a wrong password.
 const WAIT_AFTER_WRONG: Duration = Duration::from_secs(2);
 
-/// What a request with no session gets from a server that has a password.
 const SIGN_IN_FIRST: &str = "Sign in to the server first.";
 
-/// Why a password can't be the server's.
 const NO_PASSWORD_GIVEN: &str = "The password can't be empty.";
 
-/// Why signing in failed.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Refused {
-    /// The password was wrong.
     Wrong,
-    /// A wrong password came a moment ago.
     TooSoon,
 }
 
-/// The hash to save for `password`, in the form Argon2's own tools write (PHC), salt included.
-///
-/// For `--set-password`. The error is a sentence for the terminal.
+/// The hash to save for `password`, in PHC form, salt included.
 pub fn hash_password(password: &str) -> Result<String, String> {
     if password.is_empty() {
         return Err(NO_PASSWORD_GIVEN.to_string());
@@ -83,8 +56,7 @@ pub fn hash_password(password: &str) -> Result<String, String> {
         .map_err(|error| format!("The password couldn't be hashed ({error})."))
 }
 
-/// Whether `password` is the one `saved` (a hash from [`hash_password`]) was made from. A saved
-/// value that isn't such a hash matches nothing.
+/// A saved value that isn't a hash matches nothing.
 fn matches(saved: &str, password: &str) -> bool {
     PasswordHash::new(saved).is_ok_and(|hash| {
         Argon2::default()
@@ -93,18 +65,14 @@ fn matches(saved: &str, password: &str) -> bool {
     })
 }
 
-/// The server's password and its sessions.
 pub(crate) struct Access {
-    /// The saved hash; empty for a server with no password.
+    /// Empty for a server with no password.
     password: String,
-    /// Each session's key, and when it was last used.
     sessions: Mutex<HashMap<String, Instant>>,
-    /// Until when no password is tried, after a wrong one.
     wait_until: Mutex<Option<Instant>>,
 }
 
 impl Access {
-    /// Access by the password whose hash is `password`; none is needed when it is empty.
     pub(crate) fn new(password: String) -> Self {
         Self {
             password,
@@ -113,13 +81,11 @@ impl Access {
         }
     }
 
-    /// Whether the server has a password.
     pub(crate) fn required(&self) -> bool {
         !self.password.is_empty()
     }
 
-    /// Starts a session for whoever gave `password`, returning its key. Hashing takes a moment,
-    /// so this runs off the runtime's threads.
+    /// Hashing takes a moment, so never on the runtime's threads.
     pub(crate) fn sign_in(&self, password: &str, now: Instant) -> Result<String, Refused> {
         {
             let mut wait_until = self.wait_until.locked();
@@ -146,8 +112,7 @@ impl Access {
         Ok(key)
     }
 
-    /// Whether a request with `key` may be answered: no password is needed, or the key is a
-    /// session's, which this counts as used.
+    /// A session's key counts as used.
     pub(crate) fn allows(&self, key: Option<&str>, now: Instant) -> bool {
         if !self.required() {
             return true;
@@ -169,13 +134,11 @@ impl Access {
         }
     }
 
-    /// Ends the session with `key`.
     pub(crate) fn sign_out(&self, key: &str) {
         self.sessions.locked().remove(key);
     }
 }
 
-/// The session key `request` came with: `Authorization: Bearer <key>`, or `?key=<key>`.
 fn key_of(request: &Request) -> Option<String> {
     let bearer = request
         .headers()
@@ -193,7 +156,6 @@ fn key_of(request: &Request) -> Option<String> {
     })
 }
 
-/// Turns away a request with no session, when the server has a password.
 pub(crate) async fn signed_in_only(
     State(server): State<Server>,
     request: Request,
@@ -209,7 +171,6 @@ pub(crate) async fn signed_in_only(
     }
 }
 
-/// `GET /api/session`: whether a password is needed, and whether the request's key is good.
 pub(crate) async fn session(State(server): State<Server>, request: Request) -> Json<Session> {
     Json(Session {
         required: server.access.required(),
@@ -219,7 +180,6 @@ pub(crate) async fn session(State(server): State<Server>, request: Request) -> J
     })
 }
 
-/// `POST /api/session`: a new session for the right password.
 pub(crate) async fn sign_in(State(server): State<Server>, Json(given): Json<SignIn>) -> Response {
     if !server.access.required() {
         return (
@@ -251,7 +211,6 @@ pub(crate) async fn sign_in(State(server): State<Server>, Json(given): Json<Sign
     }
 }
 
-/// `DELETE /api/session`: ends the request's session.
 pub(crate) async fn sign_out(State(server): State<Server>, request: Request) -> StatusCode {
     if let Some(key) = key_of(&request) {
         server.access.sign_out(&key);
@@ -263,7 +222,6 @@ pub(crate) async fn sign_out(State(server): State<Server>, request: Request) -> 
 mod tests {
     use super::*;
 
-    /// A password of the tests' own.
     const PASSWORD: &str = "test-only";
 
     fn access() -> Access {

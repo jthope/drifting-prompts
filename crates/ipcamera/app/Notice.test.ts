@@ -1,8 +1,3 @@
-// What covers a camera's picture while it isn't live (`pictureNotice` in
-// `views/model.ts`), on cameras and streams made up here: the test runner
-// reaches no camera, so none of its streams ever loses one.
-//
-// `App.test.tsx` sees the notice a camera with no password shows.
 import { expect, test } from "nsh/test";
 import type { CameraState, RunningStream } from "ipcamera/native";
 import { pictureNotice } from "./views/model";

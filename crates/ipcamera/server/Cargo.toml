@@ -9,9 +9,7 @@ description = "IP Camera server: relays the cameras' live video to browsers, wit
 [lints]
 workspace = true
 
-# The cameras come from `core`'s library, as the app's do, `media` relays their video, and
-# `storage` keeps the snapshots and recordings by the desktop's rules. No UI, no renderer and no
-# sound device: the server decodes only the picture a snapshot or a thumbnail asks for.
+# No UI, renderer or sound device.
 [dependencies]
 ipcamera-core.workspace = true
 ipcamera-media.workspace = true
@@ -25,14 +23,13 @@ serde_json.workspace = true
 argon2.workspace = true
 # A session's key and a password's salt, from the system's random generator.
 uuid = { workspace = true, features = ["v4"] }
-# A multi-threaded runtime for the viewers, which each camera's relay session (a thread of its own)
-# hands its pictures to; `signal` ends the server on Ctrl+C.
+# A multi-threaded runtime for the viewers; `signal` ends the server on Ctrl+C.
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "sync", "signal"] }
 
 [dev-dependencies]
 tempfile.workspace = true
 tungstenite.workspace = true
 
-# The pretend camera, which the tests watch through the server. It encodes with Media Foundation.
+# The pretend camera for tests; it encodes with Media Foundation.
 [target.'cfg(windows)'.dev-dependencies]
 ipcamera-media = { workspace = true, features = ["pretend-camera"] }

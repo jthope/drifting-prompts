@@ -1,38 +1,7 @@
-//! Recording a camera while it plays: its video and sound as the camera sent them, in an MP4.
+//! Recording a stream as the camera sent it, into fragmented MP4s that still play when cut short.
 //!
-//! Nothing is decoded or encoded again. A [`RecordTap`] sits after each parser, passes every
-//! packet on to the decoder untouched, and while a recording runs it hands a copy of each
-//! compressed frame to the [`Recorder`] its tracks share. Each tap is a tee whose second output
-//! switches on and off, and the recorder is the file writer behind it.
-//!
-//! The file is a fragmented MP4, written by glass2glass's `mp4mux`: a short header up front, then
-//! one fragment about every second, closed at the next keyframe. A file cut short (the app closed,
-//! the power failed) still plays up to its last whole fragment, which an ordinary MP4, whose index
-//! is written last, would not. H.264 or H.265 and AAC go in as they are, so recording costs no
-//! decoding and little CPU. G.711 sound has no place in an MP4, so a camera that sends it records
-//! its video only.
-//!
-//! A file starts at a keyframe, because nothing before one can be decoded, and the sound starts
-//! with it. It ends when recording stops, when the stream drops (the reconnected stream starts a
-//! new file), when the picture changes size, or when it has run as long or grown as large as the
-//! recording's [`RecordRules`] let a file: then the recording goes on in a new file from that
-//! keyframe, so nothing is lost between the two.
-//!
-//! **Pre-roll.** A session told to hold some of its stream back (`MediaSession::set_preroll`) keeps
-//! the last few seconds of it here, as the camera sent them: whole keyframe intervals, from the
-//! newest keyframe at least that old, so what is held starts where a file can, and never more
-//! than [`PREROLL_MOST_BYTES`]. A recording asked to start from them opens its first file at once,
-//! at the oldest keyframe held, and writes what was held before going on with the stream: an
-//! event's video then shows the seconds before the camera saw something. Each file is named from
-//! when its first picture arrived ([`NextFile`]), the held ones' included.
-//!
-//! The file itself, and the length a fragmented MP4's header can't know when it goes out, are
-//! [`FileOut`]'s (`record/mp4.rs`).
-//!
-//! The muxer is driven here by hand, the way glass2glass's own `splitmuxsink` drives it, and never
-//! waits: [`FileOut`] writes each fragment as the muxer hands it over. So the recorder's lock is
-//! never held across a wait, and the window, which only reads [`RecordControl`], never waits for
-//! a file to be written.
+//! The muxer is driven by hand and never waits ([`FileOut`] writes each fragment at once), so the
+//! recorder's lock is never held across a wait.
 
 mod mp4;
 
@@ -60,49 +29,43 @@ use crate::{
 };
 use mp4::FileOut;
 
-/// How long a fragment runs before the next keyframe closes it.
 const FRAGMENT_MS: u64 = 1_000;
 
-/// A file gets sound only when the camera sent some this recently, so a camera whose sound has
-/// stopped doesn't hold the picture back waiting for it.
+/// A file gets sound only if some came this recently, or stopped sound holds the picture back.
 const SOUND_IS_FLOWING: Duration = Duration::from_secs(2);
 
-/// Sound that stops for this long ends the file's sound track, and the picture carries on alone.
+/// Sound that stops for this long ends the file's sound track.
 const SOUND_STALLED: Duration = Duration::from_secs(3);
 
-/// The most of a stream held back for a recording to start from, in bytes: ten seconds of a 4K
-/// camera's main stream and more. A stream whose one keyframe interval holds more has none held.
+/// The most bytes held back for a pre-roll; a keyframe interval larger than this holds none.
 pub const PREROLL_MOST_BYTES: usize = 32 * 1024 * 1024;
 
 /// How a recording asked for now goes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RecordRules {
-    /// Start from what the session holds back (`MediaSession::set_preroll`), when it holds any:
-    /// the first file opens at once, at the oldest keyframe held, rather than at the next one.
+    /// Start from what the session holds back, opening the first file at once.
     pub from_preroll: bool,
-    /// The longest a file runs before the recording goes on in a new one, at a keyframe; `None`
-    /// for no limit.
+    /// The longest a file runs before the recording goes on in a new one; `None` for no limit.
     pub split_after: Option<Duration>,
-    /// The largest a file grows, in bytes, before the recording goes on in a new one, at a
-    /// keyframe; `None` for no limit.
+    /// The bytes a file grows to before the recording goes on in a new one; `None` for no limit.
     pub split_bytes: Option<u64>,
 }
 
-/// What a recording is doing, for the window.
+/// What a recording is doing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecordStatus {
     /// Not recording.
     Off,
-    /// Asked to record, and waiting for the stream's next keyframe, or for the stream itself.
+    /// Asked to record, and waiting for a keyframe or for the stream.
     Waiting,
     /// Writing this file.
     Writing(PathBuf),
-    /// Stopped because a file could not be written. The sentence says why.
+    /// Stopped because a file could not be written; the sentence says why.
     Failed(String),
 }
 
 impl RecordStatus {
-    /// What the user reads when recording stopped by itself: `None` unless it [`Failed`](Self::Failed).
+    /// What the user reads when recording stopped by itself.
     pub fn problem(&self) -> Option<String> {
         match self {
             Self::Failed(why) => Some(format!("Recording stopped: {why}")),
@@ -111,34 +74,26 @@ impl RecordStatus {
     }
 }
 
-/// Names the file for each new recording, given when its first picture arrived. It is called on
-/// the media thread, as the file opens. It may make the file, empty, to take the name
-/// (`ipcamera_storage`'s does): the recorder opens it over that, and removes it again if the
-/// recording can't start.
+/// Names each new file from when its first picture arrived; it runs on the media thread, and may
+/// create the file empty.
 pub type NextFile = Arc<dyn Fn(SystemTime) -> PathBuf + Send + Sync>;
 
 #[derive(Default)]
 struct ControlState {
-    /// What to name files, while recording is asked for.
     target: Option<NextFile>,
     status: Option<RecordStatus>,
-    /// How the recording asked for goes.
     rules: RecordRules,
-    /// Whether the next file may open from what is held back: once for each start.
     preroll_pending: bool,
-    /// How much of the stream to hold back for a recording to start from; `None` holds nothing.
     preroll: Option<Duration>,
 }
 
-/// What the recorder needs to know for each frame, read together.
 struct Plan {
     target: Option<NextFile>,
     rules: RecordRules,
     preroll: Option<Duration>,
 }
 
-/// What the session's owner asks of the recorder, and what it hears back. It outlives each
-/// pipeline, so a recording carries on into a reconnected stream.
+/// Outlives each pipeline, so a recording carries on into a reconnected stream.
 #[derive(Clone, Default)]
 pub(crate) struct RecordControl(Arc<Mutex<ControlState>>);
 
@@ -147,8 +102,6 @@ impl RecordControl {
         self.0.locked()
     }
 
-    /// Records from the next keyframe on, or from what is held back where `rules` say so, into
-    /// files `next_file` names, split as `rules` say.
     pub(crate) fn start(&self, next_file: NextFile, rules: RecordRules) {
         let mut state = self.lock();
         let writing = matches!(state.status, Some(RecordStatus::Writing(_)));
@@ -160,8 +113,6 @@ impl RecordControl {
         }
     }
 
-    /// Holds back the last `preroll` of the stream for a recording to start from; `None` holds
-    /// nothing.
     pub(crate) fn set_preroll(&self, preroll: Option<Duration>) {
         self.lock().preroll = preroll;
     }
@@ -179,13 +130,10 @@ impl RecordControl {
         self.lock().preroll
     }
 
-    /// Whether the file about to open may start from what is held back, which it may once for
-    /// each start.
     fn take_preroll(&self) -> bool {
         std::mem::take(&mut self.lock().preroll_pending)
     }
 
-    /// Stops at the next packet, closing the file.
     pub(crate) fn stop(&self) {
         let mut state = self.lock();
         state.target = None;
@@ -206,8 +154,6 @@ impl RecordControl {
         self.lock().status = Some(status);
     }
 
-    /// The file closed: recording goes on waiting for the next keyframe if it is still asked for.
-    /// The session calls this too, when a crash ended the pipeline before it could.
     pub(crate) fn closed(&self) {
         let mut state = self.lock();
         state.status = Some(if state.target.is_some() {
@@ -217,8 +163,7 @@ impl RecordControl {
         });
     }
 
-    /// A file could not be written, so recording stops rather than failing again at every
-    /// keyframe, which a full disk would do.
+    /// Stops recording rather than failing again at every keyframe, as a full disk would.
     fn failed(&self, why: String) {
         let mut state = self.lock();
         state.target = None;
@@ -226,46 +171,34 @@ impl RecordControl {
     }
 }
 
-/// Which of the camera's streams a tap carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Track {
     Video,
     Sound,
 }
 
-/// A frame held back for a recording to start from.
 struct Held {
     track: Track,
     frame: Frame,
-    /// Its compressed size, for [`PREROLL_MOST_BYTES`].
     bytes: usize,
-    /// When it arrived: what is held is trimmed by it, and a file named by its first picture's.
     arrived: Instant,
     at: SystemTime,
-    /// Whether a video frame carries its parameter sets, which the file's first frame needs.
     carries_parameter_sets: bool,
 }
 
-/// The file being written, and how far it has got.
 struct OpenFile {
     path: PathBuf,
     mux: Mp4MuxN,
     out: FileOut,
-    /// The keyframe the file starts at. Sound from before it is left out.
     start_pts: u64,
-    /// Where the picture has got to: the last frame's time, and how long a frame lasts.
     last_pts: u64,
     frame_ns: u64,
     opened: Instant,
-    /// The size of the picture the file holds; another size starts a new file.
     size: Option<(u32, u32)>,
-    /// The sound track, when the file has one.
     sound: Option<SoundTrack>,
 }
 
 impl OpenFile {
-    /// Whether a keyframe at `pts` should start the next file, by `rules`: this one has run as
-    /// long, or grown as large, as they let a file.
     fn due(&self, rules: &RecordRules, pts: u64) -> bool {
         let ran = Duration::from_nanos(pts.saturating_sub(self.start_pts));
         rules.split_after.is_some_and(|longest| ran >= longest)
@@ -274,30 +207,23 @@ impl OpenFile {
 }
 
 struct SoundTrack {
-    /// When the last sound went in, if any has.
     last: Option<Instant>,
-    /// Whether the track was closed because the sound stopped.
     ended: bool,
 }
 
-/// The pad each track takes on the muxer.
 const VIDEO_PAD: usize = 0;
 const SOUND_PAD: usize = 1;
 
-/// One pipeline's recording state, shared by its taps. A reconnect builds a new one.
 pub(crate) struct Recorder {
     control: RecordControl,
     video_caps: Option<Caps>,
-    /// `None` when the graph has no AAC branch.
     sound_caps: Option<Caps>,
     sound_seen: Option<Instant>,
-    /// Set when a file was given sound that never came: this pipeline's files are video only.
     sound_unreliable: bool,
     parameter_sets: ParameterSets,
     file: Option<OpenFile>,
-    /// What is held back for a recording to start from, oldest first, from a keyframe.
+    /// Oldest first, from a keyframe.
     held: VecDeque<Held>,
-    /// What `held` holds, in bytes.
     held_bytes: usize,
 }
 
@@ -319,8 +245,7 @@ impl Recorder {
     fn note_caps(&mut self, track: Track, caps: &Caps) {
         match track {
             Track::Video => {
-                // A picture of another size needs another header, so it starts another file, and
-                // what is held back of the old size can't start one.
+                // Another size needs another header: a new file, and nothing held of the old size.
                 let size = fixed_size(caps);
                 if size.is_some()
                     && let Some(file) = &self.file
@@ -379,8 +304,6 @@ impl Recorder {
         };
         self.check_sound();
 
-        // A file that has run as long, or grown as large, as the rules let one goes on in the
-        // next, from this keyframe.
         if frame.timing.keyframe
             && self
                 .file
@@ -395,7 +318,6 @@ impl Recorder {
         }
 
         if self.file.is_none() {
-            // What was held back, this frame among it.
             if self.control.take_preroll() && self.open_from_held(&next_file, codec) {
                 return;
             }
@@ -409,13 +331,10 @@ impl Recorder {
         self.put_video(frame, carries_parameter_sets);
     }
 
-    /// Opens a file named by `next_file` for a picture that arrived `at`, starting at `start_pts`;
-    /// a file that can't be opened stops the recording and says why. Returns whether it opened.
     fn open_named(&mut self, next_file: &NextFile, at: SystemTime, start_pts: u64) -> bool {
         let path = next_file(at);
         if let Err(why) = self.open(path.clone(), start_pts) {
-            // Naming the file may have made it, empty, to take the name. Nothing was recorded
-            // into it, so it doesn't stay behind as a recording of nothing.
+            // Naming the file may have made it empty: don't leave a recording of nothing.
             if std::fs::metadata(&path).is_ok_and(|file| file.len() == 0) {
                 let _ = std::fs::remove_file(&path);
             }
@@ -425,9 +344,7 @@ impl Recorder {
         true
     }
 
-    /// Opens the recording's first file at the oldest keyframe held back and writes everything
-    /// held, as it arrived. Returns whether it did anything: nothing is held, or what is held
-    /// can't start a file yet, and the file waits for the next keyframe instead.
+    /// False when nothing held can start a file, so the next keyframe opens one instead.
     fn open_from_held(&mut self, next_file: &NextFile, codec: g2g_core::VideoCodec) -> bool {
         let Some(first) = self.held.front() else {
             return false;
@@ -460,7 +377,6 @@ impl Recorder {
         true
     }
 
-    /// Writes a picture into the open file.
     fn put_video(&mut self, frame: &Frame, carries_parameter_sets: bool) {
         let first = self
             .file
@@ -491,8 +407,6 @@ impl Recorder {
         self.put_sound(frame);
     }
 
-    /// Writes sound into the open file's sound track, when it has one and the sound is of its
-    /// time.
     fn put_sound(&mut self, frame: &Frame) {
         let Some(file) = &mut self.file else { return };
         let Some(sound) = &mut file.sound else { return };
@@ -503,10 +417,7 @@ impl Recorder {
         self.write(SOUND_PAD, PipelinePacket::DataFrame(frame.share()));
     }
 
-    /// Holds `frame` back for a recording to start from, while `preroll` asks for any, and lets
-    /// go of whole keyframe intervals from the front once the next one reaches back far enough
-    /// on its own, or what is held is more than [`PREROLL_MOST_BYTES`]. What is held starts at a
-    /// keyframe; with no `preroll`, nothing is held.
+    /// Keeps whole keyframe intervals reaching back `preroll`, up to [`PREROLL_MOST_BYTES`].
     fn hold(
         &mut self,
         track: Track,
@@ -554,14 +465,12 @@ impl Recorder {
         }
     }
 
-    /// Lets go of everything held back.
     fn let_go(&mut self) {
         self.held.clear();
         self.held_bytes = 0;
     }
 
-    /// Ends a file's sound track when the sound has stopped, and gives up on sound that never
-    /// came, which would otherwise hold every picture back in memory.
+    /// Gives up on sound that never came, which would otherwise hold every picture back in memory.
     fn check_sound(&mut self) {
         let Some(file) = &mut self.file else { return };
         let Some(sound) = &mut file.sound else { return };
@@ -574,8 +483,7 @@ impl Recorder {
                 self.write(SOUND_PAD, PipelinePacket::Eos);
             }
             None if file.opened.elapsed() >= SOUND_STALLED => {
-                // Nothing reached the file yet: the muxer writes nothing until every track has
-                // started. Start again at the next keyframe, without sound.
+                // The muxer writes nothing until every track starts: start again without sound.
                 self.discard();
                 self.sound_unreliable = true;
             }
@@ -583,7 +491,6 @@ impl Recorder {
         }
     }
 
-    /// Drops the open file, which holds nothing yet, and deletes it.
     fn discard(&mut self) {
         if let Some(file) = self.file.take() {
             drop(file.out);
@@ -637,7 +544,6 @@ impl Recorder {
         Ok(())
     }
 
-    /// Hands one packet to the muxer. A file that cannot be written is closed, and recording stops.
     fn write(&mut self, pad: usize, packet: PipelinePacket) {
         let Some(file) = &mut self.file else { return };
         let result = at_once(MultiInputElement::process(
@@ -658,15 +564,13 @@ impl Recorder {
         }
     }
 
-    /// Finishes the file: the muxer writes what it still holds, and the file is complete.
     pub(crate) fn close(&mut self) {
         let Some(mut file) = self.file.take() else {
             return;
         };
         let mut pads = vec![VIDEO_PAD];
         match &file.sound {
-            // Sound that never started means the muxer never wrote the header, so the file is
-            // empty and goes.
+            // Sound never started, so the muxer wrote nothing: the file is empty.
             Some(SoundTrack { last: None, .. }) => {
                 self.file = Some(file);
                 self.discard();
@@ -706,7 +610,6 @@ impl Recorder {
         self.control.closed();
     }
 
-    /// Closes the file once recording is no longer asked for, even when no frame arrives to do it.
     pub(crate) fn check(&mut self) {
         if self.control.target().is_none() && self.file.is_some() {
             self.close();
@@ -714,14 +617,12 @@ impl Recorder {
     }
 }
 
-/// Hands the recorder a copy of each frame of one track, passing everything on.
 pub(crate) struct RecordTap {
     track: Track,
     recorder: Arc<Mutex<Recorder>>,
 }
 
 impl RecordTap {
-    /// The tap for `track`, as the element the graph takes.
     pub(crate) fn new(track: Track, recorder: Arc<Mutex<Recorder>>) -> Tap<Self> {
         Tap(Self { track, recorder })
     }
@@ -750,8 +651,7 @@ impl Watch for RecordTap {
     }
 }
 
-/// Runs a muxer call to the end. It never waits, because [`FileOut`] never does, so one poll
-/// finishes it; one that did wait would leave the muxer half way, so it counts as a failure.
+/// One poll finishes a muxer call, since [`FileOut`] never waits; a wait would leave it half way.
 fn at_once<F: Future<Output = Result<(), G2gError>>>(future: F) -> Result<(), G2gError> {
     let future = pin!(future);
     match future.poll(&mut Context::from_waker(Waker::noop())) {
@@ -760,7 +660,6 @@ fn at_once<F: Future<Output = Result<(), G2gError>>>(future: F) -> Result<(), G2
     }
 }
 
-/// `frame` with other bytes.
 fn with_bytes(frame: &Frame, bytes: Vec<u8>) -> Frame {
     Frame::new(
         MemoryDomain::System(SystemSlice::from_boxed(bytes.into_boxed_slice())),
@@ -797,7 +696,6 @@ mod tests {
         }
     }
 
-    /// The SPS and PPS of a 64 x 64 H.264 stream.
     const SPS: &[u8] = &[
         0x67, 0x42, 0xc0, 0x0a, 0xda, 0x0f, 0xd0, 0x80, 0x00, 0x00, 0x03, 0x00, 0x80, 0x00, 0x00,
         0x1e, 0x47, 0x89, 0x16, 0xa8,
@@ -839,7 +737,6 @@ mod tests {
         frame(annex_b(&[&[0x41, 0x9a, 0x02, 0x10]]), pts_ms, false)
     }
 
-    /// One ADTS frame of mono 8 kHz AAC-LC, with a few bytes of payload.
     fn adts(pts_ms: u64) -> Frame {
         let payload = [0x21u8, 0x10, 0x05];
         let length = 7 + payload.len();
@@ -856,7 +753,6 @@ mod tests {
         frame([&header[..], &payload].concat(), pts_ms, true)
     }
 
-    /// Names files `clip-0.mp4`, `clip-1.mp4`, ... in `folder`.
     fn naming(folder: &TempDir) -> NextFile {
         let folder = folder.path().to_path_buf();
         let next = std::sync::atomic::AtomicU32::new(0);
@@ -894,7 +790,6 @@ mod tests {
             "nothing can start mid-picture"
         );
 
-        // 25 frames a second, with a keyframe every second, for three seconds.
         for at in 0..75 {
             let pts = 40 + at * 40;
             let picture = if at % 25 == 0 {
@@ -928,7 +823,6 @@ mod tests {
         );
     }
 
-    /// The header's `mehd` and `mvhd` lengths.
     fn movie_length(bytes: &[u8]) -> (u64, u64) {
         let at = |kind: &[u8]| {
             bytes
@@ -952,7 +846,6 @@ mod tests {
         recorder.note_caps(Track::Video, &video_caps());
         recorder.note_caps(Track::Sound, &sound_caps());
 
-        // Sound arriving from before the keyframe, as it does from a camera.
         recorder.offer(Track::Sound, &adts(0));
         recorder.offer(Track::Video, &keyframe(0, true));
         for at in 1..20 {
@@ -978,11 +871,9 @@ mod tests {
         let recorder = Recorder::new(control.clone());
         let mut recorder = recorder.lock().unwrap();
         recorder.note_caps(Track::Video, &video_caps());
-        // The parameter sets go by before recording starts...
         recorder.offer(Track::Video, &keyframe(0, true));
         assert_eq!(control.status(), RecordStatus::Off);
 
-        // ...and the keyframe the recording starts at doesn't repeat them.
         control.start(naming(&folder), RecordRules::default());
         recorder.offer(Track::Video, &keyframe(40, false));
         recorder.offer(Track::Video, &delta(80));
@@ -1011,7 +902,6 @@ mod tests {
         recorder.offer(Track::Video, &keyframe(0, true));
         assert!(matches!(control.status(), RecordStatus::Writing(_)));
 
-        // Long enough for the sound to count as never having started.
         recorder.file.as_mut().unwrap().opened -= SOUND_STALLED;
         recorder.offer(Track::Video, &delta(40));
         assert_eq!(
@@ -1039,7 +929,6 @@ mod tests {
     #[test]
     fn a_file_that_cannot_be_made_stops_the_recording_and_says_why() {
         let folder = TempDir::new().unwrap();
-        // A file where the folder should be.
         let blocked = folder.path().join("videos");
         std::fs::write(&blocked, "in the way").unwrap();
 
@@ -1067,7 +956,6 @@ mod tests {
         );
     }
 
-    /// Offers `seconds` of 25 frames a second from `from_ms`, a keyframe each second.
     fn offer_seconds(recorder: &mut Recorder, from_ms: u64, seconds: u64) {
         for at in 0..seconds * 25 {
             let pts = from_ms + at * 40;
@@ -1080,7 +968,6 @@ mod tests {
         }
     }
 
-    /// Every file in `folder`, by name, in order.
     fn files_in(folder: &TempDir) -> Vec<String> {
         let mut names: Vec<String> = std::fs::read_dir(folder.path())
             .unwrap()
@@ -1099,13 +986,11 @@ mod tests {
         recorder.note_caps(Track::Video, &video_caps());
         control.set_preroll(Some(Duration::from_secs(60)));
 
-        // A delta first: what is held starts at a keyframe.
         recorder.offer(Track::Video, &delta(0));
         assert!(recorder.held.is_empty());
         offer_seconds(&mut recorder, 40, 3);
         assert_eq!(control.status(), RecordStatus::Off, "nothing is written");
 
-        // The first picture's time names the file.
         let named = Arc::new(Mutex::new(None));
         recorder.held[0].at = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let seen = named.clone();
@@ -1152,7 +1037,6 @@ mod tests {
         control.set_preroll(Some(Duration::from_secs(1)));
 
         offer_seconds(&mut recorder, 0, 2);
-        // As though those two seconds arrived long ago.
         for held in &mut recorder.held {
             held.arrived -= Duration::from_secs(10);
         }
@@ -1164,7 +1048,6 @@ mod tests {
         );
         assert_eq!(recorder.held.len(), 26);
 
-        // Turned off, nothing is held.
         control.set_preroll(None);
         recorder.offer(Track::Video, &delta(2_040));
         assert!(recorder.held.is_empty());

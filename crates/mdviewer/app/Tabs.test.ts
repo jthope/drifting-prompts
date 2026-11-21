@@ -1,6 +1,3 @@
-// The tabs as plain values (`views/tabs.ts`): opening, the preview, pinning,
-// closing, moving, each tab's mode, what the project saves, and the way to the
-// file in front that the breadcrumbs show.
 import { expect, test } from "nsh/test";
 import {
   close,
@@ -26,7 +23,6 @@ import {
 
 const paths = (set: TabSet) => set.tabs.map((tab) => `${tab.pinned ? "^" : ""}${tab.path}${tab.preview ? "?" : ""}`);
 
-/** README pinned, then a.md, b.md and c.md kept, b.md in front. */
 const FOUR: TabSet = {
   tabs: [
     { path: "README.md", pinned: true, preview: false, mode: "rendered" },

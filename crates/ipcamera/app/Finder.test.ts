@@ -1,4 +1,3 @@
-// What a camera found on the network is listed as: `views/finder.tsx`.
 import { expect, test } from "nsh/test";
 import { Cameras, type FoundCamera } from "ipcamera/native";
 import { foundDetail, foundTitle, withToldBrand } from "./views/finder";
@@ -15,7 +14,6 @@ test("what else it says of itself follows its address, and a name that is its mo
   const camera = found("IPC-123", "IPC-123", ["Serial: 42", "MAC: aa:bb"]);
   expect(foundTitle(camera)).toBe("IPC-123");
   expect(foundDetail(camera)).toBe("10.0.0.5 · Serial: 42 · MAC: aa:bb");
-  // One that says no model is listed by its name.
   expect(foundTitle(found("Front Door", ""))).toBe("Front Door");
   expect(foundDetail(found("Front Door", ""))).toBe("10.0.0.5");
 });
@@ -42,12 +40,9 @@ test("a picked camera takes the brand Connect told, with its ports, where the us
   expect(filled.brand).toBe("reolink");
   expect([filled.apiPort, filled.apiHttps]).toEqual(["80", false]);
   expect(filled.onvifPort).toBe("8000");
-  // What was typed meanwhile stays.
   expect(filled.user).toBe("admin");
 
-  // A port typed since the pick stays the user's.
   expect(withToldBrand({ ...picked, apiPort: "8443" }, picked, told).apiPort).toBe("8443");
-  // A brand picked by hand, or another address, and the answer comes too late to matter.
   expect(withToldBrand({ ...picked, brand: "other" }, picked, told).brand).toBe("other");
   expect(withToldBrand({ ...picked, host: "10.0.0.9" }, picked, told).brand).toBe("dahua");
 });

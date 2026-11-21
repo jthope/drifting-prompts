@@ -1,14 +1,3 @@
-// The map beside a view of the file: the whole file drawn small on nsh's
-// `Canvas` (its picture, `MapPicture` in `minimap.ts`), the headings' names
-// written over it, a band across it for each match of the search, and a lighter
-// band for the part in view. A press on the map takes the view there, and a drag
-// keeps it there as the pointer goes. Where the pointer rests, a card shows that
-// part of the file larger, beside the map: the heading it is under and its
-// lines, as written beside Raw and as the page shows them beside Rendered.
-//
-// The picture and what moves over it are two canvases, one over the other: the
-// picture draws again only when the file or the map's size changes, the band in
-// view as often as the view scrolls.
 import { Canvas, type CanvasRenderingContext2D, type CanvasSize, Overlay, type Point, signal, Text, token, View } from "nsh";
 import { TextView } from "nsh/base";
 import { look, popupSurface } from "../../../dp/ui";
@@ -19,19 +8,15 @@ import { PAGE } from "./syntax";
 /** The map's width, in points. */
 export const MAP_WIDTH = 84;
 
-/** The room at the map's sides, in points. */
 const PAD = 4;
 
-/** How long the pointer rests on the map before the preview shows, in milliseconds. */
 const PREVIEW_AFTER = 350;
 
-/** The preview's width, in points. */
 const PREVIEW_WIDTH = 360;
 
-/** What the map's preview shows of a place: the heading it is under and where (`crumb`), and its lines, as the page shows them with `page`, else as written. */
+/** What the map's preview shows of a place: its heading crumb and its lines, rendered when `page`. */
 export type MapPreview = { crumb: string; text: string; page: boolean };
 
-/** Each ink's theme color, and how strongly it shows. */
 function inkOf(ink: MapInk): { color: string; alpha: number } {
   switch (ink) {
     case "text":
@@ -55,13 +40,10 @@ function inkOf(ink: MapInk): { color: string; alpha: number } {
   }
 }
 
-/** The order the inks draw in: the bands under everything. */
 const INKS: MapInk[] = ["band", "frame", "text", "punctuation", "quote", "marker", "link", "code", "heading"];
 
-/** The thinnest a bar is drawn, in points, however small its share of the file. */
 const THINNEST = 0.6;
 
-/** Draws `picture` at `scale` points a unit on a canvas `size` big: its bars, then its headings' names, kept apart. */
 function drawPicture(cx: CanvasRenderingContext2D, size: CanvasSize, picture: MapPicture, scale: number) {
   const across = (size.width - PAD * 2) / MAP_COLUMNS;
   for (const ink of INKS) {
@@ -91,7 +73,6 @@ function drawPicture(cx: CanvasRenderingContext2D, size: CanvasSize, picture: Ma
   }
 }
 
-/** Draws what moves over the picture: a band across for each match (`matches`), and the part in view (`view`), at `scale` points a unit. */
 function drawOver(cx: CanvasRenderingContext2D, size: CanvasSize, matches: number[], view: { top: number; height: number } | null, scale: number) {
   cx.fillStyle = look().found.mark;
   for (const at of matches) cx.fillRect(0, at * scale - 1, size.width, 2);
@@ -107,12 +88,7 @@ function drawOver(cx: CanvasRenderingContext2D, size: CanvasSize, matches: numbe
   cx.globalAlpha = 1;
 }
 
-/**
- * The map: `picture`, at `scale(height)` points a unit on a map `height` tall;
- * `view`, the part in view, and `matches`, where the search's are, in the
- * picture's units. A press or a drag takes the view to a unit (`onGo`), and the
- * pointer resting shows `preview(unit)`.
- */
+/** The map of the whole file beside a view; `view` and `matches` are in the picture's units. */
 export function FileMap(props: {
   label: string;
   testID?: string;
@@ -124,7 +100,6 @@ export function FileMap(props: {
   preview: (unit: number) => MapPreview | null;
 }) {
   const height = signal(0);
-  /** Where the preview shows: the place in the picture's units, and the map's edge at the pointer, in the window. */
   const shown = signal<{ unit: number; anchor: Point } | null>(null);
   let resting: ReturnType<typeof setTimeout> | undefined;
   const unitAt = (y: number) => {
@@ -157,12 +132,12 @@ export function FileMap(props: {
         }
         const place = { unit: unitAt(event.position.y), anchor: { x: event.pagePosition.x - event.position.x, y: event.pagePosition.y } };
         clearTimeout(resting);
-        // Once it shows, the preview follows the pointer; before, it waits for the pointer to rest.
         if (shown()) shown.set(place);
         else resting = setTimeout(() => shown.set(place), PREVIEW_AFTER);
       }}
       onMouseLeave={hide}
     >
+      {/* Two canvases, so the picture redraws only when the file or the map's size changes. */}
       <Canvas class="absolute inset-0" draw={(cx, size) => drawPicture(cx, size, props.picture, props.scale(size.height))} />
       <Canvas class="absolute inset-0" draw={(cx, size) => drawOver(cx, size, props.matches, props.view, props.scale(size.height))} />
       <If when={shown() && preview()}>

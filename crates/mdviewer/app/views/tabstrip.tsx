@@ -1,17 +1,3 @@
-// The tabs over the reader: one for each file open in the project, the shared
-// `FileTabs` drawn from the tabs in `model.ts` and acting through `actions.ts`,
-// each with how many matches the search found in its file; and, while the
-// search's results have a tab of their own (`results.tsx`), theirs last, which
-// is the window's alone and never saved. They scroll in one row or wrap onto
-// more, as Settings says (`tabOverflow`). While the files panel or the outline
-// is hidden, the button that shows it again waits at this strip's end on its
-// side.
-//
-// Under the tabs, the breadcrumbs: the way to the file in front (the project,
-// each folder, the file), then the heading the reader is under. A folder's
-// lists the files in it, the project's those at its top, and the heading's
-// the file's headings; a folder with no files of its own is plain text. While
-// the results' tab is in front, the project and Search.
 import { computed } from "nsh";
 import { type Crumb, FileTabs, IconButton } from "../../../dp/ui";
 import { closeResultsTab, closeTab, folderMenu, headingMenu, keepTab, moveTab, pinTab, showTab, tabMenu } from "./actions";
@@ -19,23 +5,20 @@ import { filesOpen, found, headings, listing, openPath, outlineOpen, project, re
 import { countIn } from "./search";
 import { label, movesWithin, pathSteps } from "./tabs";
 
-/** The results' tab's id: no file's path, which never holds a colon at its start. */
+// No file's path starts with a colon.
 const RESULTS = ":results";
 
-/** The tab strip. `filesShown` and `outlineShown` say whether those panes show, rather than only whether they are asked for. */
+/** The tabs over the reader and the breadcrumbs under them. */
 export function TabStrip(props: { filesShown: boolean; outlineShown: boolean }) {
-  /** The project's name: a computed, so saving the tabs (a new `project`) makes no new breadcrumbs. */
+  // A computed, so saving the tabs (a new `project`) makes no new breadcrumbs.
   const projectName = computed(() => project()?.name ?? "");
-  /** The folders that hold files of their own, whose breadcrumbs list them. */
   const holding = computed(() => new Set((listing()?.files ?? []).map((file) => file.folder)));
-  /** The breadcrumb of folder `folder` (`""` for the project's own), named `name`. */
   const folderCrumb = (folder: string, name: string): Crumb => ({
     id: `folder:${folder}`,
     label: name,
     menu: holding().has(folder) ? () => folderMenu(folder) : undefined,
     menuLabel: `Files in ${name}`,
   });
-  /** The breadcrumbs of the way to the file in front: the project, its folders, the file. */
   const pathCrumbs = computed<Crumb[]>(() => {
     const path = openPath();
     if (path === "") return [];
@@ -43,7 +26,6 @@ export function TabStrip(props: { filesShown: boolean; outlineShown: boolean }) 
       (step): Crumb => (step.kind === "file" ? { id: `file:${path}`, label: step.label, icon: "file-text", current: true } : folderCrumb(step.folder, step.label)),
     );
   });
-  /** The breadcrumbs under the tabs: the way to the file in front, then the heading the reader is under; the project, then Search, while the results' tab is in front. */
   const crumbs = (): Crumb[] => {
     if (resultsTab() && resultsInFront()) return [folderCrumb("", projectName()), { id: RESULTS, label: "Search", icon: "search", current: true }];
     const heading = headings()[reading()];
@@ -73,7 +55,6 @@ export function TabStrip(props: { filesShown: boolean; outlineShown: boolean }) 
           },
         ]
       : files();
-  /** The file tabs' count: the results' tab after them moves nowhere, and nothing moves past them. */
   const fileCount = () => tabSet().tabs.length;
   return (
     <FileTabs

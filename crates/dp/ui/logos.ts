@@ -1,20 +1,10 @@
-// The products' logos, as SVG markup in the code rather than files beside it,
-// so each ships inside its app's bundle (`nsh\bundle.nshc`) with no assets
-// folder of its own. `Logo` (`logo.tsx`) shows each as a `data:` URL, which
-// `Image` loads like a file, on the desktop and on the web.
-//
-// To change a logo, replace the markup with the new SVG's. A template string
-// reads backticks, backslashes and `${` in it, so check the new one has none;
-// these have none.
-//
-// Every theme shows them: a logo stays its product's whatever the look.
+// The products' logos as SVG markup, so each ships inside its app's bundle. The markup sits in
+// template strings, so it must hold no backticks, backslashes or `${`.
 
-/** A product of the suite, by the name its app goes by (`nsh.json` `"name"`'s folder). */
+/** A product of the suite, by its app's name. */
 export type Product = "ipcamera" | "mdviewer";
 
-// IP Camera's is the mark of `assets/brand/ipcamera/logo/ip-camera-icon-color.svg`
-// in one color: the five shapes its mask draws, filled with `ink`, the lens a
-// hole in the camera (`evenodd`), centered in a square the mark spans 96% of.
+// The mark of `assets/brand/ipcamera/logo/ip-camera-icon-color.svg`, in one color.
 const ipcamera = (ink: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="201 -586 3714 3714" width="320" height="320" role="img" aria-label="IP Camera logo">
 <path fill="${ink}" fill-rule="evenodd" d="M 3513.5 274.13 C 3580.5 274.135 3621.16 274.3 3680.61 304.643 C 3736.53 333.186 3788.32 384.752 3813.35 442.791 C 3838.8 501.789 3840.56 532.694 3840.6 597 C 3840.72 813.499 3841.01 1030 3840.31 1246.5 C 3840.1 1312.15 3840.99 1377.86 3840.14 1443.5 C 3839.64 1482.61 3836.55 1510.12 3824.16 1547.01 C 3807.16 1597.64 3771.32 1649.12 3729.05 1681.51 C 3674.16 1723.55 3613.06 1742.14 3544.23 1743.5 C 3538.32 1743.62 3532.41 1743.68 3526.5 1743.72 C 3453.85 1744.18 3381.15 1743.56 3308.5 1743.61 C 3219.53 1743.68 3130.46 1742.57 3041.5 1743.98 C 3014.45 1744.42 2988.11 1743.86 2986.02 1776.5 C 2984.37 1802.29 2984.47 1828.16 2984.65 1854 C 2984.84 1881.26 2983.18 1909.49 2998.44 1933.32 C 3024.87 1974.57 3061.18 1979.48 3107 1980.19 C 3157.13 1980.97 3207.36 1980.28 3257.5 1980.27 C 3316.79 1980.27 3376.17 1979.44 3435.45 1980.49 C 3453.3 1980.8 3470.98 1980.96 3488.07 1986.66 C 3554.11 2008.71 3590.9 2065.81 3587.21 2134.5 C 3584.84 2178.58 3561.88 2218.38 3524.97 2242.83 C 3494.33 2263.14 3468.99 2266.71 3433 2267.25 C 3320.87 2268.95 3208.64 2267.83 3096.5 2267.51 C 2979.34 2267.19 2862.16 2267.94 2745 2267.43 C 2563.66 2266.64 2382.33 2268.14 2201 2267.57 C 2075.83 2267.18 1950.67 2268.08 1825.5 2267.98 C 1813.65 2267.97 1801.79 2267.97 1790 2266.61 C 1728.49 2259.52 1671.92 2209.52 1665.12 2146.5 C 1659.41 2093.49 1672.74 2048.78 1714.45 2013.85 C 1752.02 1982.38 1775.56 1980.72 1823.5 1980.39 C 1935.82 1979.59 2048.17 1980.53 2160.5 1980.41 C 2241.82 1980.32 2323.2 1981.32 2404.5 1979.85 C 2428.84 1979.4 2453.16 1979.88 2477.5 1979.53 C 2511 1979.06 2538.04 1977.57 2565.21 1956.29 C 2598.61 1930.13 2601.14 1904.5 2601.5 1864.52 C 2601.71 1840.18 2601.64 1815.84 2601.22 1791.5 C 2601.07 1782.84 2601.23 1772.85 2597.32 1764.87 C 2587.81 1745.44 2569.18 1744.38 2550 1744.04 C 2549.99 1744.04 2545.01 1743.96 2545 1743.96 C 2443.36 1742.77 2341.65 1743.68 2240 1743.55 C 2185.34 1743.48 2130.66 1743.91 2076 1743.7 C 2033.37 1743.55 1994.4 1739.6 1954.6 1723.62 C 1876.46 1692.25 1820.85 1640.4 1789.08 1562 C 1771.32 1518.17 1769.01 1493.02 1768.26 1445.5 C 1767.44 1393.85 1767.67 1342.15 1767.66 1290.5 C 1767.65 1178.84 1767.17 1067.15 1767.74 955.5 C 1768.38 829.673 1766.38 703.816 1768 578 C 1768.05 574.166 1768.12 570.333 1768.22 566.5 C 1769.78 504.454 1788.43 440.413 1826.86 390.96 C 1852.95 357.396 1884.41 328.25 1922.48 308.941 C 1992.91 273.221 2039.51 274.272 2117.5 274.219 C 2582.83 273.902 3048.17 274.094 3513.5 274.13 z M 3355.5 528.96 C 3422.4 528.315 3484.46 563.764 3517.89 621.718 C 3551.32 679.673 3550.93 751.143 3516.88 808.733 C 3482.82 866.323 3420.38 901.098 3353.49 899.73 C 3252.2 897.658 3171.33 814.667 3171.88 713.358 C 3172.43 612.049 3254.19 529.937 3355.5 528.96 z"/>
 <path fill="${ink}" d="M 1033.5 1043.83 C 1080.33 1043.78 1127.17 1043.99 1174 1044.06 C 1257.81 1044.19 1341.71 1042.88 1425.5 1044.39 C 1434.01 1044.54 1442.5 1044.79 1451 1045.13 C 1511.36 1047.57 1554.79 1068.57 1595.42 1113.23 C 1632.68 1154.18 1651.84 1213.94 1644.79 1269 C 1637.4 1326.66 1612.21 1369.6 1568.01 1407.06 C 1534.15 1435.76 1489.31 1448.4 1445.5 1449.73 C 1435.84 1450.02 1426.17 1450.09 1416.5 1450.1 C 1413.5 1450.1 1410.5 1450.09 1407.5 1450.08 C 1340.33 1449.84 1273.18 1449.79 1206 1449.81 C 1139.03 1449.84 1071.96 1450.63 1005 1449.54 C 987.494 1449.26 970.623 1447.56 953.534 1443.66 C 891.613 1429.54 834.795 1378.92 813.82 1319 C 784.345 1234.82 808.665 1140.5 880.459 1085.9 C 929.556 1048.57 973.42 1043.89 1033.5 1043.83 z"/>
@@ -23,10 +13,7 @@ const ipcamera = (ink: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewB
 <path fill="${ink}" d="M 483.487 1036.56 C 599.406 1035.56 694.144 1128.81 694.98 1244.73 C 695.816 1360.65 602.434 1455.25 486.512 1455.93 C 370.824 1456.6 276.451 1363.44 275.617 1247.76 C 274.782 1132.07 367.801 1037.56 483.487 1036.56 z"/>
 </svg>`;
 
-// Markdown Viewer's is the mark of `assets/brand/mdviewer/logo/md-viewer-icon-color.svg`
-// in one color: the dot, the three bars and the block, filled with `ink`
-// through the same mask, which cuts the M and the arrow out of the block,
-// centered in a square the mark spans 96% of.
+// The mark of `assets/brand/mdviewer/logo/md-viewer-icon-color.svg`, in one color.
 const mdviewer = (ink: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="189 -896 4285 4284" width="320" height="320" role="img" aria-label="Markdown Viewer logo">
 <defs><mask id="mark" maskUnits="userSpaceOnUse" x="-125" y="-54" width="4913" height="2600"><circle cx="485" cy="1246" r="210" fill="#fff"/><rect x="800" y="528" width="846" height="380" rx="190" fill="#fff"/><rect x="800" y="1046" width="846" height="400" rx="200" fill="#fff"/><rect x="800" y="1584" width="846" height="380" rx="190" fill="#fff"/><g transform="translate(1800 346) scale(14.0625)"><rect width="184" height="128" rx="22" fill="#fff"/><polyline points="32,94 32,36 58,68 84,36 84,94" fill="none" stroke="#000" stroke-width="23" stroke-linecap="round" stroke-linejoin="round"/><line x1="136" y1="34" x2="136" y2="68" stroke="#000" stroke-width="23" stroke-linecap="round"/><polygon points="112,63 160,63 136,93" stroke="#000" stroke-width="8" stroke-linejoin="round"/></g></mask></defs>
 <rect x="-125" y="-54" width="4913" height="2600" fill="${ink}" mask="url(#mark)"/>
@@ -36,7 +23,7 @@ const dataUrl = (markup: string) => `data:image/svg+xml;utf8,${encodeURIComponen
 
 const both = (mark: (ink: string) => string) => ({ ink: dataUrl(mark("#111111")), inverse: dataUrl(mark("#FFFFFF")) });
 
-/** Each product's logo on light (`ink`) and on dark (`inverse`), in the brand's black and white, with what a screen reader calls it. */
+/** Each product's logo on light (`ink`) and on dark (`inverse`), and its name for a screen reader. */
 export const LOGOS: Record<Product, { ink: string; inverse: string; label: string }> = {
   ipcamera: { ...both(ipcamera), label: "IP Camera" },
   mdviewer: { ...both(mdviewer), label: "Markdown Viewer" },

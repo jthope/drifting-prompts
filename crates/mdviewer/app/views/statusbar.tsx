@@ -1,8 +1,3 @@
-// The window's status bar, along its bottom under the sidebar too, as IP
-// Camera's: how long the open file is and how long it takes to read, its
-// headings, which show the outline, what the title bar's search found and
-// which match the reader is on, which steps to the next, and in the raw view
-// where the caret is.
 import { View } from "nsh";
 import { look, StatusItem, StatusText } from "../../../dp/ui";
 import { stepMatch } from "./actions";

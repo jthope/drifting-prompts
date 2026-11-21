@@ -1,13 +1,4 @@
-//! An H.265 decoder element built on `rust_h265`, a decoder written in Rust.
-//!
-//! glass2glass's Media Foundation element creates the H.265 decoder by its fixed class id. The
-//! Microsoft Store's HEVC Video Extensions do not register that id where a desktop app looks it
-//! up, so the element fails even where the extension is installed. Decoding in Rust needs nothing
-//! installed and works on every platform, at the cost of doing the work on the CPU.
-//!
-//! It follows glass2glass's own OpenH264 element: H.265 access units in, I420 pictures out,
-//! announced by a caps change whenever the picture size changes. The pictures are already cropped
-//! to the size the stream declares.
+//! An H.265 decoder element on `rust_h265`: access units in, I420 pictures out.
 
 use std::{collections::BTreeSet, future::Future, pin::Pin};
 
@@ -18,21 +9,18 @@ use g2g_core::{
 };
 use rust_h265::{Decoder, PixelData};
 
-/// Worker threads per decoder. Each one can hold a picture back while it decodes, so more of them
-/// buy throughput with latency; two keep a 1080p camera well ahead of real time.
+/// Each worker can hold a picture back, so more of them buy throughput with latency.
 const THREADS: usize = 2;
 
-/// One decoded picture, as I420 bytes.
 struct Picture {
     width: u32,
     height: u32,
     pixels: Vec<u8>,
 }
 
-/// Packs a decoded picture as I420, or says why it cannot be shown.
 fn pack(frame: rust_h265::Frame) -> Result<Picture, G2gError> {
     if frame.bit_depth != 8 || frame.chroma_format_idc != 1 {
-        // 10-bit, 4:2:2 and 4:4:4 cameras exist, but none of the converters here take them.
+        // The converters here take only 8-bit 4:2:0.
         return Err(G2gError::CapsMismatch);
     }
     let (PixelData::U8(y), PixelData::U8(u), PixelData::U8(v)) = (frame.y, frame.u, frame.v) else {
@@ -89,12 +77,10 @@ fn output_caps(width: Dim, height: Dim, framerate: Rate, colorimetry: Colorimetr
     }
 }
 
-/// Decodes H.265 to I420.
 pub(crate) struct HevcDec {
     decoder: Decoder,
     framerate: Rate,
     colorimetry: Colorimetry,
-    /// The size last announced downstream.
     geometry: Option<(u32, u32)>,
     /// Pictures come out in display order, so each takes the earliest time still waiting.
     pending_pts: BTreeSet<u64>,
@@ -117,10 +103,7 @@ impl HevcDec {
         }
     }
 
-    /// Feeds one access unit in and takes whatever pictures are ready.
-    ///
-    /// A slice the decoder rejects is skipped rather than ending the stream: a camera recovers at
-    /// its next key frame, as a player decoding through a lost packet does.
+    /// A rejected slice is skipped, since a camera recovers at its next keyframe.
     fn decode(&mut self, access_unit: &[u8]) -> Result<Vec<Picture>, G2gError> {
         for nal in rust_h265::parse_annex_b(access_unit) {
             let _ = self.decoder.decode_nal(&nal);
@@ -247,13 +230,12 @@ impl AsyncElement for HevcDec {
                     self.last_timing = timing;
                     self.emit(pictures, timing, out).await?;
                 }
-                // The decoder announces its own caps; it only needs the colors from upstream.
+                // Only the colors matter: the decoder announces its own caps.
                 PipelinePacket::CapsChanged(Caps::CompressedVideo { colorimetry, .. }) => {
                     self.colorimetry = colorimetry;
                 }
                 PipelinePacket::CapsChanged(_) => {}
-                // The runner sends the one end of stream itself; this only hands over the
-                // pictures still held back.
+                // The runner sends end of stream itself: only hand over what is held back.
                 PipelinePacket::Eos => {
                     let pictures = self.drain()?;
                     let timing = self.last_timing;

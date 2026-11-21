@@ -1,14 +1,6 @@
-//! Thumbnails: a small PNG of each snapshot and recording, so a page can show a folder of them
-//! without decoding a full picture or any video.
+//! A small PNG of each snapshot and recording, in a `thumbnails` folder beside it.
 //!
-//! A thumbnail sits in the `thumbnails` folder inside its file's folder, under the file's name
-//! with a `.png` extension (`snapshots\thumbnails\snapshot-1762560000-<id>.png`,
-//! `videos\thumbnails\video-1762560000-<id>.png`), and is 480 pixels wide at most; the pages show
-//! them about half that wide. A PNG can't be decoded any smaller than it is, so a gallery of 1080p
-//! snapshots shown as they are decodes 8 MB for each tile.
-//!
-//! Each is written to a file of its own beside it first and renamed into place, so a page never
-//! reads half of one, and two writing the same one at once don't mix.
+//! Each is written to a file of its own and renamed into place, so a page never reads half of one.
 
 use std::{
     path::{Path, PathBuf},
@@ -23,10 +15,8 @@ use crate::error::{Result, StorageError};
 /// The thumbnails' folder, inside the folder of the files they show.
 pub const FOLDER: &str = "thumbnails";
 
-/// How wide a thumbnail is at most, in pixels.
 const WIDTH: u32 = 480;
 
-/// Numbers the files thumbnails are written to before they are renamed into place.
 static NEXT_PART: AtomicU64 = AtomicU64::new(0);
 
 /// Where the thumbnail of `file` goes.
@@ -40,8 +30,7 @@ pub fn existing(file: &Path) -> Option<PathBuf> {
     path_of(file).filter(|path| path.is_file())
 }
 
-/// The thumbnail called `name` in the thumbnails folder of `folder`. Only a PNG directly in it, so
-/// a name can never reach another file.
+/// Only a PNG directly in `folder`'s thumbnails, so a name can never reach another file.
 pub fn locate(folder: &Path, name: &str) -> Result<PathBuf> {
     let plain = Path::new(name).file_name().is_some_and(|file| file == name);
     let path = folder.join(FOLDER).join(name);
@@ -67,7 +56,6 @@ pub fn write(file: &Path, frame: &DecodedFrame) -> Result<PathBuf> {
     save(file, &rgba_of(frame)?)
 }
 
-/// `frame` as a picture `image` can work on.
 pub(crate) fn rgba_of(frame: &DecodedFrame) -> Result<RgbaImage> {
     if frame.width == 0 || frame.height == 0 {
         return Err(bad("the frame is empty"));
@@ -76,7 +64,7 @@ pub(crate) fn rgba_of(frame: &DecodedFrame) -> Result<RgbaImage> {
         .ok_or_else(|| bad("the frame does not match its size"))
 }
 
-/// Writes the thumbnail of `file`, a picture, from the picture itself.
+/// Writes the thumbnail of the picture `file`.
 pub fn write_from_picture(file: &Path) -> Result<PathBuf> {
     let picture = image::open(file)
         .map_err(|error| bad(format!("{}: {error}", file.display())))?
@@ -84,18 +72,15 @@ pub fn write_from_picture(file: &Path) -> Result<PathBuf> {
     save(file, &picture)
 }
 
-/// A picture that can't be made into a thumbnail, and why.
 pub(crate) fn bad(why: impl Into<String>) -> StorageError {
     StorageError::BadPicture(why.into())
 }
 
-/// Writes `picture`, made smaller, as the thumbnail of `file`.
 pub(crate) fn save(file: &Path, picture: &RgbaImage) -> Result<PathBuf> {
     let path = path_of(file).ok_or_else(|| bad("the file has no folder"))?;
     save_at(path, picture)
 }
 
-/// Writes `picture`, made as small as a thumbnail, at `path`.
 pub(crate) fn save_at(path: PathBuf, picture: &RgbaImage) -> Result<PathBuf> {
     if picture.width() == 0 || picture.height() == 0 {
         return Err(bad("the picture is empty"));

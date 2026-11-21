@@ -1,9 +1,3 @@
-// The dashboard's sums, on files and events made up here, the page key the app
-// reopens on, and the cameras kept connected whatever page is open.
-//
-// As with `Recordings.test.ts`, a test gets no file system to put files where
-// the app reads them, so `App.test.tsx` opens the dashboard empty and these
-// read `views/overview.ts` directly.
 import { expect, test } from "nsh/test";
 import type { CameraState, DriveSpace, EventInfo, SnapshotInfo, VideoInfo } from "ipcamera/native";
 import { kept, keptStreams, onScreen, pageFrom, pageKey, show, states, streamsOn, streamsOnScreen, views } from "./views/model";
@@ -60,7 +54,6 @@ test("the days run back from today, each with what was saved in it, older files 
   expect([last.videos, last.snapshots, last.seconds]).toEqual([1, 2, 60]);
   expect([list[5].videos, list[5].snapshots]).toEqual([1, 0]);
   expect([list[4].videos, list[4].snapshots]).toEqual([0, 1]);
-  // Seven days back is a day before the first of seven.
   expect(list.reduce((total, day) => total + day.videos, 0)).toBe(2);
   expect(list.reduce((total, day) => total + day.snapshots, 0)).toBe(3);
 });
@@ -97,10 +90,8 @@ test("the events add up by weekday and hour over the period, older and later one
   );
 
   expect(cells.length).toBe(7 * 24);
-  // Sunday's hours first, midnight first in each.
   expect([cells[0].weekday, cells[0].hour, cells[25].weekday, cells[25].hour]).toEqual([0, 0, 1, 1]);
   const at = (hour: number) => cells[weekday * 24 + hour].events;
-  // Two at noon today and one a week before, one at 11; fourteen days back is a day before the first of fourteen, and tomorrow hasn't come.
   expect([at(12), at(11)]).toEqual([3, 1]);
   expect(cells.reduce((total, cell) => total + cell.events, 0)).toBe(4);
 
@@ -153,7 +144,6 @@ test("the last view's cameras, and each camera opened on its own since, stay con
   expect(tiles).toContain(camera.id);
   expect(kept()).toEqual(tiles);
 
-  // One of the view's cameras on its own keeps the others; another camera joins them.
   show({ kind: "camera", id: camera.id });
   expect(onScreen()).toEqual([camera.id]);
   expect(kept()).toEqual(tiles);
@@ -167,7 +157,6 @@ test("the last view's cameras, and each camera opened on its own since, stay con
     expect(kept()).toEqual([...tiles, "elsewhere"]);
   }
 
-  // A view starts over with its own cameras.
   show({ kind: "view", id: view.id });
   expect(kept()).toEqual(tiles);
   expect(keptStreams()).toEqual(streamsOnScreen());
@@ -182,7 +171,6 @@ test("a camera on its own stays connected on the stream it was shown on last", (
   expect(streamsOnScreen()).toEqual([{ camera: "elsewhere", stream: "sub" }]);
   expect(keptStreams()).toEqual([...tiles, { camera: "elsewhere", stream: "sub" }]);
 
-  // Its own stream takes the sub stream's place.
   show({ kind: "camera", id: "elsewhere" });
   expect(keptStreams()).toEqual([...tiles, { camera: "elsewhere", stream: "" }]);
   expect(kept()).toContain("elsewhere");
@@ -211,7 +199,6 @@ test("a page is kept by its key and found again, unless it is gone", () => {
   expect(pageKey({ kind: "view", id: view.id })).toBe(`view:${view.id}`);
   expect(pageFrom(`view:${view.id}`)).toEqual({ kind: "view", id: view.id });
   expect(pageFrom(`camera:${camera.id}`)).toEqual({ kind: "camera", id: camera.id });
-  // A camera on its own keeps the stream it shows.
   const onSub = { kind: "camera", id: camera.id, stream: "/cam/realmonitor?channel=1&subtype=1" } as const;
   expect(pageFrom(pageKey(onSub))).toEqual(onSub);
   expect(pageKey({ kind: "camera", id: camera.id, stream: "" })).toBe(`camera:${camera.id}`);

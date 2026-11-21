@@ -1,12 +1,10 @@
-//! Tests of the camera form: made from a camera's settings and back, its checks, and what Detect
-//! fills in.
+//! Tests of the camera form.
 
 use super::*;
 
 #[test]
 fn a_form_comes_back_as_the_setting_it_was_made_from() {
     let camera = CameraConfig {
-        // The form never shows the id; the camera store keeps it.
         id: Default::default(),
         name: "Driveway".into(),
         brand: Brand::Reolink,
@@ -65,7 +63,6 @@ fn a_camera_follows_the_apps_event_videos_until_the_form_gives_it_its_own() {
     );
     assert_eq!(to_config(&form).event_video, None);
 
-    // Its own, with numbers outside the ranges and a kind this build doesn't know.
     let own = CameraForm {
         own_event_video: true,
         event_video: EventVideoSettings {
@@ -129,7 +126,6 @@ fn fields_of(form: &CameraForm) -> Vec<String> {
         .collect()
 }
 
-/// A new camera's form with a name and an address: nothing missing, for a test to spoil.
 fn complete() -> CameraForm {
     CameraForm {
         name: "Driveway".into(),
@@ -259,19 +255,16 @@ fn detect_gives_the_form_the_streams_the_camera_listed_and_keeps_them_when_it_li
         "none is at the path the app would build, so the first the camera lists"
     );
 
-    // The one at the path that has played so far, whatever its place in the list.
     let built = rtsp_url::path_for(Brand::Other, 1, Stream::Main);
     let known = [stream("small", "/live/2"), stream("main", &built)];
     assert_eq!(found(&complete(), &known).rtsp_path, built);
 
-    // A path typed by hand stays.
     let typed = CameraForm {
         rtsp_path: "/own".into(),
         ..complete()
     };
     assert_eq!(found(&typed, &listed).rtsp_path, "/own");
 
-    // Asked again without a login, the camera lists none: those it listed before stay.
     assert_eq!(found(&with_streams, &[]).streams, with_streams.streams);
 }
 
@@ -349,7 +342,6 @@ fn detect_fills_in_the_brand_and_the_api_and_says_what_it_found() {
         dahua.summary
     );
 
-    // An Amcrest light bulb camera: no DVRIP, Dahua's HTTP API on port 80.
     let model = DeviceInfo {
         model: "AL-L411W".into(),
         firmware: "2.800".into(),

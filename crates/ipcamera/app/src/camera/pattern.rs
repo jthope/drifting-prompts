@@ -1,20 +1,6 @@
-//! A moving 1080p test picture, for running without a camera, or a still picture in its place.
-//!
-//! It stands in for the pipeline as closely as it can: a thread allocates a full BGRA frame at a
-//! camera's rate and stores it in a [`FrameSlot`], so everything downstream does the same work it
-//! does for a real stream. The only part it skips is network and decode. Set `IPCAMERA_SOURCE=pattern`
-//! to develop or test without a camera, and without touching one.
-//!
-//! Like a stream, it does nothing while no tile shows it ([`Pattern::set_shown`]): it draws no
-//! frame and keeps none, as a stream decodes none, except the one picture asked for
-//! ([`Pattern::want_picture`]), as a stream's decode gate lets one keyframe's through.
-//!
-//! With `IPCAMERA_PICTURES` naming a folder, a camera whose name a PNG there has (`Front door.png`)
-//! shows that picture, still, in place of the moving one ([`picture_for`]), and its status says it
-//! is live, as a camera's would. With `IPCAMERA_FOUND` naming a JSON file, the network search
-//! lists the cameras in it rather than refusing to search ([`found_cameras`]). `cargo screenshots`
-//! takes the READMEs' screenshots this way (`crates/xtask`), with pictures and cameras made up for
-//! it.
+//! A moving 1080p test picture for running without a camera (`IPCAMERA_SOURCE=pattern`), or a
+//! still picture in its place (`IPCAMERA_PICTURES`). Like a stream, it draws nothing while no tile
+//! shows it, except a picture asked for.
 
 use std::{
     ffi::OsStr,
@@ -30,31 +16,24 @@ use std::{
 use ipcamera_core::FoundCamera;
 use ipcamera_media::{DecodedFrame, FrameSlot};
 
-/// The folder of pictures that stand in for cameras, each named for its camera: `<name>.png`.
 pub(super) const PICTURES_VARIABLE: &str = "IPCAMERA_PICTURES";
 
-/// The JSON file of the cameras the network search finds in their place: a list of
-/// `ipcamera_core::FoundCamera`, as the server's `/api/discover` answers.
 pub(super) const FOUND_VARIABLE: &str = "IPCAMERA_FOUND";
 
 const WIDTH: u32 = 1920;
 const HEIGHT: u32 = 1080;
 const FPS: u32 = 30;
 
-/// The moving bar's width, and how far it travels each frame, in pixels.
 const BAR_WIDTH: u32 = 96;
 const BAR_STEP: u32 = 16;
 
 /// A running test picture. Dropping it stops the thread.
 pub struct Pattern {
     frames: FrameSlot,
-    /// Set while no tile shows it.
     hidden: Arc<AtomicBool>,
-    /// Set when one picture is wanted while it is hidden.
     wanted: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
-    /// Whether it shows a picture of its own rather than the moving one.
     still: bool,
 }
 
@@ -85,7 +64,7 @@ impl Pattern {
         }
     }
 
-    /// Whether it shows a picture of its own ([`picture_for`]) rather than the moving one.
+    /// Whether it shows a picture of its own rather than the moving one.
     pub fn is_still(&self) -> bool {
         self.still
     }
@@ -117,15 +96,14 @@ impl Drop for Pattern {
     }
 }
 
-/// The picture standing in for the camera named `name`, when `IPCAMERA_PICTURES` names a folder
-/// that has one.
+/// The picture standing in for the camera named `name`, from `IPCAMERA_PICTURES`.
 pub fn picture_for(name: &str) -> Option<DecodedFrame> {
     let folder = std::env::var_os(PICTURES_VARIABLE)?;
     picture_in(Path::new(&folder), name)
 }
 
-/// `<name>.png` in `folder`, as BGRA; `None` when there is none or it can't be read, and for a name
-/// that isn't a plain file name, which would reach outside the folder.
+/// `<name>.png` in `folder` as BGRA; `None` for a name that isn't a plain file name, which would
+/// reach outside the folder.
 fn picture_in(folder: &Path, name: &str) -> Option<DecodedFrame> {
     let file = format!("{name}.png");
     if name.is_empty() || Path::new(&file).file_name() != Some(OsStr::new(&file)) {
@@ -145,14 +123,12 @@ fn picture_in(folder: &Path, name: &str) -> Option<DecodedFrame> {
     })
 }
 
-/// The cameras the network search finds when `IPCAMERA_FOUND` names a file: those it lists, or
-/// why it can't be read. `None` when it names none.
+/// The cameras in the file `IPCAMERA_FOUND` names, or why it can't be read; `None` when unset.
 pub fn found_cameras() -> Option<Result<Vec<FoundCamera>, String>> {
     let file = std::env::var_os(FOUND_VARIABLE)?;
     Some(found_in(Path::new(&file)))
 }
 
-/// The cameras listed in `file`.
 fn found_in(file: &Path) -> Result<Vec<FoundCamera>, String> {
     let text = std::fs::read_to_string(file)
         .map_err(|error| format!("Couldn't read {}: {error}.", file.display()))?;
@@ -184,7 +160,7 @@ fn run(
     while !stop.load(Ordering::SeqCst) {
         let shown = !hidden.load(Ordering::SeqCst);
         if shown || wanted.swap(false, Ordering::SeqCst) {
-            // A new buffer every frame, as `DecodedFrame::from_bgra_rows` makes for a real picture.
+            // A new buffer every frame, as a real stream makes.
             let mut bgra = background.clone();
             if !still {
                 draw_bar(&mut bgra, (step * BAR_STEP) % WIDTH);
@@ -194,8 +170,8 @@ fn run(
                 height,
                 bgra,
             }));
-            // Checked after the store: a hide that lands in between empties the slot itself. A
-            // picture asked for while hidden stays.
+            // Checked after the store: a hide in between empties the slot itself.
+            // A wanted picture stays.
             if shown && hidden.load(Ordering::SeqCst) {
                 frames.clear();
             }
@@ -209,7 +185,6 @@ fn run(
     }
 }
 
-/// A blue-to-red sweep with a green fade downwards, so scaling and channel order are easy to judge.
 fn gradient() -> Vec<u8> {
     let mut bgra = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
     for y in 0..HEIGHT {
@@ -222,7 +197,6 @@ fn gradient() -> Vec<u8> {
     bgra
 }
 
-/// A white bar at `left`, cut off at the right edge of the picture.
 fn draw_bar(bgra: &mut [u8], left: u32) {
     let right = (left + BAR_WIDTH).min(WIDTH);
     let row = (WIDTH * 4) as usize;

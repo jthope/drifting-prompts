@@ -1,12 +1,7 @@
-//! How much the snapshots and videos hold together, and making room under a limit by deleting the
-//! oldest: the app's Automation settings can cap all media (`core`'s `config::Automation`).
+//! What the snapshots and videos hold together, and deleting the oldest to keep them under a limit.
 //!
-//! [`media_files`] lists both folders, oldest first. Their sizes come from the folder listing,
-//! which costs nothing more per file, except for the files a camera is writing (`busy`): Windows
-//! updates a listing's size only once a file is closed, so those are asked themselves.
-//! [`make_room`] deletes the oldest, snapshots and videos alike, until the rest fit under the limit;
-//! never a file a camera is writing, and each with its thumbnail, as deleting one on its page does.
-//! A file that can't be deleted (one a player has open) is left, and the next oldest goes instead.
+//! A listing's size is stale until a file closes, so a file a camera is writing is sized from the
+//! file itself, and never deleted.
 
 use std::{
     fs,
@@ -30,12 +25,11 @@ pub struct MediaFile {
     pub video: bool,
     /// Its size, in bytes.
     pub bytes: u64,
-    /// When it was made, in milliseconds since 1970: as its name says, else when it was written.
+    /// When it was made, in ms since 1970: as its name says, else when it was written.
     pub made_ms: u64,
 }
 
-/// Every snapshot in `snapshots` and recording in `videos`, oldest first. `busy` are the files
-/// cameras are writing, whose sizes are asked of the files themselves.
+/// Every snapshot and recording, oldest first; the `busy` files cameras are writing.
 pub fn media_files(snapshots: &Path, videos: &Path, busy: &[PathBuf]) -> Vec<MediaFile> {
     let mut files = listed(&SNAPSHOT, snapshots, false, busy);
     files.extend(listed(&VIDEO, videos, true, busy));
@@ -43,7 +37,6 @@ pub fn media_files(snapshots: &Path, videos: &Path, busy: &[PathBuf]) -> Vec<Med
     files
 }
 
-/// The files of `kind` in `folder`, sized by the listing, or by the file when it is `busy`.
 fn listed(kind: &FileKind, folder: &Path, video: bool, busy: &[PathBuf]) -> Vec<MediaFile> {
     let Ok(listing) = fs::read_dir(folder) else {
         return Vec::new();
@@ -85,8 +78,7 @@ pub fn total(files: &[MediaFile]) -> u64 {
     files.iter().map(|file| file.bytes).sum()
 }
 
-/// Deletes the oldest of `files`, never one in `busy`, until the rest add up to less than `limit`,
-/// and returns what they add up to then: still `limit` or more when nothing more could go.
+/// Deletes the oldest, never one in `busy`, until the rest are under `limit`; returns what is left.
 pub fn make_room(files: &[MediaFile], limit: u64, busy: &[PathBuf]) -> u64 {
     let mut left = total(files);
     for file in files {
@@ -111,8 +103,7 @@ pub fn make_room(files: &[MediaFile], limit: u64, busy: &[PathBuf]) -> u64 {
     left
 }
 
-/// `bytes` as a message says it: `250 MB`, `5 GB`, `1.5 GB`, counting as the system does (1,024 to
-/// the next unit).
+/// `bytes` as a message says it (`1.5 GB`), 1,024 to the next unit.
 pub fn size_label(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["bytes", "KB", "MB", "GB", "TB"];
     let mut size = bytes as f64;
@@ -139,7 +130,6 @@ mod tests {
     use super::*;
     use crate::thumbnail;
 
-    /// Writes a file of `bytes` called `name` in `folder`, and returns where.
     fn write(folder: &Path, name: &str, bytes: usize) -> PathBuf {
         fs::create_dir_all(folder).unwrap();
         let path = folder.join(name);
@@ -187,7 +177,6 @@ mod tests {
 
         let files = media_files(&snapshots, &videos, &busy);
         assert_eq!(total(&files), 380);
-        // Under 150: the snapshot and the older video go, oldest first; the one being written stays.
         let left = make_room(&files, 150, &busy);
         assert_eq!(left, 130);
         assert!(writing.exists());
@@ -196,7 +185,6 @@ mod tests {
         assert!(!older_video.exists());
         assert!(newest.exists());
 
-        // Nothing more can go: what a camera writes is all that is left over the limit.
         let files = media_files(&snapshots, &videos, &busy);
         assert_eq!(make_room(&files, 50, &busy), 100);
         assert!(writing.exists());

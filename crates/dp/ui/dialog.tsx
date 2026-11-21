@@ -1,6 +1,3 @@
-// Questions the app asks. `askName(...)` from anywhere asks for a name, shown by
-// `<NameDialog />`, placed once in the app as `<Toaster />` is. A delete asks
-// with the system's own dialog, through `confirmDelete(...)`.
 import { signal, Text, View } from "nsh";
 import { AlertDialog, Dialog } from "nsh/base";
 import { Button } from "./button";
@@ -12,10 +9,7 @@ type Question = { title: string; label: string; action: string; resolve: (name: 
 const question = signal<Question | null>(null);
 const typed = signal("");
 
-/**
- * Asks for a name, starting from `value`. Resolves with the name trimmed, or
- * `null` when the user cancels. `action` labels the button that accepts it.
- */
+/** Asks for a name, starting from `value`; resolves with it trimmed, or `null` when canceled. */
 export function askName(options: { title: string; label: string; action: string; value?: string }): Promise<string | null> {
   question()?.resolve(null);
   typed.set(options.value ?? "");

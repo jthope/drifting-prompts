@@ -1,29 +1,7 @@
-//! The decode gate: a live view that stays connected while nothing on screen shows it, without
-//! being decoded.
+//! The decode gate: a hidden live view stays connected but hands the decoder nothing.
 //!
-//! Decoding is most of what a camera costs. A live view can stay connected while no tile shows it
-//! ([`MediaSession::set_shown`]), so its status stays current and its picture comes back at once.
-//! The gate sits between the size tap and the decoder ([`crate::pipeline`]), after the record tap,
-//! so a recording never notices it. While the view is shown it passes everything on. While it is
-//! hidden it hands the decoder nothing. The stream still arrives: the session stays live, a
-//! recording goes on, and a camera that stops sending is still lost after the RTSP source's stall
-//! timeout.
-//!
-//! Coming back must not wait for the camera's next keyframe, which can be seconds away, and must
-//! never hand the decoder a picture whose keyframe it missed: a decoding error ends the run, and
-//! the session reconnects. So while hidden the gate keeps the pictures since the last keyframe, as
-//! the relay keeps them for a late viewer (`relay`), and the newest parameter sets. Shown again, it
-//! sends that keyframe, with the parameter sets ahead of it if it came without them, then the
-//! pictures after it, and the decoder catches up in one burst. The sink keeps the keyframe's
-//! picture and skips the rest of the burst ([`Visibility::skips`]) until the newest, so the tile
-//! has a picture at once and the live one a moment later, and the burst doesn't count as frames
-//! the window never drew.
-//!
-//! While hidden, the frame slot stays empty, so a view nobody sees holds no decoded picture (8 MB
-//! at 1080p). The one exception is the picture a recording's file starts on, which its thumbnail
-//! is made from ([`Visibility::want_picture`]): the gate lets that keyframe through.
-//!
-//! [`MediaSession::set_shown`]: crate::MediaSession::set_shown
+//! The decoder must never get a picture whose keyframe it missed (a decoding error ends the run),
+//! so while hidden the gate keeps the pictures since the last keyframe and replays them when shown.
 
 use std::{
     collections::VecDeque,
@@ -43,26 +21,19 @@ use ipcamera_core::sync::LockExt;
 
 use crate::{DecodedFrame, FrameSlot, annexb::ParameterSets};
 
-/// The most pictures the gate keeps while hidden, as many as the relay keeps for a late viewer. A
-/// camera whose keyframes are further apart than this comes back at its next keyframe instead.
+/// Keyframes further apart than this come back at the next keyframe instead.
 const HELD: usize = 300;
 
-/// Whether a live view is shown, shared by the session that is told, the gate that acts on it and
-/// the sink that keeps its pictures.
 #[derive(Default)]
 pub(crate) struct Visibility {
-    /// Where the pictures go.
     frames: FrameSlot,
     hidden: AtomicBool,
-    /// Set while hidden when the next keyframe's picture is wanted: the one a recording's new file
-    /// starts on.
     wanted: AtomicBool,
-    /// While the decoder catches up, the presentation time of the newest picture it was sent.
+    /// While the decoder catches up: the newest picture's presentation time.
     catch_up: Mutex<Option<u64>>,
 }
 
 impl Visibility {
-    /// Shown, putting its pictures in `frames`.
     pub(crate) fn new(frames: FrameSlot) -> Self {
         Self {
             frames,
@@ -70,17 +41,14 @@ impl Visibility {
         }
     }
 
-    /// The slot the pictures go in.
     pub(crate) fn frames(&self) -> FrameSlot {
         self.frames.clone()
     }
 
-    /// Whether anything shows the pictures.
     pub(crate) fn shown(&self) -> bool {
         !self.hidden.load(Ordering::SeqCst)
     }
 
-    /// Shows the pictures again, or hides them and lets go of the one in the slot.
     pub(crate) fn set_shown(&self, shown: bool) {
         self.hidden.store(!shown, Ordering::SeqCst);
         if !shown {
@@ -98,14 +66,11 @@ impl Visibility {
         self.wanted.load(Ordering::SeqCst)
     }
 
-    /// Notes the newest picture the decoder was sent to catch up, or that it has nothing to catch
-    /// up through.
     fn catch_up_to(&self, newest: Option<u64>) {
         *self.catch_up.locked() = newest;
     }
 
-    /// Whether the sink skips the picture shown at `pts`: one the decoder is catching up through,
-    /// once the slot has a picture.
+    /// Skips the pictures the decoder catches up through, once the slot has one.
     pub(crate) fn skips(&self, pts: u64) -> bool {
         let mut catch_up = self.catch_up.locked();
         match *catch_up {
@@ -118,7 +83,7 @@ impl Visibility {
         }
     }
 
-    /// Puts a decoded picture in the slot. While hidden it is let go at once, unless it was wanted.
+    /// While hidden the picture is let go at once, unless it was wanted.
     pub(crate) fn store(&self, picture: Arc<DecodedFrame>) {
         self.frames.store(picture);
         let wanted = self.wanted.swap(false, Ordering::SeqCst);
@@ -129,17 +94,14 @@ impl Visibility {
     }
 }
 
-/// Hands the decoder the stream while the view is shown, and nothing while it is hidden.
 pub(crate) struct DecodeGate {
     visibility: Arc<Visibility>,
-    /// Set by the first keyframe while hidden, so the session reports the camera live although
-    /// nothing is decoded.
     live: Arc<AtomicBool>,
     codec: Option<VideoCodec>,
     parameter_sets: ParameterSets,
-    /// Whether the decoder has had everything since a keyframe, so the next picture can go to it.
+    /// The decoder has had everything since a keyframe.
     in_step: bool,
-    /// While out of step: the pictures since the last keyframe, that keyframe first.
+    /// Since the last keyframe, that keyframe first.
     held: VecDeque<Frame>,
 }
 
@@ -161,8 +123,6 @@ impl DecodeGate {
         }
     }
 
-    /// What goes on to the decoder now that `frame` has arrived: nothing, `frame`, or the pictures
-    /// since the last keyframe.
     fn admit(&mut self, frame: Frame) -> Vec<Frame> {
         let keyframe = frame.timing.keyframe;
         let carries_parameter_sets = match (self.codec, frame.domain.as_system_slice()) {
@@ -181,8 +141,7 @@ impl DecodeGate {
                 self.live.store(true, Ordering::Relaxed);
             }
         } else if self.held.is_empty() || self.held.len() >= HELD {
-            // Nothing to decode it against, or too far from its keyframe to catch up through:
-            // wait for the next keyframe.
+            // No keyframe to decode it against, or too far behind one: wait for the next.
             self.held.clear();
             return Vec::new();
         }
@@ -203,7 +162,6 @@ impl DecodeGate {
         admitted
     }
 
-    /// The pictures since the last keyframe, all at once, after which the decoder is in step.
     fn catch_up(&mut self) -> Vec<Frame> {
         let newest = self
             .held
@@ -217,7 +175,6 @@ impl DecodeGate {
         self.held.drain(..).collect()
     }
 
-    /// `keyframe` with the newest parameter sets ahead of it, when there are all of them.
     fn with_parameter_sets(&self, keyframe: Frame) -> Frame {
         let complete = self
             .codec
@@ -232,7 +189,6 @@ impl DecodeGate {
     }
 }
 
-/// A frame of `bytes` with `like`'s timing.
 fn system_frame(bytes: Box<[u8]>, like: &Frame) -> Frame {
     Frame::new(
         MemoryDomain::System(SystemSlice::from_boxed(bytes)),
@@ -241,7 +197,6 @@ fn system_frame(bytes: Box<[u8]>, like: &Frame) -> Frame {
     )
 }
 
-/// A copy of `frame`, which the gate both sends on and keeps.
 fn copy(frame: &Frame) -> Option<Frame> {
     let bytes = frame.domain.as_system_slice()?;
     Some(system_frame(Box::from(bytes), frame))
@@ -306,7 +261,6 @@ mod tests {
     use super::*;
     use crate::annexb;
 
-    /// The SPS and PPS of a 64 x 64 H.264 stream, and a picture of each kind.
     const SPS: &[u8] = &[
         0x67, 0x42, 0xc0, 0x0a, 0xda, 0x0f, 0xd0, 0x80, 0x00, 0x00, 0x03, 0x00, 0x80, 0x00, 0x00,
         0x1e, 0x47, 0x89, 0x16, 0xa8,
@@ -334,7 +288,6 @@ mod tests {
         )
     }
 
-    /// A keyframe that carries its parameter sets, as cameras send them.
     fn keyframe(at_ms: u64) -> Frame {
         access_unit(&[SPS, PPS, IDR], at_ms, true)
     }
@@ -368,7 +321,6 @@ mod tests {
         }
     }
 
-    /// The times, in ms, of what went on to the decoder.
     fn times(frames: &[Frame]) -> Vec<u64> {
         frames
             .iter()

@@ -1,6 +1,3 @@
-// The videos page: the recordings, laid out like the snapshots gallery (the
-// collapsing header over the grid of `grid.tsx`) and narrowed, sorted and
-// grouped the same way, and the player that opens over it.
 import { effect, Image, keymap, Text, Video, View } from "nsh";
 import { Dialog } from "nsh/base";
 import type { VideoInfo } from "ipcamera/native";
@@ -39,16 +36,10 @@ import {
   videosScroll,
 } from "./recordings";
 
-/** How often the page reads the folder again while a camera records, so its length and size keep up. */
 const WHILE_RECORDING_EVERY = 2000;
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
 
-/**
- * One recording: its first picture over its camera and when it started, its
- * length in a corner, or at the row's end in a list, whose picture is too
- * small for it. A press plays it, or picks it while others are selected.
- */
 function Tile(props: { video: VideoInfo }) {
   const name = () => props.video.name;
   const list = () => videoLibrary.size() === "list";
@@ -100,7 +91,6 @@ function Tile(props: { video: VideoInfo }) {
   );
 }
 
-/** The header: how many show and what the filters keep, the stats and what records, and the filters and buttons in its bar. */
 function VideosHeader() {
   const live = () => (totals().recording > 0 ? `${countLabel(totals().recording)} recording now` : undefined);
 
@@ -139,7 +129,6 @@ function VideosHeader() {
   );
 }
 
-/** Before the first recording: what makes one, and where they go. */
 function NoVideos() {
   return (
     <EmptyState
@@ -151,7 +140,7 @@ function NoVideos() {
   );
 }
 
-/** The player's keys, bound while it is open. Newer bindings win, so Escape closes this before it leaves full screen. */
+/** Newer bindings win, so Escape closes the player before it leaves full screen. */
 function PlayerKeys(props: { onStep: (by: number) => void; onDelete: () => void; onClose: () => void }) {
   keymap.bind("left", () => props.onStep(-1));
   keymap.bind("right", () => props.onStep(1));
@@ -160,11 +149,6 @@ function PlayerKeys(props: { onStep: (by: number) => void; onDelete: () => void;
   return null;
 }
 
-/**
- * One recording, playing over the whole window with the platform's controls,
- * under a bar that says whose and when it is. Left and right step through the
- * page in its order, skipping any still recording.
- */
 function Player() {
   const index = () => ordered().findIndex((video) => video.name === playing());
   // A recording that left the folder closes the player by itself.
@@ -235,7 +219,6 @@ function Player() {
 /** The videos page, in place of the stage and the PTZ panel. */
 export function VideosPage() {
   videosScroll.set(0);
-  // Reads the folder now, then again whenever a file comes or goes, by this app or anything else.
   Videos.onChange(() => reload());
   // A file being written doesn't change the folder's listing, so it is read again on a timer.
   effect(() => {

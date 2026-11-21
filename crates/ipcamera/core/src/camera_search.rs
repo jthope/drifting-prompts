@@ -1,18 +1,5 @@
-//! Finding the cameras on this machine's networks, for the camera form's network search, whatever
-//! they speak. Nothing here logs in to anything.
-//!
-//! Two searches run side by side, about three seconds together:
-//!
-//! - **ONVIF's own** ([`onvif::discover`](crate::onvif::discover)): a camera with ONVIF on says
-//!   where its ONVIF service is, its name and its model.
-//! - **For video** ([`video_devices`]): many cameras have no ONVIF, or have it off, and still
-//!   send video over RTSP. Each address of this machine's private networks is tried on RTSP's
-//!   port, and one that takes the connection is asked which requests it takes (`OPTIONS`, which
-//!   needs no login and names no stream). A device that answers in RTSP is listed by its address,
-//!   with what its RTSP server calls itself: it says nothing else without a login.
-//!
-//! A camera both find is one entry, ONVIF's, with its RTSP port. Only RTSP's usual port is tried:
-//! a camera moved to another port, like one on another network, is added by its address.
+//! Finding the cameras on this machine's networks, with no login: ONVIF's discovery, and every
+//! private address asked RTSP's `OPTIONS` on port 554, side by side.
 
 use std::{
     io::{Read, Write},
@@ -23,22 +10,17 @@ use std::{
 
 use crate::{camera_features::FoundCamera, onvif};
 
-/// RTSP's port, which cameras ship their video on.
 const RTSP_PORT: u16 = 554;
 
-/// How long an address may take to accept a connection on RTSP's port: one on the same network
-/// answers within a few milliseconds, and nothing at an address never does.
 const CONNECT_WAIT: Duration = Duration::from_millis(800);
 
-/// How long a device that took the connection may take to answer.
 const ANSWER_WAIT: Duration = Duration::from_millis(1200);
 
-/// The stack of the thread that tries one address: it holds a small buffer and nothing else.
+/// Small, since one thread runs per address.
 const TRY_STACK: usize = 64 * 1024;
 
-/// The cameras on this machine's networks: those ONVIF's discovery finds, and every other device
-/// that answers in RTSP, by address. No camera is logged in to. Blocks for about three seconds,
-/// so call it off the window's thread and off any async runtime's own threads.
+/// The cameras on this machine's networks, by address. Blocks for about three seconds, so keep it
+/// off an async runtime's threads.
 pub fn find_cameras() -> Vec<FoundCamera> {
     let (over_onvif, with_video) = thread::scope(|scope| {
         let video = scope.spawn(video_devices);
@@ -47,8 +29,6 @@ pub fn find_cameras() -> Vec<FoundCamera> {
     merged(over_onvif, with_video)
 }
 
-/// `over_onvif` and `with_video` as one list, by address: a camera in both is ONVIF's entry with
-/// its RTSP port, and a device only RTSP found comes after those ONVIF did.
 fn merged(mut over_onvif: Vec<FoundCamera>, with_video: Vec<FoundCamera>) -> Vec<FoundCamera> {
     let mut only_video = Vec::new();
     for device in with_video {
@@ -64,9 +44,6 @@ fn merged(mut over_onvif: Vec<FoundCamera>, with_video: Vec<FoundCamera>) -> Vec
     over_onvif
 }
 
-/// Every device on this machine's private networks that answers in RTSP on RTSP's port, by
-/// address. Each address is tried at once, on a thread of its own, so the whole search takes
-/// what one address may.
 fn video_devices() -> Vec<FoundCamera> {
     let addresses: Vec<Ipv4Addr> = onvif::private_networks()
         .into_iter()
@@ -91,8 +68,6 @@ fn video_devices() -> Vec<FoundCamera> {
     found
 }
 
-/// The device at `address`, when it answers in RTSP: asked `OPTIONS` for the server itself
-/// (`*`), with no login and no stream named.
 fn video_device(address: Ipv4Addr) -> Option<FoundCamera> {
     let mut stream =
         TcpStream::connect_timeout(&SocketAddr::from((address, RTSP_PORT)), CONNECT_WAIT).ok()?;
@@ -116,9 +91,8 @@ fn video_device(address: Ipv4Addr) -> Option<FoundCamera> {
     })
 }
 
-/// What the RTSP server that sent `reply` calls itself, empty when it doesn't say; `None` for a
-/// reply that isn't RTSP's. Any RTSP answer counts, one asking for a login included: it is a
-/// device that speaks RTSP either way.
+/// What the RTSP server calls itself; `None` for a reply that isn't RTSP. Any RTSP answer counts,
+/// one asking for a login included.
 fn rtsp_server(reply: &str) -> Option<String> {
     let mut lines = reply.lines();
     if !lines.next()?.starts_with("RTSP/1.") {

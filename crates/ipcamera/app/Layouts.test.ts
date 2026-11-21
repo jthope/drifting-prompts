@@ -1,8 +1,3 @@
-// Editing a view's layout on the 12 × 12 grid (`views/arrange.ts`): moving,
-// resizing, adding and removing tiles, the layouts a draft starts from, and
-// the cameras its frames show.
-// The drags themselves are the stage's (`views/arranger.tsx`); `App.test.tsx`
-// edits a view through the editor's buttons.
 import { expect, test } from "nsh/test";
 import type { CellInfo, ViewInfo } from "ipcamera/native";
 import type { MenuEntries } from "../../dp/ui";
@@ -33,7 +28,6 @@ const layout = (key: string) => {
   return found;
 };
 
-/** A view divided as the layout `key`, its first tile showing a camera, keeping no tiles past its cells. */
 function viewAs(key: string): ViewInfo {
   const cells = layout(key).cells;
   return {
@@ -65,17 +59,14 @@ test("the grid is 12 by 12, and every layout fills it", () => {
 
 test("a tile moves by whole cells, stops at the grid's edges, and never onto another", () => {
   startEditing(viewAs("4"));
-  // Every cell is taken: nothing can move.
   expect(moveTile(keyOf(0), 1, 0)).toBe(false);
 
   removeTile(keyOf(1));
   expect(draftCells().length).toBe(3);
   expect(moveTile(keyOf(0), 3, 0)).toBe(true);
   expect(draftCells()[0]).toEqual(cell(3, 0, 6, 6));
-  // Past the edge, it stops there.
   expect(moveTile(keyOf(0), 99, -5)).toBe(true);
   expect(draftCells()[0]).toEqual(cell(6, 0, 6, 6));
-  // Down onto the tile below it: not made.
   expect(moveTile(keyOf(0), 0, 3)).toBe(false);
   expect(draftCells()[0]).toEqual(cell(6, 0, 6, 6));
   cancelEditing();
@@ -90,7 +81,6 @@ test("a tile resizes by its bottom right, no smaller than 2 × 2 and no further 
   expect(draftCells()[0]).toEqual(cell(0, 0, 2, 2));
   expect(resizeTile(first, { right: 99 })).toBe(true);
   expect(draftCells()[0]).toEqual(cell(0, 0, 12, 2));
-  // Taller would cover the tile under it.
   expect(resizeTile(first, { bottom: 6 })).toBe(false);
   expect(matchingLayout(draftCells())).toBe(undefined);
   cancelEditing();
@@ -98,20 +88,15 @@ test("a tile resizes by its bottom right, no smaller than 2 × 2 and no further 
 
 test("a tile resizes by any edge or corner, the edges across from it staying put", () => {
   startEditing(viewAs("4"));
-  // The top right quarter goes, leaving room above the bottom right one.
   removeTile(keyOf(1));
   const last = keyOf(2);
   expect(draftCells()[2]).toEqual(cell(6, 6, 6, 6));
-  // Its left edge right, no closer to its right edge than the smallest width.
   expect(resizeTile(last, { left: 10 })).toBe(true);
   expect(draftCells()[2]).toEqual(cell(10, 6, 2, 6));
-  // Its top edge up, stopping at the grid's top.
   expect(resizeTile(last, { top: -99 })).toBe(true);
   expect(draftCells()[2]).toEqual(cell(10, 0, 2, 12));
-  // Its top left corner: both edges at once.
   expect(resizeTile(last, { left: -4, top: 2 })).toBe(true);
   expect(draftCells()[2]).toEqual(cell(6, 2, 6, 10));
-  // Further left would cover the top left quarter.
   expect(resizeTile(last, { left: -1 })).toBe(false);
   expect(draftCells()[2]).toEqual(cell(6, 2, 6, 10));
   cancelEditing();
@@ -124,7 +109,6 @@ test("a new tile goes in the first room from the top left, largest first, until 
 
   resizeTile(keyOf(0), { right: -2, bottom: -2 });
   expect(addTile()).toBe(true);
-  // The first tile shrank to 4 × 4, leaving a strip 2 cells wide beside it: room for the smallest.
   expect(draftCells()[4]).toEqual(cell(4, 0, 2, 2));
   expect(draft()?.tiles[4].was).toBe(null);
   cancelEditing();
@@ -143,7 +127,6 @@ test("the last tile stays, and a layout lays the draft out tile by tile with the
 });
 
 test("a frame shows the camera of the tile it was, kept past the cells too, and its streams each once", () => {
-  // A 2 × 2 view that was 3 × 3 keeps tiles 5 to 9: the sixth and the ninth hold cameras.
   const view = { ...viewAs("4"), tiles: ["cam", "", "cam", ""], streams: ["", "", "sub", ""], hiddenTiles: ["", "porch", "", "", "cam"], hiddenStreams: ["", "", "", "", "sub"] };
   expect(showingOf(view, 0)).toEqual({ camera: "cam", stream: "" });
   expect(showingOf(view, 1)).toBe(undefined);
@@ -175,7 +158,6 @@ test("a frame's picture keeps the fit of the tile it was, and a new one takes th
   expect(fitOf(view, null)).toBe("stretch");
 });
 
-/** A menu's entries as text: its labels, `✓` after the checked one, `-` for a line; a submenu's after it, indented. */
 function menuText(entries: MenuEntries): string[] {
   return entries.flatMap((entry) => {
     if (!entry) return [];
@@ -190,7 +172,6 @@ test("a tile's menu picks its fit, those that force a shape apart, and a camera 
   const view = { ...viewAs("4"), fits: ["fill", "original", "original", "original"] };
   const menu = menuText(tileMenu(view, 0));
   const fit = menu.indexOf("Fit");
-  // After Stream, before Edit camera.
   expect(menu.slice(fit, fit + 10)).toEqual(["Fit", "  Original", "  Fill ✓", "  Stretch", "  -", "  1:1", "  4:3", "  3:4", "  16:9", "  9:16"]);
   expect(menu.indexOf("Stream") < fit).toBe(true);
   expect(menu[fit + 10]).toBe("Edit camera…");

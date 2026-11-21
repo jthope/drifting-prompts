@@ -1,7 +1,3 @@
-// The snapshots gallery: the header the dashboard has, which collapses to
-// its bar of filters as the grid scrolls under it, then the pictures under a
-// heading for each month, day or camera (`grid.tsx`, which the videos and the
-// events share), and the viewer that opens over it.
 import { Image, Text, View } from "nsh";
 import type { SnapshotInfo } from "ipcamera/native";
 import { Snapshots } from "ipcamera/native";
@@ -36,11 +32,7 @@ import {
 } from "./snapshots";
 import { PictureViewer } from "./viewer";
 
-/**
- * What an event saved a file for, over its picture's bottom left corner: what
- * the camera saw as it started (`Vehicle`). A list's row is too small for it.
- * The videos page shows it too.
- */
+/** What an event saw as it saved a file (`Vehicle`), over its picture's corner. */
 export function TagChip(props: { tags: string[] }) {
   return (
     <If when={props.tags.length > 0}>
@@ -52,13 +44,7 @@ export function TagChip(props: { tags: string[] }) {
   );
 }
 
-/**
- * One picture: the snapshot's thumbnail over its camera and when it was taken,
- * never the picture itself, which decodes to 8 MB at 1080p, and what the
- * camera saw where an event took it. One without a thumbnail yet shows an
- * icon until it gets one. A press opens it, or picks it while others are
- * selected.
- */
+/** One picture: the snapshot's thumbnail, never the picture itself, which decodes to 8 MB at 1080p. */
 function Tile(props: { shot: SnapshotInfo }) {
   const name = () => props.shot.name;
   const picture = () => (
@@ -96,7 +82,6 @@ function Tile(props: { shot: SnapshotInfo }) {
   );
 }
 
-/** The header: how many show and what the filters keep, the stats, and the filters and buttons in its bar. */
 function GalleryHeader() {
   const cameras = () => new Set(visible().map((shot) => shot.camera)).size;
   const thisMonth = () => {
@@ -139,7 +124,6 @@ function GalleryHeader() {
   );
 }
 
-/** Before the first snapshot: what makes one, and where they go. */
 function NoSnapshots() {
   return (
     <EmptyState
@@ -151,7 +135,6 @@ function NoSnapshots() {
   );
 }
 
-/** A snapshot at full size: whose and when, its size, and Explorer's button for it. */
 function Viewer() {
   return (
     <PictureViewer
@@ -173,8 +156,6 @@ function Viewer() {
 /** The gallery page, in place of the stage and the PTZ panel. */
 export function Gallery() {
   galleryScroll.set(0);
-  // Reads the folder now, then again whenever it changes, by this app or anything else, while
-  // the page shows.
   Snapshots.onChange(() => reload());
 
   return (

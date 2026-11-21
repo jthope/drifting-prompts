@@ -1,35 +1,6 @@
-//! Dahua's HTTP API, in either of its two dialects:
-//!
-//! - the CGI, `GET /cgi-bin/<object>.cgi?action=<method>&…`, answered with `key=value` lines, which
-//!   Dahua's cameras and the Amcrest ones on Dahua's firmware have;
-//! - the XML API, `POST /dev-api/<object>/<method>` with an XML body, answered in XML, which
-//!   Amcrest Link's cameras speak (Amcrest's "AMLINK CGI" specification), its light bulb cameras
-//!   among them. They have no DVRIP: their PTZ and light go over it.
-//!
-//! Both have the same objects and methods (`magicBox`, `ptz`, `configManager`,
-//! `coaxialControlIO`) and the same tables, so the client asks the same things in either. It tries
-//! the CGI first, and the XML API when the camera answers the CGI with an error, with the same
-//! login. A value in an XML reply is found by its element's name, as a CGI reply's is by its key.
-//!
-//! The login is HTTP digest with MD5 (RFC 7616), as both ask for it. The first request goes
-//! without one; the camera's 401 says how to log in (its realm and a nonce), and every request
-//! after that carries the answer, counting up. The password itself never crosses the network. A
-//! camera that forgot its nonce answers 401 to a request that worked before, which gets one more
-//! try with the new nonce. A 401 to a fresh nonce is a refused login: the client remembers it and
-//! answers every later call with it without asking the camera again, since failed logins lock the
-//! account (five, on Dahua's firmware).
-//!
-//! What it asks here: what the camera is (`magicBox`), what its PTZ does and a move (`ptz`, with
-//! the codes and speeds DVRIP takes: [`DahuaCommand`]), and its light. A light is a white light
-//! among `Lighting_V2`'s lights, as a light bulb camera's bulb or a floodlight's flood is, switched
-//! by its mode (`Manual` on, `Off` off); else the white light of `coaxialControlIO`. Only a row
-//! with a brightness is a light: a row without one is a stub that switches nothing. `Lighting`, the
-//! older table, is the infrared lamp's on most cameras, which switched off would leave the camera
-//! blind at night, so it is never taken for a light. The XML API sets a table whole, so a switch
-//! there reads it, changes the rows' modes in the text the camera sent and sends that back.
-//!
-//! Calls block for up to [`TIMEOUT`]: each camera's client belongs on a thread of its own. HTTPS
-//! is accepted with the certificate each camera signs itself, as Reolink's client does.
+//! Dahua's HTTP API, in its CGI and XML (`/dev-api/`) dialects, with a digest login. A refused
+//! login is remembered and never retried, since failed logins lock the account; the `Lighting`
+//! table is the infrared lamp's, never taken for a light. Calls block.
 
 use std::{fmt, ops::Range, time::Duration};
 
@@ -41,26 +12,22 @@ use crate::{
     ptz::DahuaCommand,
 };
 
-/// How long a request may take before the camera counts as unreachable.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How long [`DahuaHttp::answers`] waits: a camera that answers at all answers in well under it.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// What every XML request's body starts with.
 const XML_HEAD: &str = r#"<?xml version="1.0" encoding="utf-8" standalone="yes"?>"#;
 
 /// Why a call to the API failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DahuaHttpError {
-    /// The camera refused the login, for the reason given. Nothing retries it.
+    /// The camera refused the login. Nothing retries it.
     LoginRejected(String),
-    /// The camera could not be reached, or the connection broke, for the reason given.
+    /// The camera could not be reached, or the connection broke.
     Unreachable(String),
-    /// The camera answered the request with an error, for the reason given: it may not have
-    /// what was asked, or not on that channel.
+    /// The camera answered the request with an error.
     Failed(String),
-    /// The camera answered with something the client can't use, for the reason given.
+    /// The camera answered with something the client can't use.
     Protocol(String),
 }
 
@@ -84,7 +51,6 @@ impl fmt::Display for DahuaHttpError {
 
 impl std::error::Error for DahuaHttpError {}
 
-/// What a call to the API returns.
 type Result<T> = std::result::Result<T, DahuaHttpError>;
 
 /// Which of Dahua's HTTP APIs a camera speaks.
@@ -103,34 +69,28 @@ pub struct PtzCaps {
     pub pan_tilt: bool,
     /// Whether it zooms.
     pub zoom: bool,
-    /// The channel number the camera answered to: `ptz` counts from 0 on most firmware and from 1
-    /// on some, so both are asked.
+    /// The channel number it answered to: most firmware counts from 0, some from 1.
     pub channel: u32,
 }
 
 /// How a camera's light is switched over the API.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DahuaLight {
-    /// White lights among `Lighting_V2`'s, each as its indexes in the table: channel, then profile
-    /// (day, night, normal, …), then light. One for each profile that has it, all switched
-    /// together, since which profile is in use can change through the day.
+    /// White lights among `Lighting_V2`'s, by channel, profile and light index; every profile's
+    /// switched together, since the profile in use changes through the day.
     Lighting(Vec<Vec<usize>>),
-    /// The white light of `coaxialControlIO`, on this channel (from 1, as the camera's settings
-    /// count).
+    /// `coaxialControlIO`'s white light, on this channel (from 1).
     Coaxial(u32),
 }
 
-/// What a camera's 401 asked for: the realm and nonce a digest login answers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Challenge {
     realm: String,
     nonce: String,
     opaque: Option<String>,
-    /// Whether it asked for `qop=auth`, which adds a count and a nonce of the client's.
     qop: bool,
 }
 
-/// What one request came back with: the body, or a challenge to log in.
 enum Reply {
     Text(String),
     Challenge(Challenge),
@@ -139,23 +99,18 @@ enum Reply {
 /// A connection to a Dahua camera's HTTP API, with the login and dialect it has learned.
 pub struct DahuaHttp {
     agent: Agent,
-    /// `http://host:port`, which every path goes after.
     base: String,
     user: String,
     password: String,
     dialect: Dialect,
     challenge: Option<Challenge>,
-    /// How many requests have answered the current nonce.
     count: u32,
-    /// Why the camera refused a login, which every later call returns without asking it again.
+    /// Returned by every later call without asking the camera again.
     refused: Option<DahuaHttpError>,
 }
 
 impl DahuaHttp {
-    /// Logs in to the API of the camera at `host` on `port`, over HTTPS when `https`, else plain
-    /// HTTP, and asks what it is: in the CGI, and in the XML API when the CGI answers with an
-    /// error. One login attempt, which both share: a request without one for the camera's
-    /// challenge, then one with it.
+    /// Logs in once and asks what the camera is: in the CGI, then the XML API if the CGI fails.
     pub fn connect(
         host: &str,
         port: u16,
@@ -183,9 +138,7 @@ impl DahuaHttp {
         }
     }
 
-    /// Whether Dahua's HTTP API answers at `host` on `port`, in either dialect: `magicBox` asks
-    /// for a digest login there, which only Dahua's firmware has at those paths. Never a login, so
-    /// never a failed one. Waits up to [`PROBE_TIMEOUT`] a request.
+    /// Whether Dahua's HTTP API answers at `host` on `port`, in either dialect, without a login.
     pub fn answers(host: &str, port: u16, https: bool) -> bool {
         let probe = Self::new(host, port, https, "", "", PROBE_TIMEOUT);
         match probe.send(
@@ -195,9 +148,7 @@ impl DahuaHttp {
             None,
         ) {
             Ok(Reply::Challenge(_)) => return true,
-            // A camera that lets anyone ask.
             Ok(Reply::Text(text)) if find(&read_values(&text), "type").is_some() => return true,
-            // Nothing listens there.
             Err(DahuaHttpError::Unreachable(_)) => return false,
             _ => {}
         }
@@ -215,7 +166,6 @@ impl DahuaHttp {
         }
     }
 
-    /// A client that hasn't logged in, speaking the CGI until it learns otherwise.
     fn new(
         host: &str,
         port: u16,
@@ -225,7 +175,6 @@ impl DahuaHttp {
         timeout: Duration,
     ) -> Self {
         let scheme = if https { "https" } else { "http" };
-        // An IPv6 address goes in brackets in a URL.
         let host = if host.contains(':') {
             format!("[{host}]")
         } else {
@@ -249,12 +198,12 @@ impl DahuaHttp {
         }
     }
 
-    /// Which dialect the camera speaks, as [`connect`](Self::connect) found.
+    /// Which dialect the camera speaks.
     pub fn dialect(&self) -> Dialect {
         self.dialect
     }
 
-    /// What the camera says it is: its model (`type`, as `AL-L411W`), firmware and hardware.
+    /// What the camera says it is.
     pub fn device_info(&mut self) -> Result<DeviceInfo> {
         let said = self.values("magicBox", "getDeviceType", "", "")?;
         let model = find(&said, "type")
@@ -276,8 +225,7 @@ impl DahuaHttp {
         })
     }
 
-    /// What the PTZ on `channel` (from 1, as the camera's settings count) does; `None` when the
-    /// camera won't say on either numbering.
+    /// What the PTZ on `channel` (from 1) does; `None` when the camera won't say on either count.
     pub fn ptz_caps(&mut self, channel: u32) -> Result<Option<PtzCaps>> {
         let channel = channel.max(1);
         for asked in [channel - 1, channel] {
@@ -308,13 +256,12 @@ impl DahuaHttp {
         Ok(None)
     }
 
-    /// Starts `command` on PTZ `channel`, numbered as the camera answered to it
-    /// ([`PtzCaps::channel`]); it lasts until [`ptz_stop`](Self::ptz_stop).
+    /// Starts `command` on PTZ `channel` ([`PtzCaps::channel`]) until [`ptz_stop`](Self::ptz_stop).
     pub fn ptz_start(&mut self, channel: u32, command: DahuaCommand) -> Result<()> {
         self.ptz("start", channel, command.code, command.arg1, command.arg2)
     }
 
-    /// Stops `command`, which a stop names as its start did.
+    /// Stops `command`.
     pub fn ptz_stop(&mut self, channel: u32, command: DahuaCommand) -> Result<()> {
         self.ptz("stop", channel, command.code, 0, 0)
     }
@@ -336,8 +283,7 @@ impl DahuaHttp {
         .map(drop)
     }
 
-    /// The light on `channel` (from 1) the app can switch, if the camera has one: a white light
-    /// with a brightness among `Lighting_V2`'s, else `coaxialControlIO`'s white light.
+    /// The light on `channel` (from 1) the app can switch, if the camera has one.
     pub fn light(&mut self, channel: u32) -> Result<Option<DahuaLight>> {
         let channel = channel.max(1);
         let index = (channel - 1) as usize;
@@ -361,9 +307,7 @@ impl DahuaHttp {
         }
     }
 
-    /// Whether `light` is on, and how bright. A `Lighting_V2` light is on when any of its rows is
-    /// in `Manual` (or `ForceOn`); one in `Auto` lights itself only when it is dark or something
-    /// moves.
+    /// Whether `light` is on (`Auto` is not), and how bright.
     pub fn light_state(&mut self, light: &DahuaLight) -> Result<Spotlight> {
         match light {
             DahuaLight::Lighting(rows) => {
@@ -403,8 +347,7 @@ impl DahuaHttp {
         }
     }
 
-    /// Switches `light` on or off: every `Lighting_V2` row to `Manual` or `Off` in one request,
-    /// or the coaxial white light's output.
+    /// Switches `light` on or off.
     pub fn set_light(&mut self, light: &DahuaLight, on: bool) -> Result<()> {
         match light {
             DahuaLight::Lighting(rows) => {
@@ -418,7 +361,7 @@ impl DahuaHttp {
                         self.get(&format!("configManager.cgi?action=setConfig{settings}"))
                             .map(drop)
                     }
-                    // The XML API sets a table whole: what the camera sent, with the modes changed.
+                    // The XML API sets a table whole: the camera's own text, its modes changed.
                     Dialect::DevApi => {
                         let table = self.lighting()?;
                         let changed = xml_with_modes(&table, rows, mode)?;
@@ -448,7 +391,6 @@ impl DahuaHttp {
         }
     }
 
-    /// The `Lighting_V2` table, as the camera sends it.
     fn lighting(&mut self) -> Result<String> {
         self.call(
             "configManager",
@@ -458,7 +400,6 @@ impl DahuaHttp {
         )
     }
 
-    /// `coaxialControlIO`'s status on `channel` (from 1): whether its white light is on.
     fn coaxial_status(&mut self, channel: u32) -> Result<Vec<(String, String)>> {
         let method = match self.dialect {
             Dialect::Cgi => "getStatus",
@@ -473,8 +414,6 @@ impl DahuaHttp {
         )
     }
 
-    /// `method` of `object` in the camera's dialect, with `cgi` after the CGI's action (`&key=…`)
-    /// or `xml` inside the XML body's root; the reply's body.
     fn call(&mut self, object: &str, method: &str, cgi: &str, xml: &str) -> Result<String> {
         match self.dialect {
             Dialect::Cgi => self.get(&format!("{object}.cgi?action={method}{cgi}")),
@@ -482,7 +421,6 @@ impl DahuaHttp {
         }
     }
 
-    /// [`call`](Self::call), with the reply read as names and values.
     fn values(
         &mut self,
         object: &str,
@@ -497,19 +435,16 @@ impl DahuaHttp {
         }
     }
 
-    /// One `GET /cgi-bin/<query>` with the login, returning the reply's body. Public for the
-    /// owner's read-only check of a real camera; the app uses the calls above.
+    /// One `GET /cgi-bin/<query>` with the login; the reply's body.
     pub fn get(&mut self, query: &str) -> Result<String> {
         self.request("GET", &format!("/cgi-bin/{query}"), None)
     }
 
-    /// One `POST /dev-api/<path>` with `fields` inside the XML body's root, and the login,
-    /// returning the reply's body. Public for the owner's read-only check of a real camera.
+    /// One `POST /dev-api/<path>` with `fields` in the XML root and the login; the reply's body.
     pub fn post(&mut self, path: &str, fields: &str) -> Result<String> {
         self.request("POST", &format!("/dev-api/{path}"), Some(&xml_body(fields)))
     }
 
-    /// One request with the login: `method` on `uri`, with `body` when it has one.
     fn request(&mut self, method: &str, uri: &str, body: Option<&str>) -> Result<String> {
         if let Some(refused) = &self.refused {
             return Err(refused.clone());
@@ -537,13 +472,11 @@ impl DahuaHttp {
         }
     }
 
-    /// Starts answering `challenge`, counting from 1.
     fn learn(&mut self, challenge: Challenge) {
         self.challenge = Some(challenge);
         self.count = 0;
     }
 
-    /// Remembers that the camera refused the login, which nothing tries again.
     fn refuse(&mut self) -> DahuaHttpError {
         let refused = DahuaHttpError::LoginRejected(
             "HTTP 401: the camera turned the username and password down".into(),
@@ -552,7 +485,6 @@ impl DahuaHttp {
         refused
     }
 
-    /// Sends `method` on `uri` with the answer to the current challenge.
     fn send_logged_in(&mut self, method: &str, uri: &str, body: Option<&str>) -> Result<Reply> {
         let Some(challenge) = &self.challenge else {
             return Err(DahuaHttpError::Protocol(
@@ -572,8 +504,6 @@ impl DahuaHttp {
         self.send(method, uri, body, Some(&header))
     }
 
-    /// One `method` (`GET` or `POST`) on `uri`, with `body` and `authorization` when given: the
-    /// body of a reply that worked, the challenge of a 401, or why it failed.
     fn send(
         &self,
         method: &str,
@@ -638,8 +568,6 @@ impl DahuaHttp {
     }
 }
 
-/// The `Authorization` header answering `challenge` for `method` on `uri`, the `count`th request
-/// on its nonce, with `cnonce` the client's own nonce.
 fn authorization(
     user: &str,
     password: &str,
@@ -677,7 +605,6 @@ fn authorization(
     header
 }
 
-/// `text` as the inside of a quoted string.
 fn quoted(text: &str) -> String {
     text.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -689,7 +616,6 @@ fn md5_hex(text: &str) -> String {
         .collect()
 }
 
-/// The digest challenge with MD5 among a 401's `WWW-Authenticate` headers.
 fn read_challenge(headers: &[String]) -> Result<Challenge> {
     let digests: Vec<_> = headers
         .iter()
@@ -736,7 +662,6 @@ fn read_challenge(headers: &[String]) -> Result<Challenge> {
         })
 }
 
-/// The `name=value` and `name="value"` pairs of a challenge, in order.
 fn read_parameters(text: &str) -> Vec<(String, String)> {
     let mut parameters = Vec::new();
     let mut rest = text.trim();
@@ -751,7 +676,6 @@ fn read_parameters(text: &str) -> Vec<(String, String)> {
             .to_ascii_lowercase();
         let after = after.trim_start();
         let (value, left) = if let Some(inside) = after.strip_prefix('"') {
-            // A quoted value ends at the first quote no backslash escapes.
             let mut value = String::new();
             let mut chars = inside.char_indices();
             let mut end = inside.len();
@@ -787,17 +711,14 @@ fn parameter<'a>(parameters: &'a [(String, String)], name: &str) -> Option<&'a s
         .map(|(_, value)| value.as_str())
 }
 
-/// An XML request's body: `fields` inside the root.
 fn xml_body(fields: &str) -> String {
     format!("{XML_HEAD}<root>{fields}</root>")
 }
 
-/// An XML field holding a number.
 fn xml_number(name: &str, value: impl fmt::Display) -> String {
     format!(r#"<{name} type="number">{value}</{name}>"#)
 }
 
-/// An XML field holding text.
 fn xml_text(name: &str, value: &str) -> String {
     format!(r#"<{name} type="string">{value}</{name}>"#)
 }
@@ -810,8 +731,7 @@ pub fn read_values(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// An XML reply as a CGI reply would say it: each element that holds a value, by the names of
-/// the elements around it from below the root (`caps.Pan`), with its text.
+/// An XML reply's values, each named by its path below the root (`caps.Pan`).
 pub fn read_xml_values(text: &str) -> Result<Vec<(String, String)>> {
     let document = parse_xml(text)?;
     let mut values = Vec::new();
@@ -842,18 +762,15 @@ fn parse_xml(text: &str) -> Result<roxmltree::Document<'_>> {
     })
 }
 
-/// Where an XML reply starts: past a byte order mark and blank lines, which a parser refuses
-/// before the declaration.
+/// Past a byte order mark and blank lines, which the parser refuses before the declaration.
 fn xml_start(text: &str) -> &str {
     text.trim_start_matches('\u{feff}').trim_start()
 }
 
-/// The last part of a value's name: `Pan` of `caps.Pan`.
 fn last(key: &str) -> &str {
     key.rsplit('.').next().unwrap_or(key)
 }
 
-/// The value named `name`, by the last part of its name, whatever its case.
 fn find<'a>(values: &'a [(String, String)], name: &str) -> Option<&'a str> {
     values
         .iter()
@@ -861,13 +778,10 @@ fn find<'a>(values: &'a [(String, String)], name: &str) -> Option<&'a str> {
         .map(|(_, value)| value.as_str())
 }
 
-/// A row's indexes as a CGI key writes them: `[0][0][1]`.
 fn indexes(row: &[usize]) -> String {
     row.iter().map(|index| format!("[{index}]")).collect()
 }
 
-/// The `Lighting_V2[channel][profile][light]` rows of a CGI reply that are white lights with a
-/// brightness, for `channel` (from 0), in the order the camera listed them.
 fn cgi_white_lights(values: &[(String, String)], channel: usize) -> Vec<Vec<usize>> {
     let row_of = |key: &str| {
         let mut rest = key.strip_prefix("table.Lighting_V2")?;
@@ -904,7 +818,6 @@ fn cgi_white_lights(values: &[(String, String)], channel: usize) -> Vec<Vec<usiz
     rows
 }
 
-/// A CGI row's mode and brightness.
 fn cgi_row_fields(values: &[(String, String)], row: &[usize]) -> (Option<String>, Option<u8>) {
     let field = |name: &str| {
         let key = format!("table.Lighting_V2{}.{name}", indexes(row));
@@ -920,8 +833,7 @@ fn cgi_row_fields(values: &[(String, String)], row: &[usize]) -> (Option<String>
     (field("Mode"), brightness)
 }
 
-/// Every row of an XML `Lighting_V2` table (an element with a `LightType`), with its indexes
-/// under the table, in order.
+/// Every row of an XML `Lighting_V2` table (an element with a `LightType`), with its indexes.
 fn xml_rows<'a, 'input>(
     document: &'a roxmltree::Document<'input>,
 ) -> Vec<(Vec<usize>, roxmltree::Node<'a, 'input>)> {
@@ -958,7 +870,6 @@ fn xml_rows<'a, 'input>(
     rows
 }
 
-/// The child element `name` of `node`.
 fn child<'a, 'input>(
     node: roxmltree::Node<'a, 'input>,
     name: &str,
@@ -966,8 +877,6 @@ fn child<'a, 'input>(
     node.children().find(|field| field.has_tag_name(name))
 }
 
-/// The rows of an XML `Lighting_V2` table that are white lights with a brightness, for `channel`
-/// (from 0).
 fn xml_white_lights(text: &str, channel: usize) -> Result<Vec<Vec<usize>>> {
     let document = parse_xml(text)?;
     Ok(xml_rows(&document)
@@ -984,7 +893,6 @@ fn xml_white_lights(text: &str, channel: usize) -> Result<Vec<Vec<usize>>> {
         .collect())
 }
 
-/// The mode and brightness of each of `rows` in an XML `Lighting_V2` table.
 fn xml_row_fields(text: &str, rows: &[Vec<usize>]) -> Result<Vec<(Option<String>, Option<u8>)>> {
     let document = parse_xml(text)?;
     let all = xml_rows(&document);
@@ -1005,8 +913,6 @@ fn xml_row_fields(text: &str, rows: &[Vec<usize>]) -> Result<Vec<(Option<String>
         .collect())
 }
 
-/// An XML `Lighting_V2` table with the `Mode` of each of `rows` set to `mode`, the rest as the
-/// camera sent it.
 fn xml_with_modes(text: &str, rows: &[Vec<usize>], mode: &str) -> Result<String> {
     let start = xml_start(text);
     let document = parse_xml(start)?;
@@ -1024,7 +930,6 @@ fn xml_with_modes(text: &str, rows: &[Vec<usize>], mode: &str) -> Result<String>
                 Some(value) => changes.push((value.range(), mode.to_string())),
                 None => changes.push((field.range(), xml_text("Mode", mode))),
             },
-            // No mode yet: one goes before the row's end.
             None => {
                 let range = node.range();
                 let end = start[range.clone()]
@@ -1103,8 +1008,6 @@ mod tests {
 
     #[test]
     fn a_light_is_a_white_light_row_with_a_brightness() {
-        // An ASH26 floodlight's, as its owner posted it: [0][2][1] has no brightness and switches
-        // nothing.
         let values = read_values(
             "table.Lighting_V2[0][0][0].LightType=InfraredLight\r\n\
              table.Lighting_V2[0][0][0].MiddleLight[0].Light=50\r\n\
@@ -1126,8 +1029,6 @@ mod tests {
         );
     }
 
-    /// The AMLINK specification's own shape: the table, its channels, their profiles, their
-    /// lights, each array an element repeated with the table's name.
     const XML_TABLE: &str = r#"
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <root>

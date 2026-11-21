@@ -1,9 +1,4 @@
-//! The app's Rust code: what `App.tsx` imports from `mdviewer/native`. Their TypeScript
-//! declarations are generated from these types into `.nsh/types/mdviewer/native.d.ts`.
-//!
-//! The bridge (`bridge.rs`) is thin: the projects, the files, the outline and the search are
-//! `mdviewer_core`'s, and the themes, the window's place, the folder picker and Explorer are the
-//! suite's (`dp_ui`).
+//! The app's Rust code: the `mdviewer/native` modules, over `mdviewer_core` and `dp_ui`.
 
 mod bridge;
 mod dropped;

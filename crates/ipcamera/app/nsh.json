@@ -1,6 +1,7 @@
 {
   "name": "ipcamera",
   "id": "com.driftingprompts.ipcamera",
+  "nsh": "=0.6.1",
   "version": "1.0.0",
   "build": 1,
   "icon": "icon.png",

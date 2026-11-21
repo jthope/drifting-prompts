@@ -1,12 +1,7 @@
 import { colorScheme, Image } from "nsh";
 import { LOGOS, type Product } from "./logos";
 
-/**
- * `product`'s logo, 32 points by default: the mark in one color, dark on light
- * and white on dark, whatever the theme. Its markup is in the code
- * (`logos.ts`), so it ships inside the bundle. It appears at once rather than
- * fading in like a loaded picture.
- */
+/** `product`'s logo, dark on light and white on dark whatever the theme; its markup ships in the bundle. */
 export function Logo(props: { product: Product; size?: number }) {
   const size = () => props.size ?? 32;
   const logo = () => LOGOS[props.product];

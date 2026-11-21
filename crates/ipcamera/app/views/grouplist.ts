@@ -1,21 +1,10 @@
-// What the Groups page lists: every group with its cameras and what they are
-// doing, narrowed by the search and the filters, in the chosen order, and which
-// of them are selected. The order, the selection and the pages are the
-// table's (`listing.ts`), as the Cameras page's are. Like `roster.ts`'s, these
-// are module-level signals, so the page's header, its table, its selection bar
-// and the actions share them, and coming back to the page finds them as they
-// were left.
 import { computed, signal } from "nsh";
 import type { CameraState, GroupInfo, StatusTone } from "ipcamera/native";
 import { countLabel } from "./library";
 import { byText, listingOf } from "./listing";
 import { groups, states } from "./model";
 
-/**
- * A group as a row of the table: the group itself, its cameras in its order
- * (only those that exist), and how many of them are connected, have a problem,
- * record, and wait for a password.
- */
+/** A group as a row of the table: its cameras that exist, in its order, and how many are connected, in trouble, recording or waiting for a password. */
 export type GroupRow = {
   id: string;
   name: string;
@@ -59,8 +48,6 @@ export function statusOf(row: GroupRow): { text: string; tone: StatusTone } {
   if (row.problems > 0) return { text: row.problems === 1 ? "1 has a problem" : `${countLabel(row.problems)} have a problem`, tone: "warn" };
   return { text: `${countLabel(row.connected)} of ${countLabel(count)} connected`, tone: row.connected > 0 ? "ok" : "normal" };
 }
-
-// The filters.
 
 export type StatusFilter = "all" | "problem" | "password" | "recording" | "empty";
 
@@ -107,7 +94,6 @@ function matchesStatus(row: GroupRow, status: StatusFilter): boolean {
   }
 }
 
-/** The name of camera `id` for the filter, `""` once it is gone. */
 const cameraName = (id: string) => states().find((camera) => camera.id === id)?.name ?? "";
 
 /** What the filters keep, for the header: "With Porch, Has a problem", or `""` for nothing left out. */
@@ -121,7 +107,6 @@ export const summary = computed(() => {
   return parts.filter((part) => part !== "").join(", ");
 });
 
-/** The rows the search and the filters keep, in the order the sidebar lists the groups. */
 const kept = computed((): GroupRow[] => {
   const words = query().toLowerCase().split(/\s+/).filter((word) => word !== "");
   const camera = cameraFilter();
@@ -129,14 +114,10 @@ const kept = computed((): GroupRow[] => {
   return rows().filter((row) => matchesQuery(row, words) && (camera === null || row.group.cameras.includes(camera)) && matchesStatus(row, status));
 });
 
-// The order.
-
 export type SortKey = "name" | "cameras" | "members" | "status";
 
-/** How much of a group is connected, from 0 to 1. */
 const share = (row: GroupRow) => (row.cameras.length === 0 ? 0 : row.connected / row.cameras.length);
 
-/** How two rows compare by `key`, before the direction is applied. */
 function compare(a: GroupRow, b: GroupRow, key: SortKey): number {
   switch (key) {
     case "name":
@@ -146,15 +127,13 @@ function compare(a: GroupRow, b: GroupRow, key: SortKey): number {
     case "members":
       return byText(membersOf(a), membersOf(b));
     case "status":
-      // The groups with problems first, the most first: they are the ones to look at. Then by how much is connected.
       return b.problems - a.problems || share(a) - share(b);
   }
 }
 
-/** An empty group has no cameras to sort by and no status: it goes last either way. */
 const blank = (row: GroupRow, key: SortKey) => (key === "members" || key === "status") && row.cameras.length === 0;
 
-/** The table's order, selection and pages: `shown` is the rows the search and filters keep, in the chosen order. */
+/** The table's order, selection and pages. */
 export const listing = listingOf({ kept, compare, blank, filters: () => [query(), cameraFilter(), statusFilter()] });
 
 export const {
@@ -176,8 +155,6 @@ export const {
   onPage,
   pageSpan,
 } = listing;
-
-// The header's stats.
 
 /** How many cameras are in at least one group, and how many in none. */
 export const grouping = computed(() => {

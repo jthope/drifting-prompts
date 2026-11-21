@@ -1,10 +1,4 @@
-//! The library over HTTP, as the web build reads and changes it: the cameras it lists, the copy it
-//! hands out without passwords, changes made and refused in the app's words, a camera with no
-//! saved password left alone until someone presses Connect, PTZ to a camera without it, and the
-//! folders the files go in, with their drives.
-//!
-//! Each test serves a library of its own from a temporary folder, on a free port; no camera is
-//! reached.
+//! The library over HTTP, as the web build reads and changes it; no test reaches a camera.
 
 #[allow(dead_code)]
 #[path = "support/server.rs"]
@@ -42,7 +36,7 @@ fn an_unknown_camera_is_not_found() {
 
 #[test]
 fn settings_that_reach_no_camera_say_why_without_trying() {
-    // No username: the session refuses to start, so nothing is sent anywhere.
+    // No username, so the session never starts and nothing is sent anywhere.
     let unnamed = CameraConfig {
         user: String::new(),
         ..porch()
@@ -188,7 +182,6 @@ fn a_camera_with_no_password_is_never_tried() {
         r#"{ "pan": 1, "tilt": 0, "zoom": 0, "speed": 0.5 }"#,
     );
     assert_eq!((moved.status, moved.body.as_str()), (400, why));
-    // A viewer is told the same, and no session starts for it.
     let mut socket = watch(port, id);
     let status = next_json(&mut socket);
     assert_eq!(
@@ -252,8 +245,6 @@ fn pressing_connect_lets_a_camera_with_no_password_be_tried() {
     assert_eq!(gone.status, 404);
 }
 
-/// PTZ to a camera that offers none (nothing listens on its DVRIP port): the move is taken, and
-/// the status says what PTZ found.
 #[test]
 fn ptz_to_a_camera_without_it_says_so() {
     let (server, ids) = serve(vec![CameraConfig {

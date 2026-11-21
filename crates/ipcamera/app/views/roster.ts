@@ -1,10 +1,3 @@
-// What the Cameras page lists: every camera with what it is set to, narrowed by
-// the search and the filters, in the chosen order, and which of them are
-// selected. Like `library.ts`'s, these are module-level signals, so the page's
-// header, its table, its selection bar and the editor for several cameras share
-// them, and coming back to the page finds them as they were left. The order,
-// the selection and the pages are the table's (`listing.ts`), which the Groups
-// page's is too.
 import { computed, signal, untracked } from "nsh";
 import { type CameraChanges, type CameraForm, Cameras, type CameraState } from "ipcamera/native";
 import { byText, copyName, listingOf } from "./listing";
@@ -15,23 +8,18 @@ export { PAGE_SIZES, type Pick, pickOf } from "./listing";
 /** A camera's saved settings, as the table reads them: the form, with only whether it has a password. */
 export type Saved = Omit<CameraForm, "password" | "passwordNote"> & { id: string; hasPassword: boolean };
 
-/** A camera as a row of the table: its settings, what it is doing, and the names of its groups in the sidebar's order. */
+/** A camera as a row of the table: its settings, its state and its groups' names. */
 export type CameraRow = Saved & { state: CameraState; groups: string[] };
 
 /** Every camera's saved settings, as `reload` last read them. */
 export const saved = signal<Saved[]>([]);
 
-/**
- * `form` as the table keeps it: the password stays in Rust, and only whether
- * there is one comes here. On the web the form never holds a saved password,
- * and its note says one is kept instead.
- */
+/** `form` without its password, which stays in Rust; on the web a kept password shows only as `passwordNote`. */
 export function savedOf(id: string, form: CameraForm): Saved {
   const { password, passwordNote, ...rest } = form;
   return { ...rest, id, hasPassword: password !== "" || passwordNote !== "" };
 }
 
-/** Camera `id`'s settings as Rust has them now; none for a camera deleted since its id was read. */
 function read(id: string): Saved | undefined {
   try {
     return savedOf(id, Cameras.form(id));
@@ -40,7 +28,7 @@ function read(id: string): Saved | undefined {
   }
 }
 
-/** Reads every camera's settings again: when the page opens, and after any saved change. */
+/** Reads every camera's settings again. */
 export function reload() {
   saved.set(untracked(states).flatMap((camera) => read(camera.id) ?? []));
 }
@@ -53,12 +41,9 @@ export const rows = computed((): CameraRow[] => {
     // A camera added a moment ago is read on its own until the next `reload`, so it is never missing.
     const found = settings.get(state.id) ?? read(state.id);
     if (!found) return [];
-    // The name the camera goes by now, which the states follow a moment after a save.
     return [{ ...found, name: state.name, state, groups: all.filter((group) => group.cameras.includes(state.id)).map((group) => group.name) }];
   });
 });
-
-// The filters.
 
 export type StatusFilter = "all" | "password" | "problem" | "connected" | "recording";
 export type StreamFilter = "all" | "main" | "sub";
@@ -127,11 +112,8 @@ function matchesGroup(row: CameraRow, group: string | null): boolean {
   return all.some((each) => each.id === group && each.cameras.includes(row.id));
 }
 
-// The order.
-
 export type SortKey = "name" | "address" | "stream" | "login" | "groups";
 
-/** How two rows compare by `key`, before the direction is applied. */
 function compare(a: CameraRow, b: CameraRow, key: SortKey): number {
   switch (key) {
     case "name":
@@ -141,17 +123,14 @@ function compare(a: CameraRow, b: CameraRow, key: SortKey): number {
     case "stream":
       return Number(a.channel || 1) - Number(b.channel || 1) || a.subStream - b.subStream || Number(b.useTcp) - Number(a.useTcp);
     case "login":
-      // The cameras still waiting for a password first: they are the ones to fix.
       return Number(a.hasPassword) - Number(b.hasPassword) || byText(a.user, b.user);
     case "groups":
       return byText(a.groups.join(", "), b.groups.join(", "));
   }
 }
 
-/** Blanks go last either way, so they are found in one place. */
 const blank = (row: CameraRow, key: SortKey) => (key === "address" && row.host === "") || (key === "groups" && row.groups.length === 0);
 
-/** The rows the search and the filters keep, in the order the cameras were added. */
 const kept = computed((): CameraRow[] => {
   const words = query().toLowerCase().split(/\s+/).filter((word) => word !== "");
   const group = groupFilter();
@@ -174,7 +153,7 @@ export const summary = computed(() => {
   return parts.filter((part) => part !== "").join(", ");
 });
 
-/** The table's order, selection and pages: `shown` is the rows the search and filters keep, in the chosen order. */
+/** The table's order, selection and pages. */
 export const listing = listingOf({ kept, compare, blank, filters: () => [query(), groupFilter(), statusFilter(), streamFilter()] });
 
 export const {
@@ -197,21 +176,12 @@ export const {
   pageSpan,
 } = listing;
 
-// Copies.
-
 /** What a copy needs to know of the other cameras: the names taken, and the channels each address uses. */
 export type Taken = { name: string; host: string; channel: string };
 
-/** `host` as two cameras on one recorder share it, whatever its case or the spaces around it. */
 const sameHost = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/**
- * A copy of `form`, as Duplicate makes one: the same address, login, stream
- * and ports, on the next channel the address doesn't use yet, so copying one
- * of a recorder's channels makes the next; and named after it with "copy",
- * numbered when that name is taken ("Garage copy", "Garage copy 2"). `taken`
- * is every camera there is, the original included.
- */
+/** A copy of `form` on the next channel its address doesn't use, named with "copy"; `taken` is every camera, the original included. */
 export function copyOf<F extends Taken>(form: F, taken: Taken[]): F {
   const used = new Set(taken.filter((each) => sameHost(each.host, form.host)).map((each) => Number(each.channel.trim() || 1)));
   let channel = Number(form.channel.trim() || 1) + 1;
@@ -220,9 +190,7 @@ export function copyOf<F extends Taken>(form: F, taken: Taken[]): F {
   return { ...form, name: copyName(form.name, taken.map((each) => each.name)), channel: String(channel) };
 }
 
-// Several cameras at once.
-
-/** The settings several cameras can be given at once (`CameraChanges`): all but the name and the channel, each camera's own, and the password, which no one reads back. */
+/** The settings several cameras can be given at once: not the name or the channel, nor the password, which no one reads back. */
 export type SharedField = Exclude<keyof CameraChanges, "password">;
 
 export const SHARED_FIELDS: SharedField[] = ["host", "user", "rtspPort", "subStream", "rtspPath", "useTcp", "autoReconnect", "onvifPort", "dvripPort", "onvifPath"];
@@ -240,11 +208,7 @@ export function commonOf(list: Saved[]): Common {
   return common as Common;
 }
 
-/**
- * What to save: `edits` less what every camera already has (`common`), and
- * less an empty password, which keeps each camera's own. Nothing left means
- * nothing to save.
- */
+/** `edits` less what every camera already has, and less an empty password, which keeps each camera's own. */
 export function changesToSave(edits: CameraChanges, common: Common): CameraChanges {
   const changes: Record<string, unknown> = {};
   for (const [field, value] of Object.entries(edits)) {

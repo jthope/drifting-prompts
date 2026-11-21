@@ -1,23 +1,19 @@
-//! Showing the app's files in Explorer: a snapshot or a recording selected in its folder, or a
-//! folder opened.
-//!
-//! Which file a name means is `ipcamera_storage`'s rule ([`FileKind::locate`]), the same the server
-//! keeps; opening Explorer is the desktop's alone, and the suite's (`dp_ui::explorer`).
+//! Showing the app's files and folders in Explorer.
 
 use std::{fs, path::Path};
 
-use ipcamera_storage::saved_file::{FileKind, absolute};
+use ipcamera_storage::saved_file::FileKind;
 
 /// Opens Explorer on `folder` with the file of `kind` called `name` selected.
-pub fn reveal(kind: &FileKind, folder: &Path, name: &str) -> Result<(), String> {
+pub async fn reveal(kind: &FileKind, folder: &Path, name: &str) -> Result<(), String> {
     let path = kind
         .locate(folder, name)
         .map_err(|error| error.to_string())?;
-    dp_ui::explorer::show_file(&path)
+    dp_ui::folders::show_file(&path).await
 }
 
-/// Opens Explorer on `folder`, making it first if nothing has been saved there yet.
-pub fn open_folder(folder: &Path) -> Result<(), String> {
+/// Opens Explorer on `folder`, making it first if it is missing.
+pub async fn open_folder(folder: &Path) -> Result<(), String> {
     fs::create_dir_all(folder).map_err(|error| format!("{}: {error}", folder.display()))?;
-    dp_ui::explorer::open_folder(&absolute(folder))
+    dp_ui::folders::open(folder).await
 }

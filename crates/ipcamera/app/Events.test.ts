@@ -1,8 +1,3 @@
-// The events page's menus, labels and preview, on events made up here.
-//
-// As with `Snapshots.test.ts`, `App.test.tsx` can only open the page empty: the
-// test runner reaches no camera, so its log stays empty. These read
-// `views/eventlog.ts` directly; `crates/ipcamera/core/src/event_log.rs` tests the log.
 import { expect, test } from "nsh/test";
 import type { VideoInfo } from "ipcamera/native";
 import { current, eventLibrary, eventMenu, type EventItem, events, eventsLabel, lastedLabel, previewed, savedLabel, stepPreview, tileMenu, viewing } from "./views/eventlog";
@@ -12,7 +7,6 @@ import { page, states } from "./views/model";
 import { playing, videoLibrary, videos } from "./views/recordings";
 import { snapshotLibrary } from "./views/snapshots";
 
-/** The camera the throwaway settings start with. */
 const camera = () => states()[0].id;
 
 function event(id: string, startedAt: number, ongoing = false, saved: Partial<EventItem> = {}): EventItem {
@@ -36,7 +30,6 @@ function event(id: string, startedAt: number, ongoing = false, saved: Partial<Ev
   };
 }
 
-/** What an event that saved a picture and two videos holds. */
 const SAVED: Partial<EventItem> = {
   snapshot: "snapshot-1-cam.person.png",
   picture: "C:\\snapshots\\snapshot-1-cam.person.png",
@@ -51,7 +44,6 @@ test("the page opens as a table, a row each under a heading for each day, which 
   // At noon, so both fall on today whenever the test runs.
   const noon = new Date().setHours(12, 0, 0, 0);
   events.set([event("a", noon), event("b", noon - 60_000)]);
-  // The snapshots and videos open on their medium pictures; the events, as a table.
   expect(eventLibrary.size()).toBe("list");
   expect(eventLibrary.grouping()).toBe("day");
 
@@ -74,15 +66,12 @@ test("the preview shows the row picked, else the first, and Up and Down step thr
   current.set("b");
   expect(previewed()?.name).toBe("b");
   expect(stepPreview(1)).toBe("c");
-  // At either end it stays.
   expect(stepPreview(1)).toBe(null);
   expect(current()).toBe("c");
 
-  // Today folded away, its rows leave the steps; the preview keeps yesterday's.
   const today = eventLibrary.sections()[0].key;
   eventLibrary.toggleCollapsed(today);
   expect(stepPreview(-1)).toBe(null);
-  // One picked that no longer shows leaves it to the first that does.
   current.set("a");
   expect(previewed()?.name).toBe("c");
   eventLibrary.toggleCollapsed(today);
@@ -105,7 +94,6 @@ test("how long the camera saw an event, in seconds, minutes and hours", () => {
 test("an event's videos are found in the videos folder, and it opens its picture, else its videos", () => {
   const clip = (name: string): VideoInfo => ({ name, path: `C:\\videos\\${name}`, thumbnail: "", camera: camera(), tags: ["person"], event: "a", startedAt: 1, seconds: 30, bytes: 1, recording: false });
   videos.set([clip("video-60-cam.person.mp4"), clip("video-1-cam.person.mp4")]);
-  // In the event's order, oldest first; one the folder doesn't list yet is left out.
   const seen = event("a", Date.now(), false, { ...SAVED, videos: [...(SAVED.videos ?? []), "video-90-cam.person.mp4"] });
   expect(eventVideos(seen).map((video) => video.name)).toEqual(["video-1-cam.person.mp4", "video-60-cam.person.mp4"]);
 
@@ -113,7 +101,6 @@ test("an event's videos are found in the videos folder, and it opens its picture
   expect(viewing()).toBe("a");
   viewing.set(null);
 
-  // With no picture, its videos play on the videos page, narrowed to them.
   openEvent(event("a", Date.now(), false, { videos: ["video-1-cam.person.mp4"] }));
   expect(page()).toEqual({ kind: "videos" });
   expect(videoLibrary.eventFilter()).toBe("a");
@@ -134,7 +121,6 @@ test("an event's menu opens its picture first, then what it saved, then its came
   expect(viewing()).toBe("a");
   viewing.set(null);
 
-  // One that saved nothing has nothing to open or play.
   const bare = event("b", Date.now());
   const plain = eventMenu(bare, eventLinks(bare)).filter(Boolean);
   expect(plain[0]).toMatchObject({ label: "Open picture", disabled: true });

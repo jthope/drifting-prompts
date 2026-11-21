@@ -1,14 +1,6 @@
-//! How large each of a camera's RTSP streams is, as the camera says when asked, for Detect.
+//! How large each of a camera's RTSP streams is, from its answer to DESCRIBE, for Detect.
 //!
-//! A camera says how large a stream's pictures are in the SDP it answers DESCRIBE with: the H.264
-//! or H.265 parameter sets in its `sprop-parameter-sets`, which retina reads. Detect asks here for
-//! the streams nothing else sized: those of a camera whose ONVIF refused the login or that has
-//! none, and those ONVIF or the camera's API listed without a size. The app's Auto picks a stream
-//! by the size a tile is drawn at, so it picks only among streams whose size it knows.
-//!
-//! Nothing plays: DESCRIBE alone, one stream at a time, each with the camera's saved login. The
-//! first refused login ends it, so a wrong password costs one try, and a camera with no password
-//! is never asked.
+//! The first refused login ends the asking, so a wrong password costs one try.
 
 use std::time::Duration;
 
@@ -21,24 +13,17 @@ use url::Url;
 
 use crate::pipeline::{USER_AGENT, credentials};
 
-/// How long one stream's DESCRIBE may take before it is left unsized.
 const ASK_WAIT: Duration = Duration::from_secs(5);
 
-/// What asking one stream came to.
 enum Answer {
-    /// Its pictures' size and codec, as a stream's detail says them: `2560×1440, H265`.
     Sized(String),
     /// The camera refused the login: ask it nothing more.
     Refused,
-    /// No size: the stream isn't there, sends neither codec, or didn't say.
     Unsized,
 }
 
-/// The RTSP streams of `camera` to size, each a path and a name: its own, then for a camera of a
-/// known brand that listed no RTSP stream its main and sub at the brand's paths, named `main` and
-/// `sub` (where it listed some, ONVIF's or its API's are those streams under other paths), then
-/// each it listed over RTSP without a size, under its own name. Each path once, and none `listed`
-/// already sizes. Its own takes the brand's name where it is at one of those paths, else none.
+/// The brand's main and sub only where the camera listed no RTSP stream: one that did lists them
+/// under other paths.
 fn unsized_paths(camera: &CameraConfig, listed: &[CameraStream]) -> Vec<(String, String)> {
     let is_rtsp = |path: &str| matches!(StreamPath::of(path), StreamPath::Rtsp(_));
     let brand_path = |stream| rtsp_url::path_for(camera.brand, camera.channel, stream);
@@ -88,15 +73,7 @@ fn unsized_paths(camera: &CameraConfig, listed: &[CameraStream]) -> Vec<(String,
     paths
 }
 
-/// Each of `camera`'s RTSP streams that `listed` doesn't size ([`unsized_paths`]) and the camera
-/// says the size of, its size and codec in its detail (`2560×1440, H265`), for
-/// `CameraStream::merge`. Its own stream is asked first, and the first refused login ends it.
-/// Empty for a camera with no password, and for one that listed nothing and has one stream to
-/// size: listing it would only take the typed path's field from its dialog, and give Auto
-/// nothing to pick between.
-///
-/// It blocks for up to a few seconds a stream, on a runtime of its own: call it off the main
-/// thread and off any async runtime's threads (`spawn_blocking`).
+/// The streams `listed` doesn't size that the camera sizes; blocks, so never on an async runtime.
 pub fn sized_streams(camera: &CameraConfig, listed: &[CameraStream]) -> Vec<CameraStream> {
     if camera.password.is_empty() {
         return Vec::new();
@@ -125,6 +102,7 @@ pub fn sized_streams(camera: &CameraConfig, listed: &[CameraStream]) -> Vec<Came
                 Answer::Unsized => {}
             }
         }
+        // A lone stream would give Auto nothing to pick between.
         if listed.is_empty() && sized.len() < 2 {
             sized.clear();
         }
@@ -132,7 +110,6 @@ pub fn sized_streams(camera: &CameraConfig, listed: &[CameraStream]) -> Vec<Came
     })
 }
 
-/// Asks the stream at `url` what it sends, with `camera`'s login.
 async fn ask(url: &str, camera: &CameraConfig) -> Answer {
     let Ok(parsed) = Url::parse(url) else {
         return Answer::Unsized;
@@ -187,7 +164,6 @@ mod tests {
                 path("/cam/realmonitor?channel=1&subtype=1", "sub")
             ]
         );
-        // Another brand's paths are anybody's guess: its own alone.
         let mut other = CameraConfig::for_brand(Brand::Other);
         other.rtsp_path_override = "/live1".into();
         assert_eq!(unsized_paths(&other, &[]), [path("/live1", "")]);
@@ -205,13 +181,11 @@ mod tests {
             third,
             listed("flv:channel0_autotrack_sub.bcs", ""),
         ];
-        // Not the brand's main and sub, which the listed ones are; only the one listed unsized.
         assert_eq!(
             unsized_paths(&camera, &streams),
             [("/onvif/profile3".to_string(), "Profile 3".to_string())]
         );
 
-        // A camera on an FLV stream has no RTSP stream of its own to ask.
         camera.rtsp_path_override = "flv:channel0_ext.bcs".into();
         assert!(unsized_paths(&camera, &streams[..2]).is_empty());
     }

@@ -1,32 +1,14 @@
-// What the title bar's search works out, kept apart from drawing so the tests
-// can read it: where each scope looks (`placesFor`), the drop-down's rows and
-// the files panel's tree of results, how many matches each file and each of
-// its headings holds, which match is next as F3 steps across the files, the
-// raw view's marks beside the lines that hold one, and the page with its
-// matches highlighted. The marks, the counts and F3 go by the open project's
-// matches alone (`inProject`); All projects lists the others' too, and going
-// to one opens its project.
-//
-// The search itself is Rust's (`Search.onChange`, `mdviewer_core::search`): it
-// finds what nsh's editor finds, so Raw highlights the same matches by itself
-// (the editor's `search`) and the counts are the editor's. The page's text has
-// no Markdown in it, so Rendered finds the query again in its own text, a piece
-// at a time, with JavaScript's regular expressions (`pagePattern`): a match
-// across formatting (half of it bold) isn't highlighted there, nor one in code,
-// where a link goes or the front matter, which show no text to highlight. The
-// match the reader is on is the page's too where it can be (`onThePage`): its
-// section, and which of that section's highlights it is.
 import type { CommandItem, EditorDecoration, TextViewDocument, TextViewInline, TreeItem } from "nsh/base";
 import type { FileMatches, HeadingInfo, MarkInfo, MarkKind, MatchInfo, SearchPlace, SearchQuery, SearchResults } from "mdviewer/native";
 import { folderOf, headingAt, mapLeaves } from "./document";
 
-/** A match, by its file (`docs/setup.md`) and its place among that file's matches, from 0. */
+/** A match, by its file and its index among that file's matches. */
 export type MatchPlace = { file: string; index: number };
 
-/** Where the search looks: the file in front, the files open in tabs, the open project, or every project. */
+/** Where the search looks. */
 export type SearchScope = "file" | "tabs" | "project" | "all";
 
-/** The scopes, as the drop-down offers them. */
+/** The scopes, with their titles. */
 export const SCOPES: { value: SearchScope; title: string }[] = [
   { value: "file", title: "This file" },
   { value: "tabs", title: "Open tabs" },
@@ -34,12 +16,7 @@ export const SCOPES: { value: SearchScope; title: string }[] = [
   { value: "all", title: "All projects" },
 ];
 
-/**
- * Where a search in `scope` looks: the file in front (`front`) or the files
- * in tabs (`tabs`) of the open project (`project`, its folder), all of its
- * files, or all of every project's (`projects`), the open one first. Nothing
- * while no project is open.
- */
+/** Where a search in `scope` looks, the open project first; nothing while none is open. */
 export function placesFor(scope: SearchScope, project: string, front: string, tabs: string[], projects: string[]): SearchPlace[] {
   if (project === "") return [];
   switch (scope) {
@@ -54,17 +31,17 @@ export function placesFor(scope: SearchScope, project: string, front: string, ta
   }
 }
 
-/** `results` with only the files of project `project` (its folder): what the marks, the counts and F3 go by. */
+/** `results` with only the files of project `project`. */
 export function inProject(results: SearchResults | null, project: string): SearchResults | null {
   if (!results || results.files.every((file) => file.project === project)) return results;
   const files = results.files.filter((file) => file.project === project);
   return { ...results, files, total: files.reduce((sum, file) => sum + file.matches.length, 0) };
 }
 
-/** What a row of the results is: a project's, a file's or a match's, by its id. */
+/** A row of the results: a project's, a file's or a match's. */
 export type ResultRow = { kind: "project"; project: string } | { kind: "file"; project: string; file: string } | { kind: "match"; project: string; file: string; index: number };
 
-/** A row's id in the results: its kind, project, file and match apart, by line breaks, which no path holds. */
+/** A row's id: its parts apart by line breaks, which no path holds. */
 export function rowId(row: ResultRow): string {
   switch (row.kind) {
     case "project":
@@ -76,7 +53,7 @@ export function rowId(row: ResultRow): string {
   }
 }
 
-/** The row of id `id` (`rowId`'s); `null` for any other id. */
+/** The row of a `rowId`; `null` for any other id. */
 export function rowOf(id: string): ResultRow | null {
   const [kind, project = "", file = "", index = ""] = id.split("\n");
   if (kind === "p") return { kind: "project", project };
@@ -85,14 +62,10 @@ export function rowOf(id: string): ResultRow | null {
   return null;
 }
 
-/** The most matches the drop-down lists: the files panel lists them all. */
+/** The most matches the drop-down lists. */
 export const MOST_LISTED = 500;
 
-/**
- * The drop-down's rows: each match, its excerpt its label, under a section for
- * its file (the file's row id, which `renderGroup` turns back into the file),
- * at most `most` of them.
- */
+/** The drop-down's rows: each match, grouped by its file's row id. */
 export function resultItems(results: SearchResults | null, most = MOST_LISTED): CommandItem[] {
   const items: CommandItem[] = [];
   for (const file of results?.files ?? []) {
@@ -105,11 +78,7 @@ export function resultItems(results: SearchResults | null, most = MOST_LISTED): 
   return items;
 }
 
-/**
- * The files panel's results as a tree: each file with matches, holding its
- * matches; under a row for each project when they come from several (All
- * projects), its name from `names` (by folder).
- */
+/** The results as a tree of files and their matches, under their projects when there are several. */
 export function resultTree(results: SearchResults | null, names: Map<string, string>): TreeItem[] {
   const files = results?.files ?? [];
   const fileItem = (file: FileMatches): TreeItem => ({
@@ -126,7 +95,7 @@ export function resultTree(results: SearchResults | null, names: Map<string, str
   }));
 }
 
-/** The match a results row's id names, with its file's folder in the project; `undefined` for another row. */
+/** The match a row's id names, with its file's folder; `undefined` for another row. */
 export function matchOf(results: SearchResults | null, id: string): { match: MatchInfo; folder: string } | undefined {
   const row = rowOf(id);
   if (row?.kind !== "match") return undefined;
@@ -135,7 +104,7 @@ export function matchOf(results: SearchResults | null, id: string): { match: Mat
   return match && file ? { match, folder: folderOf(file.path) } : undefined;
 }
 
-/** How many matches a results row holds: a project's, a file's; 0 for a match's. */
+/** How many matches a project's or a file's row holds; 0 for a match's. */
 export function rowCount(results: SearchResults | null, id: string): number {
   const row = rowOf(id);
   const files = results?.files ?? [];
@@ -144,7 +113,7 @@ export function rowCount(results: SearchResults | null, id: string): number {
   return 0;
 }
 
-/** The parts of each line a file's `matches` cover, as UTF-16 ranges, by line: a match across lines covers the rest of its first line, its middle lines whole, and the start of its last. */
+/** The UTF-16 ranges a file's `matches` cover on each line. */
 export function lineMarks(matches: MatchInfo[]): Map<number, [number, number][]> {
   const marks = new Map<number, [number, number][]>();
   for (const each of matches) {
@@ -159,7 +128,7 @@ export function lineMarks(matches: MatchInfo[]): Map<number, [number, number][]>
   return marks;
 }
 
-/** `text` cut at `ranges` (in order, apart): each part, and whether a match covers it. */
+/** `text` cut at `ranges`, which must be in order and apart. */
 export function lineParts(text: string, ranges: [number, number][] = []): { text: string; found: boolean }[] {
   const parts: { text: string; found: boolean }[] = [];
   let at = 0;
@@ -173,7 +142,7 @@ export function lineParts(text: string, ranges: [number, number][] = []): { text
   return parts;
 }
 
-/** The match of a file's `matches` nearest line `line`: the first on it, else the closest above or below; -1 for none. */
+/** The index of the match nearest `line`; -1 for none. */
 export function nearestMatch(matches: MatchInfo[], line: number): number {
   let best = -1;
   matches.forEach((each, index) => {
@@ -182,7 +151,7 @@ export function nearestMatch(matches: MatchInfo[], line: number): number {
   return best;
 }
 
-/** An excerpt cut at its match: what comes before, the match, and what comes after. */
+/** An excerpt cut into before, the match, and after. */
 export function excerptParts(match: MatchInfo): [string, string, string] {
   const text = match.excerpt;
   return [text.slice(0, match.excerptStart), text.slice(match.excerptStart, match.excerptEnd), text.slice(match.excerptEnd)];
@@ -198,7 +167,7 @@ export function countIn(results: SearchResults | null, path: string): number {
   return matchesIn(results, path).length;
 }
 
-/** Which of all the matches `at` is, from 1, the files in their order; 0 when it isn't one of them. */
+/** Which of all the matches `at` is, from 1; 0 when it isn't one of them. */
 export function ordinal(results: SearchResults, at: MatchPlace): number {
   let before = 0;
   for (const file of results.files) {
@@ -208,7 +177,7 @@ export function ordinal(results: SearchResults, at: MatchPlace): number {
   return 0;
 }
 
-/** What `results` found, said shortly: which match the reader is on (`at`) of how many, in how many files. */
+/** What `results` found, said shortly. */
 export function searchSummary(results: SearchResults, at: MatchPlace | null): string {
   if (results.total === 0) return "No matches";
   const total = `${results.total.toLocaleString()}${results.truncated ? "+" : ""}`;
@@ -217,14 +186,7 @@ export function searchSummary(results: SearchResults, at: MatchPlace | null): st
   return which > 0 ? `Match ${which.toLocaleString()} of ${total} · ${files}` : `${total} ${results.total === 1 ? "match" : "matches"} · ${files}`;
 }
 
-/**
- * The match a step from `at` takes the reader to (`by` 1 the next, -1 the one
- * before): through each file's matches, then on to the next file that has
- * any, around the ends. With no match to step from (none yet, or `at` is gone),
- * the first of the file in front, `front` (its last, going back); when it has
- * none, the first of the next file in `order` (the project's files, as the
- * panel lists them) that has any, or the last of the one before it, going back.
- */
+/** The match a step from `at` (or from `front` when `at` is gone) takes the reader to, across files. */
 export function stepFrom(results: SearchResults, at: MatchPlace | null, front: string, order: string[], by: 1 | -1): MatchPlace | null {
   const files = results.files;
   if (files.length === 0) return null;
@@ -243,7 +205,7 @@ export function stepFrom(results: SearchResults, at: MatchPlace | null, front: s
   return edge(nearest ?? (by > 0 ? files[0] : files[files.length - 1]));
 }
 
-/** How many of a file's `matches` fall under each of its `headings`, by heading; those before the first heading are under none. */
+/** How many of a file's `matches` fall under each of its `headings`. */
 export function headingCounts(matches: MatchInfo[], headings: HeadingInfo[]): number[] {
   const counts = headings.map(() => 0);
   for (const each of matches) {
@@ -253,13 +215,7 @@ export function headingCounts(matches: MatchInfo[], headings: HeadingInfo[]): nu
   return counts;
 }
 
-/**
- * The raw view's marks of a file's `matches`, one for each line that holds
- * one: a bar in the gutter beside it, and a tick in the middle of the overview
- * ruler along the editor's edge, which maps the whole file, in `color` (the
- * headings and the reader's section have its sides, `minimap.ts`). The editor
- * highlights the matches themselves (its `search`).
- */
+/** The raw view's gutter and ruler marks, one per line that holds a match. */
 export function matchMarks(matches: MatchInfo[], color: string): EditorDecoration[] {
   const lines = new Set<number>();
   const marks: EditorDecoration[] = [];
@@ -275,12 +231,7 @@ export function matchMarks(matches: MatchInfo[], color: string): EditorDecoratio
   return marks;
 }
 
-/**
- * The regular expression the page finds `query` with, read as the raw view's
- * search reads it: plain text as written, or a pattern; any case unless asked;
- * `^` and `$` at each line. `null` for no query, or a pattern JavaScript can't
- * read (most of Rust's syntax is JavaScript's too).
- */
+/** The page's regular expression for `query`, read as Raw's search reads it; `null` when JavaScript can't read it. */
 export function pagePattern(query: SearchQuery | null): RegExp | null {
   if (!query || query.text === "") return null;
   const source = query.regex ? query.text : query.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -294,7 +245,7 @@ export function pagePattern(query: SearchQuery | null): RegExp | null {
 const WORD_BEFORE = /[\p{L}\p{N}_]$/u;
 const WORD_AFTER = /^[\p{L}\p{N}_]/u;
 
-/** Whether `start` to `end` of `text` starts and ends at a word's edge, as the raw view's search has it: at each end, a character that isn't a word's on one side or the other. */
+/** Must agree with Raw's search: an end in punctuation is a word's edge by itself. */
 function isWholeWord(text: string, start: number, end: number): boolean {
   const before = WORD_BEFORE.test(text.slice(Math.max(0, start - 2), start));
   const first = WORD_AFTER.test(text.slice(start, end));
@@ -303,7 +254,7 @@ function isWholeWord(text: string, start: number, end: number): boolean {
   return (!before || !first) && (!after || !last);
 }
 
-/** Where `pattern` matches in `text`, as ranges of UTF-16 units; whole words only with `wholeWord`. An empty match is left out: there is nothing of it to highlight. */
+/** Where `pattern` matches in `text`, as UTF-16 ranges, empty matches left out. */
 export function matchRanges(text: string, pattern: RegExp, wholeWord: boolean): [number, number][] {
   const ranges: [number, number][] = [];
   for (const found of text.matchAll(pattern)) {
@@ -314,14 +265,10 @@ export function matchRanges(text: string, pattern: RegExp, wholeWord: boolean): 
   return ranges;
 }
 
-/** The colors of the page's highlights: every match's, and the one the reader is on. */
+/** The colors of the page's highlights. */
 export type HighlightColors = { match: string; current: string };
 
-/**
- * `document`, a section of the page, with each match of `pattern` in its text
- * highlighted, whole words only with `wholeWord`, and the `current`th (from 0,
- * in the page's order; -1 for none) in its own color; and how many there were.
- */
+/** `document` with each match highlighted, the `current`th in its own color, and the count. */
 export function highlighted(
   document: TextViewDocument,
   pattern: RegExp | null,
@@ -349,22 +296,15 @@ export function highlighted(
   return { document: marked, count };
 }
 
-/** The parts of a file the page shows no text of to highlight: code, the language a fence names, where a link goes, the front matter and Markdown's punctuation. */
+// The page highlights no text in these.
 const UNSEEN = new Set<MarkKind>(["codeBlock", "code", "language", "url", "frontMatter", "punctuation"]);
 
-/** Whether `inner` lies within `outer`, both as a raw view's ranges. */
 function inside(inner: MatchInfo, outer: MarkInfo): boolean {
   const before = (line: number, column: number, otherLine: number, otherColumn: number) => line < otherLine || (line === otherLine && column <= otherColumn);
   return before(outer.startLine, outer.startColumn, inner.startLine, inner.startColumn) && before(inner.endLine, inner.endColumn, outer.endLine, outer.endColumn);
 }
 
-/**
- * Where match `index` of a file's `matches` shows on the page: its section (0
- * before the first of `headings`, then one for each) and which of that
- * section's highlights it is, counting only matches the page can highlight
- * (none in the parts `marks`, the file's, say are code, an address, the front
- * matter or punctuation); `null` for a match the page can't highlight.
- */
+/** Match `index`'s section on the page and which of its highlights it is; `null` when the page can't highlight it. */
 export function onThePage(matches: MatchInfo[], index: number, headings: HeadingInfo[], marks: MarkInfo[]): { section: number; nth: number } | null {
   const target = matches[index];
   if (!target) return null;
@@ -379,13 +319,7 @@ export function onThePage(matches: MatchInfo[], index: number, headings: Heading
   return { section, nth };
 }
 
-/**
- * About where line `line` of a file is on its page, as a scroll offset: its
- * section's top (`tops`, by section, as the page measured them) and as far
- * into the section as the line is into the section's lines, up to where the
- * next one starts (`end`, the page's height, after the last). `lineCount` is
- * the file's. `undefined` until the section is measured.
- */
+/** About where `line` is on the page, by its share of its section (`TextView` doesn't say where its text is drawn). */
 export function pageOffset(line: number, headings: HeadingInfo[], lineCount: number, tops: (number | undefined)[], end: number): number | undefined {
   const section = headingAt(headings, line) + 1;
   const top = tops[section];

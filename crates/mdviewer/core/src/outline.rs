@@ -1,14 +1,5 @@
-//! What a Markdown file's outline is: its headings, each with the line it is on, and how many
-//! words the file has.
-//!
-//! The outline beside a file lists its headings; pressing one goes there. The raw view goes to
-//! the heading's line, and the rendered view to the heading's section, which it finds by counting:
-//! the page shows its top-level headings in the same order. So only top-level headings count, as
-//! the page's own do: one inside a quote or a list item is part of that, not a section of the
-//! file. Front matter (`---` first) is the file's data, not a heading under a rule.
-//!
-//! pulldown-cmark reads the Markdown (CommonMark, with GitHub's tables, task lists, footnotes and
-//! alerts, and formulas, as the page reads them), and its offsets give each heading's line.
+//! A Markdown file's outline (its headings and their lines) and word count. Only top-level headings
+//! count: the rendered view finds a heading's section by counting the page's own.
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
@@ -17,7 +8,7 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 pub struct Heading {
     /// Its level: 1 for `#`, up to 6.
     pub level: u8,
-    /// Its text, without the Markdown around it: `Install` for `## Install *now*`.
+    /// Its plain text.
     pub title: String,
     /// The line it starts on, from 0.
     pub line: u32,
@@ -48,10 +39,9 @@ pub fn summarize(text: &str) -> Summary {
         |offset: usize| (line_starts.partition_point(|&start| start <= offset) - 1) as u32;
 
     let mut summary = Summary::default();
-    // The blocks and spans open around the next event: a heading counts only with none open.
+    // A heading counts only with no block or span open around it.
     let mut open = 0usize;
     let mut heading: Option<Heading> = None;
-    // Inside a code block or the front matter, whose text is no words of the file's.
     let mut aside = false;
 
     for (event, range) in Parser::new_ext(text, options).into_offset_iter() {

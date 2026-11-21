@@ -1,9 +1,4 @@
-//! The DVRIP client against a fake camera on localhost.
-//!
-//! This is the closest thing the app has to a mock server: DVRIP is plain TCP behind a 32-byte
-//! header, so a listener can play the camera and the test can assert the exact frames the client
-//! sends — the login hash, the session on every call, the PTZ arguments. Nothing here needs a
-//! camera, a network beyond loopback, or a media stack.
+//! The DVRIP client against a fake camera on loopback, which checks the exact frames it sends.
 
 use std::{
     io::{Read, Write},
@@ -23,7 +18,6 @@ const CODE: u8 = 0xf6;
 const LOGIN_ACCEPTED: u16 = 0x0008;
 const SESSION: u32 = 0x1234_5678;
 
-/// What the fake camera saw, in the order it saw it.
 #[derive(Debug, Clone, PartialEq)]
 enum Seen {
     Challenge,
@@ -43,7 +37,6 @@ struct FakeCamera {
 }
 
 impl FakeCamera {
-    /// Starts a camera that answers the login with `login_code`.
     fn start(login_code: u16) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let port = listener.local_addr().expect("the bound address").port();
@@ -71,8 +64,7 @@ impl FakeCamera {
 
 impl Drop for FakeCamera {
     fn drop(&mut self) {
-        // The client has already closed the socket by the time this runs, so the worker is
-        // waiting on a read that has returned rather than on a connection that never came.
+        // The client has closed the socket by now, so the worker's read has returned.
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
@@ -121,9 +113,7 @@ fn serve(listener: TcpListener, seen: &Mutex<Vec<Seen>>, login_code: u16) {
                 );
 
                 let reply = match method.as_str() {
-                    // The object handle the PTZ code holds on to.
                     "ptz.factory.instance" => json!({ "id": id, "result": 42 }),
-                    // What `probe` reads: one flag per axis, and the directions it can reach.
                     "ptz.getCurrentProtocolCaps" => json!({
                         "id": id,
                         "result": true,
@@ -173,7 +163,6 @@ fn write_frame(stream: &mut TcpStream, id: Option<u64>, body: &[u8]) {
     stream.flush().ok();
 }
 
-/// The login reply carries no body: the verdict and the session live in the header.
 fn write_login(stream: &mut TcpStream, code: u16) {
     let mut header = [0u8; HEADER];
     header[0] = CODE;
@@ -209,7 +198,6 @@ fn logs_in_and_carries_the_session_on_every_call() {
     assert_eq!(seen[0], Seen::Challenge);
 
     match &seen[1] {
-        // The hash is `user&&<modern><legacy>`: two MD5 hex digests after the name.
         Seen::Login(hash) => {
             assert!(hash.starts_with("admin&&"), "unexpected login text: {hash}");
             assert_eq!(hash.len(), "admin&&".len() + 32 + 32);
@@ -251,7 +239,7 @@ fn logs_in_and_carries_the_session_on_every_call() {
 
 #[test]
 fn a_refused_login_is_one_attempt_and_a_typed_error() {
-    // 0x0100 is "wrong username or password", which reports the tries left before a lockout.
+    // "Wrong username or password", with the tries left.
     let camera = FakeCamera::start(0x0100);
     let Err(error) = DvripClient::connect("127.0.0.1", camera.port, "admin", "wrong") else {
         panic!("the fake camera refuses this login");

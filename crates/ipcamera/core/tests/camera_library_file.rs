@@ -1,10 +1,5 @@
-//! `data\settings\cameras.json` and `groups.json` as a user meets them: a first launch, a camera in
-//! two groups, a hand edit, and a change that needs several files when one of them can't be
-//! written: what is left is never worse than a stale id, and a retry or the next launch finishes
-//! it.
-//!
-//! These go through the crate's public API only, so they also check that the API is usable from
-//! outside the crate.
+//! The library's files as a user meets them, through the public API only. A change across files,
+//! one of them unwritable, leaves no worse than a stale id, which a retry or the next launch fixes.
 
 use std::{
     fs,
@@ -14,13 +9,11 @@ use std::{
 use ipcamera_core::{CameraConfig, CameraId, Library, config::ConfigStore};
 use serde_json::Value;
 
-/// The files a user finds in `data\settings`. Named here rather than taken from the crate, which
-/// keeps how it saves to itself: these tests check what lands on disk.
+/// Named here, not taken from the crate: these tests check what lands on disk.
 const CAMERAS_FILE: &str = "cameras.json";
 const GROUPS_FILE: &str = "groups.json";
 const VIEWS_FILE: &str = "views.json";
 
-/// An app folder of its own, removed when the test ends.
 struct AppFolder(tempfile::TempDir);
 
 impl AppFolder {
@@ -109,7 +102,6 @@ fn a_camera_in_two_groups_is_saved_once_and_the_groups_hold_only_its_id() {
         "groups.json holds ids, never camera details"
     );
 
-    // A second launch reads both files back the same way.
     let reopened = Library::beside(&app.settings());
     let tree = reopened.tree();
     assert_eq!(tree.len(), 2);
@@ -132,7 +124,6 @@ fn a_cameras_password_comes_back_from_the_file_and_is_kept_from_anyone_else() {
         .unwrap();
     let path = app.settings_dir().join(CAMERAS_FILE);
 
-    // Windows: encrypted for this account. Elsewhere: as it is, readable by its owner alone.
     #[cfg(windows)]
     assert!(!fs::read_to_string(&path).unwrap().contains("hunter2"));
     #[cfg(unix)]
@@ -146,9 +137,7 @@ fn a_cameras_password_comes_back_from_the_file_and_is_kept_from_anyone_else() {
     assert_eq!(reopened.camera(&driveway).unwrap().password, "hunter2");
 }
 
-/// Makes every write of the file at `path` fail from now on, as a full disk or a file another
-/// program holds would: a folder stands where the file was, so the new copy can't be renamed into
-/// place. Returns what the file held.
+/// A folder in the file's place makes every write fail; returns what the file held.
 fn block_writes(path: &Path) -> String {
     let text = fs::read_to_string(path).expect("the file should be there");
     fs::remove_file(path).unwrap();
@@ -156,13 +145,11 @@ fn block_writes(path: &Path) -> String {
     text
 }
 
-/// Lets the file at `path` be written again, holding `text`, as it did before the failed write.
 fn allow_writes(path: &Path, text: &str) {
     fs::remove_dir(path).unwrap();
     fs::write(path, text).unwrap();
 }
 
-/// A library with a camera called Driveway in a group and in the first view's first tile.
 fn library_with_a_camera_everywhere(app: &AppFolder) -> (Library, CameraId) {
     let library = Library::beside(&app.settings());
     let outside = library.add_group("Outside", Vec::new()).unwrap();
@@ -182,7 +169,6 @@ fn library_with_a_camera_everywhere(app: &AppFolder) -> (Library, CameraId) {
     (library, driveway)
 }
 
-/// Whether the file at `path` names `camera` anywhere.
 fn names(path: &Path, camera: &CameraId) -> bool {
     fs::read_to_string(path).unwrap().contains(camera.as_str())
 }
@@ -214,7 +200,6 @@ fn a_camera_whose_group_could_not_be_saved_is_kept_and_joins_the_group_on_a_retr
         "it is under All cameras only, as the error says"
     );
 
-    // Once the file can be written, putting it in the group again finishes the job.
     allow_writes(&groups_file, &groups_before);
     library.add_to_group(&outside, &driveway).unwrap();
 
@@ -237,7 +222,6 @@ fn a_delete_that_stopped_half_way_hides_the_camera_and_is_finished_by_deleting_a
         .expect_err("the group could not be saved");
     assert!(error.to_string().contains(GROUPS_FILE), "{error}");
 
-    // The camera is gone, and nothing shows it, though a file still names it.
     assert!(library.camera(&driveway).is_none());
     assert!(library.tree()[0].cameras.is_empty());
     assert_eq!(library.shown_tiles(&view).unwrap()[0], None);
@@ -263,7 +247,6 @@ fn a_delete_that_stopped_half_way_is_finished_by_the_next_launch() {
     library
         .delete_camera(&driveway)
         .expect_err("the group could not be saved");
-    // The app closes here, leaving the group and the view naming a camera that is gone.
     drop(library);
     allow_writes(&groups_file, &groups_before);
     assert!(names(&groups_file, &driveway) && names(&views_file, &driveway));

@@ -1,28 +1,4 @@
-//! `ipcamera-server`: the cameras, their groups and views, and their live video, in a browser, with
-//! no desktop app.
-//!
-//! ```text
-//! ipcamera-server [--settings <file>] [--data <folder>] [--port <port>] [--app <folder>]
-//!                [--allow-origin <origin>]
-//! ipcamera-server --set-password | --clear-password [--settings <file>]
-//! ```
-//!
-//! It reads `settings.json` beside the executable, the way the app does, unless `--settings`
-//! names another: the desktop app's own works, since the files are the same. Its snapshots and
-//! recordings go where that file's `storage` says, `data\snapshots` and `data\videos` beside it by
-//! default, and its cameras are in `data\settings` beside it, unless `--data` names another folder
-//! for them. So `--settings` at the desktop app's `settings.json` shares the app's cameras,
-//! snapshots and videos. It serves the packaged web build of the app from `web` beside the
-//! executable, unless `--app` names another folder. It listens on `http://127.0.0.1:8770/` unless
-//! `--port` says otherwise, and only there. `--allow-origin` lets one more origin's pages use it,
-//! such as `http://localhost:8787`, where `nsh run --target web` serves the app; give it once for
-//! each. Ctrl+C stops it, once every moving camera has its stop and every recording's file is
-//! finished.
-//!
-//! `--set-password` asks for a password on the terminal, saves its hash in `settings.json` and
-//! ends: from its next start the server answers only those who sign in with it.
-//! `--clear-password` takes it away again. The password is never an argument, which other
-//! programs could read from the list of what is running.
+//! `ipcamera-server`: the cameras' library and their live video, for a browser.
 
 use std::{
     io::{BufRead, Write},
@@ -35,27 +11,19 @@ use anyhow::{Context, Result, anyhow, bail};
 use ipcamera_core::{Library, config::ConfigStore};
 use tokio::net::TcpListener;
 
-/// The port the server listens on when `--port` doesn't say. nsh's development server takes 8790
-/// (`nsh run`) and the web preview 8787, so this is clear of both.
+/// Clear of nsh's development server (8790) and its web preview (8787).
 const DEFAULT_PORT: u16 = 8770;
 
-/// What the command line asks for.
 struct Options {
-    /// `settings.json`, which says where snapshots and recordings go.
     settings: PathBuf,
-    /// The cameras, groups and views, when not `data\settings` beside `settings`.
     data: Option<PathBuf>,
     port: u16,
     serving: ipcamera_server::Options,
-    /// A change to the server's password to make instead of serving.
     password: Option<PasswordChange>,
 }
 
-/// What to do with the server's password.
 enum PasswordChange {
-    /// Ask for one and save it.
     Set,
-    /// Take it away.
     Clear,
 }
 
@@ -109,7 +77,6 @@ impl Options {
     }
 }
 
-/// The folder that holds this executable, where its data goes.
 fn beside_executable() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -172,15 +139,13 @@ fn run() -> Result<()> {
     })
 }
 
-/// Sets or clears the server's password in `config`'s file, and says what it did.
 fn change_password(config: &ConfigStore, change: &PasswordChange) -> Result<()> {
     if let Some(problem) = config.problem() {
         bail!("{problem}");
     }
     let hash = match change {
         PasswordChange::Set => {
-            // Typed here rather than given as an argument, which the list of running programs
-            // would show. The terminal shows it as it is typed.
+            // Typed here, never an argument, which the list of running programs would show.
             print!("The server's new password (it shows as you type): ");
             std::io::stdout().flush()?;
             let mut typed = String::new();

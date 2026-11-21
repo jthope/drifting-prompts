@@ -1,19 +1,3 @@
-// The files panel, to the left of the reader: the open project's Markdown
-// files, as a tree of its folders under the project's own (the default), under
-// a heading for each folder, or in one list by name, the view picked from the
-// button in its header. Every folder starts open, and stays so until it is
-// closed. A filter lists the files whose path holds what is typed. A press
-// opens a file as the preview, a double press keeps it in a tab of its own;
-// Ctrl+click picks several and Shift+click a run of them, which open in tabs
-// together.
-//
-// While the title bar's search holds something, the panel lists what it found
-// instead (`SearchResultsList`): each file with matches, with how many, opening
-// into its matches, each its line's number and its words around the match; a
-// project's row above its files when the search looks in every project. A
-// press, or the arrows, go to a match. The button in the header shows every
-// file again, each with how many matches it holds and those with none faded,
-// and back. Ending the search puts the panel back as it was.
 import { computed, effect, signal, Text, untracked, View } from "nsh";
 import type { FilesView } from "mdviewer/native";
 import { Button, IconButton, type IconName, MenuOpener, PaneHeader, SearchField, SelectionBar, TreeList, type TreePress } from "../../../dp/ui";
@@ -23,19 +7,15 @@ import { currentMatch, filesView, found, listing, openPath, project, projectPath
 import { countIn, matchOf, resultTree, rowCount, rowId, rowOf } from "./search";
 import { allFolders, fileList, foldersAbove, isFolder, itemsFor, matching, openFolders, pickedFiles, ROOT, shownFiles } from "./tree";
 
-/** What the search found, as the files panel lists it: the files with matches, each opening into its matches. */
 function SearchResultsList() {
-  /** The rows closed: every file and project starts open. */
   const closed = signal<string[]>([]);
   const names = computed(() => new Map(projects().projects.map((each) => [each.path, each.name])));
   const items = computed(() => resultTree(searchResults(), names()));
   const expanded = computed(() => openFolders(items(), closed()));
-  /** The match the reader is on, as its row. */
   const current = () => {
     const at = currentMatch();
     return at ? rowId({ kind: "match", project: projectPath(), file: at.file, index: at.index }) : null;
   };
-  // The match F3 steps to shows, its file opened.
   effect(() => {
     const at = currentMatch();
     if (!at) return;
@@ -90,46 +70,37 @@ function SearchResultsList() {
 /** The narrowest the files panel gets, in points. */
 export const FILES_MIN_WIDTH = 180;
 
-/** The views the panel's button offers, each with the icon the button shows while it is the one. */
 const VIEWS: { value: FilesView; title: string; icon: IconName }[] = [
   { value: "tree", title: "View as Tree", icon: "list-tree" },
   { value: "folder", title: "View as Folder", icon: "folder" },
   { value: "list", title: "View as List", icon: "list" },
 ];
 
-/** The files panel, drawn on the tool pane's island it sits in. `onHide` closes it. */
+/** The files panel: the open project's Markdown files, or what the search found. */
 export function FilesPanel(props: { onHide: () => void }) {
   const query = signal("");
-  /** The folders closed in the tree view, where every folder starts open (one that appears later too). */
   const treeClosed = signal<string[]>([]);
-  /** The folders closed in the folder view, which start open the same way. */
   const groupsClosed = signal<string[]>([]);
-  /** The files picked together (Ctrl+click, Shift+click); empty while one alone is, the one in front. */
   const marked = signal<string[]>([]);
-  /** The row the keys are on: the file in front, or a folder the arrows reached. */
   const cursor = signal<string | null>(null);
-  /** Where a Shift+click's run starts: the file pressed last without Shift. */
   let anchor = "";
 
   const files = () => listing()?.files ?? [];
   const filtering = () => query().trim() !== "";
-  /** The view showing: the one picked, or the list while the filter has text. */
   const view = (): FilesView => (filtering() ? "list" : filesView());
-  /** The project's folder's name, which the tree and the folder view show at their top: a computed, so saving the tabs (a new `project`) makes no new items. */
+  // A computed, so saving the tabs (a new `project`) makes no new items.
   const root = computed(() => project()?.name ?? "");
   const items = computed(() => (filtering() ? fileList(matching(files(), query())) : itemsFor(filesView(), files(), root())));
-  /** The folders the view picked has closed. */
   const closedIn = (shown: FilesView) => (shown === "tree" ? treeClosed : groupsClosed);
   const expanded = computed(() => (view() === "list" ? [] : openFolders(items(), closedIn(view())())));
   const setExpanded = (next: string[]) => {
     if (view() !== "list") closedIn(view()).set(allFolders(items()).filter((id) => !next.includes(id)));
   };
-  /** Closes every folder; the tree keeps its top, the project's folder, open, so its folders show. */
+  // The tree keeps its top open, so its folders show.
   const collapseAll = () => {
     if (view() !== "list") closedIn(view()).set(allFolders(items()).filter((id) => view() === "folder" || id !== ROOT));
   };
 
-  // A project starts with the filter empty, nothing picked, and every folder open.
   effect(() => {
     projectPath();
     query.set("");
@@ -137,7 +108,6 @@ export function FilesPanel(props: { onHide: () => void }) {
     treeClosed.set([]);
     groupsClosed.set([]);
   });
-  // The file in front (opened here, from a tab, a link, or as the project opens) shows, its folders open.
   effect(() => {
     const path = openPath();
     const shown = filesView();
@@ -151,7 +121,6 @@ export function FilesPanel(props: { onHide: () => void }) {
     });
   });
 
-  /** A press on a row: a folder opens or closes; a file opens, or with Ctrl or Shift is picked with others. */
   const press = (id: string, keys: TreePress) => {
     if (isFolder(id)) {
       cursor.set(id);
@@ -172,7 +141,6 @@ export function FilesPanel(props: { onHide: () => void }) {
     openFile(id, keys.clickCount >= 2 ? "keep" : "preview");
   };
 
-  /** Opens the files picked, in the order they show, then picks none. */
   const openPicked = () => {
     const order = shownFiles(items(), expanded());
     openFiles(order.filter((path) => marked().includes(path)));
@@ -180,11 +148,8 @@ export function FilesPanel(props: { onHide: () => void }) {
   };
 
   const current = () => VIEWS.find((each) => each.value === filesView()) ?? VIEWS[0];
-  /** A file's folder, said after its name in the list. */
   const folderIn = (id: string) => files().find((file) => file.path === id)?.folder ?? "";
-  /** Whether the title bar's search holds something. */
   const searching = () => searchQuery() !== null;
-  /** Whether the panel lists what the search found, rather than every file. */
   const results = () => searching() && resultsInFiles();
 
   return (

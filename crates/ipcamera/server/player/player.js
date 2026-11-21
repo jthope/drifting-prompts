@@ -1,31 +1,16 @@
-// The IP Camera player: one camera's live video from the server, decoded by the browser's own
-// WebCodecs decoder and drawn on a canvas, at `/watch?camera=<id>`, or `&stream=<key>` for a
-// stream a tile picks in place of the camera's own (`main`, `sub` or a path). With no camera, it
-// lists the cameras instead.
-//
-// The server sends JSON text for the decoder's set-up and the camera's status, and one binary
-// message per picture: a flags byte (bit 0: keyframe), an 8-byte big-endian timestamp in
-// microseconds, then the access unit in Annex-B form (`crates/ipcamera/server/src/live.rs`). With no
-// `description` in its set-up, WebCodecs reads H.264 and H.265 in exactly that form.
-//
-// A server with a password answers only requests that carry a session's key
-// (`crates/ipcamera/server/src/access.rs`). The page takes it from its own address (`&key=<key>`), as the
-// web build's tiles give it, or, for the list, asks for the password and signs in itself. The key
-// is kept only in this page's memory.
+// The IP Camera player: one camera's live video, decoded by WebCodecs, or the list of cameras.
+// Without a `description` in its set-up, WebCodecs reads the server's Annex-B pictures as sent.
+// The session's key is kept only in this page's memory.
 
 "use strict";
 
-/** Pictures waiting in the decoder past which the player skips to the next keyframe. */
 const MOST_WAITING = 8;
 
-/** How long to wait before reaching the server again, by try: then every 15 s. */
 const RETRY_AFTER_MS = [1000, 2000, 5000, 10000, 15000];
 
 const asked = new URLSearchParams(location.search);
 const camera = asked.get("camera");
-/** The stream a tile picks in place of the camera's own; `""` for its own. */
 const stream = asked.get("stream") ?? "";
-/** The session's key, when the server has a password: from the address, or from signing in. */
 let key = asked.get("key");
 if (camera) {
   play(camera);
@@ -33,20 +18,17 @@ if (camera) {
   list();
 }
 
-/** `fetch`, with the session's key when there is one. */
 function ask(url, options = {}) {
   const headers = { ...(options.headers ?? {}) };
   if (key) headers.Authorization = `Bearer ${key}`;
   return fetch(url, { ...options, headers });
 }
 
-/** `url` with the session's key in it, for a request no header can go with. */
 function keyed(url) {
   if (!key) return url;
   return `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(key)}`;
 }
 
-/** The page's list of cameras, each a link that plays it. */
 async function list() {
   const main = document.createElement("main");
   const title = document.createElement("h1");
@@ -56,7 +38,6 @@ async function list() {
   await fill(main);
 }
 
-/** Puts the cameras in `main`, or the password box when the server wants one first. */
 async function fill(main) {
   while (main.children.length > 1) main.lastChild.remove();
   let cameras;
@@ -87,7 +68,6 @@ async function fill(main) {
   main.append(items);
 }
 
-/** The password box: signing in fills `main` with the cameras. */
 function signIn(main) {
   const form = document.createElement("form");
   const label = document.createElement("label");
@@ -132,7 +112,6 @@ function note(text) {
   return paragraph;
 }
 
-/** Plays camera `id` full size, reconnecting to the server if it goes away. */
 function play(id) {
   document.body.classList.add("playing");
   const canvas = document.createElement("canvas");
@@ -156,17 +135,13 @@ function play(id) {
   }
 
   let decoder = null;
-  /** The set-up the server sent last, to set a new decoder up with after a decoding error. */
   let setUp = null;
-  /** Whether pictures are skipped until a keyframe: at first, after a set-up, after skipping. */
   let awaitingKeyframe = true;
-  /** A reason the video can't play here, which outranks the camera's status. */
   let cannotPlay = null;
   let tries = 0;
-  /** Messages are handled one after another, since setting a decoder up waits on the browser. */
+  /** One message at a time, since setting a decoder up waits on the browser. */
   let handling = Promise.resolve();
 
-  // Only the newest decoded picture is kept, and drawn at the next display refresh.
   let newest = null;
   let drawing = false;
 
@@ -187,8 +162,7 @@ function play(id) {
     };
     socket.onclose = async () => {
       awaitingKeyframe = true;
-      // A server that wants a password closes at once on a key it doesn't know. Trying again
-      // can't help: the app shows this page again with a new key once someone has signed in.
+      // A key the server doesn't know closes at once, so trying again can't help.
       if (await signedOut()) {
         show("Sign in to the server to watch this camera.");
         return;
@@ -200,7 +174,6 @@ function play(id) {
     };
   }
 
-  /** Whether the server says this page's key is no session's; `false` when it doesn't answer. */
   async function signedOut() {
     try {
       const session = await (await ask("/api/session")).json();
@@ -280,8 +253,7 @@ function play(id) {
     const view = new DataView(buffer);
     const keyframe = (view.getUint8(0) & 1) === 1;
     if (!keyframe && (awaitingKeyframe || decoder.decodeQueueSize > MOST_WAITING)) {
-      // Nothing decodes without its keyframe, and a decoder falling behind catches up faster by
-      // skipping to the next one than by working through every picture.
+      // Nothing decodes without its keyframe; a decoder falling behind catches up by skipping.
       awaitingKeyframe = true;
       return;
     }
@@ -296,7 +268,7 @@ function play(id) {
   }
 
   function failed(error) {
-    // The decoder closes itself after an error. A new one starts at the next keyframe.
+    // The decoder closes itself after an error; a new one starts at the next keyframe.
     show(`The picture couldn't be decoded (${error.message}). Starting again at the next keyframe…`);
     awaitingKeyframe = true;
   }
@@ -322,7 +294,6 @@ function play(id) {
       canvas.width = width;
       canvas.height = height;
     }
-    // The whole picture, as large as fits, in the middle.
     const fit = Math.min(width / frame.displayWidth, height / frame.displayHeight);
     const shownWidth = frame.displayWidth * fit;
     const shownHeight = frame.displayHeight * fit;
@@ -338,7 +309,6 @@ function play(id) {
   }
 }
 
-/** A reason from the server, as a sentence: capitalized, with a full stop. */
 function sentence(reason) {
   const text = (reason ?? "The camera's stream stopped").trim();
   const capitalized = text.charAt(0).toUpperCase() + text.slice(1);

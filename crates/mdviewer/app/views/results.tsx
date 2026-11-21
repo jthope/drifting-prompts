@@ -1,17 +1,3 @@
-// The search's results as a tab of their own (Open in a tab, in the drop-down
-// or the files panel): for a search with more results than a list shows well.
-// Under the query and where it looked, each file with matches, its name, its
-// folder and how many, then its matches in place: each with the two lines above
-// and below it, line numbers beside them, the matches marked, and a `⋯` where
-// lines are left out between them. A press on a line goes to its match, or the
-// nearest, in its file. A file folds from its row, and Collapse all folds them
-// all; past the first `OPEN_FILES`, files start folded. The tab follows the
-// search as it is typed and as the files change, and goes when it ends.
-//
-// The lines come from Rust (`Search.context`), read for a file as it opens and
-// again whenever the search finds something new in it. Beside the tab, the
-// outline's pane lists the files (`ResultsFiles`), and a press there goes to
-// one.
 import { cleanup, computed, effect, Scroll, type ScrollRef, signal, Text, View } from "nsh";
 import { type ContextInfo, type FileMatches, Search } from "mdviewer/native";
 import { Button, CountBadge, Icon, look, OutlineList, Press } from "../../../dp/ui";
@@ -20,27 +6,21 @@ import { folderOf } from "./document";
 import { projectPath, projects, searchQuery, searchResults, searchScope } from "./model";
 import { lineMarks, lineParts, nearestMatch, rowId, SCOPES } from "./search";
 
-/** The lines shown above and below each match. */
 const AROUND = 2;
 
-/** How many files start open; the others start folded, so a large search shows at once. */
+// The others start folded, so a large search shows at once.
 const OPEN_FILES = 30;
 
-/** The most blocks of lines a file shows; the rest are in the file. */
 const MOST_BLOCKS = 50;
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
 
-/** What takes the results to a file, while the tab shows: `ResultsFiles` calls it. */
 const goers = new Set<(id: string) => void>();
 
-/** A file's row id, for folding and for going to it. */
 const fileKey = (file: FileMatches) => rowId({ kind: "file", project: file.project, file: file.path });
 
-/** A file's matches in place: its row, and its lines around each match once it is open. */
 function FileResults(props: { file: FileMatches; open: boolean; onToggle: () => void }) {
   const blocks = signal<ContextInfo[] | null>(null);
-  // Its lines, read again whenever the search finds something new in it.
   effect(() => {
     const file = props.file;
     if (!props.open) return;
@@ -120,10 +100,9 @@ function FileResults(props: { file: FileMatches; open: boolean; onToggle: () => 
   );
 }
 
-/** The results' tab: the query, where it looked and what it found, then each file's matches in place. */
+/** The search's results as a tab of their own: each file's matches in place. */
 export function ResultsView() {
   let scroll: ScrollRef | undefined;
-  /** The files folded, by row id; the files past the first `OPEN_FILES` start folded. */
   const folded = signal<string[] | null>(null);
   const files = computed(() => searchResults()?.files ?? []);
   const isOpen = (file: FileMatches, index: number) => {
@@ -134,7 +113,6 @@ export function ResultsView() {
     const closed = folded() ?? files().flatMap((each, at) => (at < OPEN_FILES ? [] : [fileKey(each)]));
     folded.set(isOpen(file, index) ? [...closed, fileKey(file)] : closed.filter((id) => id !== fileKey(file)));
   };
-  /** Where each file's row is down the list, as its layout said. */
   const tops = new Map<string, number>();
   const go = (id: string) => {
     const top = tops.get(id);
@@ -188,7 +166,7 @@ export function ResultsView() {
   );
 }
 
-/** The outline's pane while the results' tab is in front: the files in the results, each with how many, a press going to it in the tab. */
+/** The files in the results, for the outline's pane while the results' tab is in front. */
 export function ResultsFiles() {
   const files = computed(() => searchResults()?.files ?? []);
   const lines = () => files().map((file) => ({ title: file.path, depth: 0, count: file.matches.length }));

@@ -1,11 +1,5 @@
-//! The ONVIF client and a watch over ONVIF, against a fake camera on localhost; and, when the
-//! owner asks, a real one.
-//!
-//! The fake answers SOAP on a loopback port as a camera's device, media, PTZ and event services
-//! do, and records what it was asked. It knows one account, and refuses a login as any other.
-//! The protocol itself (the envelopes, the login's digest, reading replies) is the `oxvif`
-//! crate's, with its own tests; these are about what the app does with it: one attempt at a
-//! refused login, addresses kept for their paths, the watch, the moves and the light.
+//! The ONVIF client and a watch over ONVIF, against a fake camera on loopback that knows one
+//! account; and, when the owner asks, a real one.
 
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -24,17 +18,13 @@ use ipcamera_core::{
     ptz::{PtzSession, PtzVelocity},
 };
 
-/// The one account the fake camera has.
 const USER: &str = "admin";
 const PASSWORD: &str = "s3cret";
 const PATH: &str = "/onvif/device_service";
 
-/// What the fake camera answers each request with, by its body.
 struct FakeCamera {
     port: u16,
-    /// The SOAP operations it was asked, in order.
     asked: Arc<Mutex<Vec<String>>>,
-    /// The bodies it was sent, to check no password goes in one.
     bodies: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
@@ -77,7 +67,6 @@ impl FakeCamera {
         self.asked.lock().unwrap().clone()
     }
 
-    /// The camera's settings, logging in as `user`.
     fn setting(&self, user: &str) -> CameraConfig {
         CameraConfig {
             brand: Brand::Dahua,
@@ -102,7 +91,6 @@ impl Drop for FakeCamera {
     }
 }
 
-/// The text between `<…name…>` and `</…name>` in `xml`, whatever the prefix.
 fn between(xml: &str, name: &str) -> Option<String> {
     let open = xml
         .find(&format!(":{name}"))
@@ -114,14 +102,12 @@ fn between(xml: &str, name: &str) -> Option<String> {
 
 const ENVELOPE: &str = r#"<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:tev="http://www.onvif.org/ver10/events/wsdl" xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2" xmlns:wsa5="http://www.w3.org/2005/08/addressing" xmlns:wstop="http://docs.oasis-open.org/wsn/t-1" xmlns:tns1="http://www.onvif.org/ver10/topics" xmlns:ter="http://www.onvif.org/ver10/error" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"><s:Body>"#;
 
-/// A motion notification in `state`.
 fn motion(state: bool) -> String {
     format!(
         r#"<wsnt:NotificationMessage><wsnt:Topic>tns1:RuleEngine/CellMotionDetector/Motion</wsnt:Topic><wsnt:Message><tt:Message PropertyOperation="Changed"><tt:Source><tt:SimpleItem Name="VideoSourceConfigurationToken" Value="0"/></tt:Source><tt:Data><tt:SimpleItem Name="IsMotion" Value="{state}"/></tt:Data></tt:Message></wsnt:Message></wsnt:NotificationMessage>"#
     )
 }
 
-/// Answers one request and closes the connection.
 fn serve(
     stream: TcpStream,
     asked: &Mutex<Vec<String>>,
@@ -169,7 +155,6 @@ fn serve(
     ]
     .into_iter()
     .find(|operation| {
-        // The request's own element, whatever its prefix: `<tds:GetServices>`, `<tptz:Stop/>`.
         [">", "/>", " "]
             .iter()
             .any(|end| body.contains(&format!(":{operation}{end}")))
@@ -187,17 +172,15 @@ fn serve(
         match operation.as_str() {
             "GetSystemDateAndTime" => "<tds:GetSystemDateAndTimeResponse><tds:SystemDateAndTime><tt:UTCDateTime><tt:Time><tt:Hour>12</tt:Hour><tt:Minute>0</tt:Minute><tt:Second>0</tt:Second></tt:Time><tt:Date><tt:Year>2026</tt:Year><tt:Month>11</tt:Month><tt:Day>10</tt:Day></tt:Date></tt:UTCDateTime></tds:SystemDateAndTime></tds:GetSystemDateAndTimeResponse>".to_string(),
             "GetDeviceInformation" => "<tds:GetDeviceInformationResponse><tds:Manufacturer>Dahua</tds:Manufacturer><tds:Model>IPC-HDW2431T</tds:Model><tds:FirmwareVersion>2.800</tds:FirmwareVersion><tds:SerialNumber>X</tds:SerialNumber><tds:HardwareId>1.00</tds:HardwareId></tds:GetDeviceInformationResponse>".to_string(),
-            // An address on a host the camera doesn't answer on: only its path is used.
+            // A host the camera doesn't answer on: only the path is used.
             "GetCapabilities" => "<tds:GetCapabilitiesResponse><tds:Capabilities><tt:Events><tt:XAddr>http://0.0.0.0:1/onvif/event_service</tt:XAddr><tt:WSPullPointSupport>true</tt:WSPullPointSupport></tt:Events><tt:Media><tt:XAddr>http://0.0.0.0:1/onvif/media_service</tt:XAddr></tt:Media><tt:PTZ><tt:XAddr>http://0.0.0.0:1/onvif/ptz_service</tt:XAddr></tt:PTZ></tds:Capabilities></tds:GetCapabilitiesResponse>".to_string(),
-            // A light bulb camera on a pan and tilt base, with its bulb among the auxiliary commands.
-            // The second media service, at a path of its own: the sub stream is H.265, which the
-            // first can't say, and it says nothing of the others.
+            // The second media service names the sub stream's H.265, which the first can't.
             "GetServices" => r#"<tds:GetServicesResponse><tds:Service><tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace><tds:XAddr>http://0.0.0.0:1/onvif/media_service</tds:XAddr></tds:Service><tds:Service><tds:Namespace>http://www.onvif.org/ver20/media/wsdl</tds:Namespace><tds:XAddr>http://0.0.0.0:1/onvif/media2</tds:XAddr></tds:Service></tds:GetServicesResponse>"#.to_string(),
             "GetProfiles" if second_media => r#"<tr2:GetProfilesResponse xmlns:tr2="http://www.onvif.org/ver20/media/wsdl"><tr2:Profiles token="Profile_2"><tr2:Name>sub</tr2:Name><tr2:Configurations><tr2:VideoEncoder token="e2"><tt:Name>enc</tt:Name></tr2:VideoEncoder></tr2:Configurations></tr2:Profiles><tr2:Profiles token="Profile_1"><tr2:Name>main</tr2:Name></tr2:Profiles></tr2:GetProfilesResponse>"#.to_string(),
             "GetProfiles" => r#"<trt:GetProfilesResponse><trt:Profiles token="Profile_2"><tt:Name>sub</tt:Name><tt:VideoEncoderConfiguration token="e2"><tt:Name>enc</tt:Name></tt:VideoEncoderConfiguration></trt:Profiles><trt:Profiles token="Profile_1"><tt:Name>main</tt:Name><tt:PTZConfiguration token="ptz0"/></trt:Profiles><trt:Profiles token="Profile_3"><tt:Name>none</tt:Name></trt:Profiles></trt:GetProfilesResponse>"#.to_string(),
             "GetVideoEncoderConfigurations" if second_media => r#"<tr2:GetVideoEncoderConfigurationsResponse xmlns:tr2="http://www.onvif.org/ver20/media/wsdl"><tr2:Configurations token="e2"><tt:Name>enc</tt:Name><tt:Encoding>H265</tt:Encoding><tt:Resolution><tt:Width>640</tt:Width><tt:Height>360</tt:Height></tt:Resolution></tr2:Configurations></tr2:GetVideoEncoderConfigurationsResponse>"#.to_string(),
             "GetVideoEncoderConfigurations" => r#"<trt:GetVideoEncoderConfigurationsResponse><trt:Configurations token="e2"><tt:Name>enc</tt:Name><tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>640</tt:Width><tt:Height>360</tt:Height></tt:Resolution></trt:Configurations></trt:GetVideoEncoderConfigurationsResponse>"#.to_string(),
-            // An address for each profile but the third, on a host only the camera knows itself by.
+            // No address for the third profile.
             "GetStreamUri" => match between(&body, "ProfileToken").as_deref() {
                 Some(token) if token != "Profile_3" => format!("<trt:GetStreamUriResponse><trt:MediaUri><tt:Uri>rtsp://10.9.9.9:554/live/{token}?a=1&amp;b=2</tt:Uri></trt:MediaUri></trt:GetStreamUriResponse>"),
                 _ => r#"<s:Fault><s:Code><s:Value>s:Sender</s:Value></s:Code><s:Reason><s:Text>no such stream</s:Text></s:Reason></s:Fault>"#.to_string(),
@@ -367,14 +350,13 @@ fn a_camera_of_another_brand_moves_over_onvif_and_its_light_switches() {
 
     let session = PtzSession::connect(&setting);
     session.move_by(PtzVelocity::new(0.5, 0.0, 0.0));
-    // A stop replaces a move the camera hasn't been sent yet, so the move goes out first.
+    // A stop replaces a move not sent yet, so the move goes out first.
     let deadline = Instant::now() + Duration::from_secs(5);
     while !camera.asked().contains(&"ContinuousMove".to_string()) {
         assert!(Instant::now() < deadline, "{:?}", camera.asked());
         thread::sleep(Duration::from_millis(20));
     }
     session.stop();
-    // Dropping it stops the camera on the way out.
     drop(session);
 
     let asked = camera.asked();
@@ -446,12 +428,8 @@ fn a_watch_that_is_refused_stops_for_good() {
     );
 }
 
-/// Detects the real camera named by `IPCAMERA_ONVIF_HOST`, `_USER` and `_PASSWORD`, with `_PORT`
-/// (80, then the ports cameras ship ONVIF on) and `_PATH` (`/onvif/device_service`), as the camera
-/// form's Detect does, and prints what it found; then watches it for ten seconds. It changes
-/// nothing: no move, and no light switched. It logs in once over DVRIP when that port answers,
-/// and once over ONVIF. The owner runs it:
-/// `cargo test -p ipcamera-core --test onvif_client -- --ignored --nocapture`.
+/// Detects and watches the camera `IPCAMERA_ONVIF_HOST`, `_USER` and `_PASSWORD` name, changing
+/// nothing.
 #[test]
 #[ignore = "needs the owner's camera with ONVIF on"]
 fn the_real_camera_says_what_it_is_and_sends_its_events() {

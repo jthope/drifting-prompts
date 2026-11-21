@@ -1,37 +1,6 @@
-//! Watching a camera for what it sees, and switching its spotlight: one thread per camera. The
-//! server starts one once the camera's stream is live (its login has worked, so a wrong password
-//! costs one failed login, not two) and drops it when the stream stops; the desktop app watches
-//! every camera it can for as long as it runs, waiting for a stream on its way to go live first.
-//!
-//! The thread logs in once, asks what the camera is and what it can do, then asks what it sees
-//! about once a second. A Reolink is asked over its own API ([`POLL_EVERY`]: one request for
-//! motion, AI detections and the spotlight). A Dahua with `http_api` on is asked over Dahua's HTTP
-//! API about its light ([`LIGHT_POLL_EVERY`]), and over ONVIF's events about motion when
-//! `onvif_events` is on too. Any other camera with `onvif_events` on is asked over ONVIF, whose
-//! event service holds each pull open for up to a second until something happens. What it learned
-//! is kept in [`Watched`], which the window or the server reads whenever it likes without waiting
-//! on the camera. A spotlight switch (a Reolink's, a Dahua's white light, or the light of an ONVIF
-//! camera whose PTZ service lists one) goes to the thread as a request, and its answer comes back
-//! on a channel of its own. An ONVIF camera with no event service is still watched for its light.
-//!
-//! **Events.** A watch started to log them ([`CameraWatch::start_logging`], the desktop app's)
-//! also turns what the camera sees into [`CameraEvent`]s ([`EventTracker`], grouped by the
-//! [`EventRules`] it is given), and keeps each start, sighting, change and end for the program to take
-//! ([`CameraWatch::take_events`]) and act on, with what the camera sees then as tags for what the
-//! program saves. A camera that hands out a picture of its own (a Reolink's `Snap`) gives one as
-//! each event starts, so an event has a picture whether or not the camera is on screen. A watch
-//! started plainly ([`CameraWatch::start`], the server's) keeps none and asks for no picture.
-//!
-//! A refused login ends the watch for good, as everywhere else in the app: trying again with the
-//! same password could lock the account ([`Watched::gave_up`]). A camera that can't be reached is
-//! tried again every [`RETRY_EVERY`]. Dropping a [`CameraWatch`] never waits: the thread sees that
-//! it is gone at its next poll, logs out and ends.
-//!
-//! [`watches`] says which cameras are watched. Telling a camera's brand from its address, for the
-//! camera form, is [`crate::camera_detect`]'s.
-//!
-//! In C# terms, a `CameraWatch` is a `BackgroundService` per camera with a thread-safe snapshot
-//! property and a request queue, and dropping it is cancelling its token without awaiting it.
+//! Watching a camera for what it sees, and switching its spotlight, on a thread per camera. A
+//! refused login ends the watch for good, since retrying could lock the account; dropping a watch
+//! never waits for its thread.
 
 use std::{
     sync::{Arc, Mutex, mpsc},
@@ -49,14 +18,11 @@ use crate::{
     sync::LockExt,
 };
 
-/// How often the thread asks what the camera sees: a motion badge that lags by a second at most.
 const POLL_EVERY: Duration = Duration::from_secs(1);
 
-/// How often a Dahua's light is asked about: it changes only when someone switches it, here or in
-/// the camera's own app, and each ask reads its whole lighting table.
+/// Each ask reads a Dahua's whole lighting table.
 const LIGHT_POLL_EVERY: Duration = Duration::from_secs(5);
 
-/// How long the thread waits before trying a camera it couldn't reach again.
 const RETRY_EVERY: Duration = Duration::from_secs(15);
 
 /// What a watch has learned of its camera so far.
@@ -68,17 +34,14 @@ pub struct Watched {
     pub features: Option<CameraFeatures>,
     /// What it saw at the last poll.
     pub activity: CameraActivity,
-    /// What went wrong last, as a sentence, until a poll works again; for a refused login, for
-    /// good.
+    /// What went wrong last, until a poll works again.
     pub problem: Option<String>,
-    /// Whether the watch has stopped for good: the camera refused its login. Nothing should log
-    /// in to it by itself again until its settings change.
+    /// Whether the camera refused the login: nothing should log in again until its settings change.
     pub gave_up: bool,
 }
 
 impl Watched {
-    /// What the watch says of its camera, for the stats strip: what went wrong, or what the camera
-    /// is and has. `RLC-811A: Motion, Person, Spotlight.`
+    /// What went wrong, or what the camera is and has: `RLC-811A: Motion, Person, Spotlight.`
     pub fn summary(&self) -> String {
         if let Some(problem) = &self.problem {
             return problem.clone();
@@ -100,7 +63,7 @@ impl Watched {
         }
     }
 
-    /// What the server tells the web build of it.
+    /// As the server's API reports it.
     pub fn status(&self) -> WatchStatus {
         let spotlight = self.activity.spotlight;
         WatchStatus {
@@ -116,22 +79,19 @@ impl Watched {
     }
 }
 
-/// An event as a watch saw it start, change or end, for the program that logs it.
+/// An event as a watch saw it start, change or end.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeenEvent {
     /// What this answer did to it.
     pub step: EventStep,
     /// The event as it is now.
     pub event: CameraEvent,
-    /// What the camera sees now, as the tags of a file saved now ([`EventTracker::tags`]): none
-    /// as a sighting ends.
+    /// What the camera sees now, as a file's tags; none as a sighting ends.
     pub tags: Vec<&'static str>,
-    /// The camera's own picture as the event started, a JPEG: only with its start, and only from
-    /// a camera that hands one out.
+    /// The camera's own JPEG as the event started, from a camera that hands one out.
     pub still: Option<Vec<u8>>,
 }
 
-/// A request for the watch's thread, with the channel its answer goes back on.
 enum Request {
     Spotlight(Spotlight, mpsc::Sender<Result<(), String>>),
 }
@@ -140,17 +100,13 @@ enum Request {
 pub struct CameraWatch {
     requests: mpsc::Sender<Request>,
     watched: Arc<Mutex<Watched>>,
-    /// What the thread saw happen since the program last took it, for a watch that logs events.
     events: Option<Arc<Mutex<Vec<SeenEvent>>>>,
 }
 
-/// How many events a watch keeps for the program at most: a program that stops taking them loses
-/// the oldest rather than holding pictures without end. It takes them every second or so.
+/// A program that stops taking events loses the oldest rather than holding pictures without end.
 const MOST_KEPT: usize = 64;
 
-/// Whether the app can watch `camera`: a Reolink, over its API; a Dahua with `http_api` on, over
-/// Dahua's; or a camera with `onvif_events` on, over ONVIF; and a password, since a login without
-/// one can only fail.
+/// Whether the app can watch `camera`; it needs a password, as a login without one can only fail.
 pub fn watches(camera: &CameraConfig) -> bool {
     !camera.password.is_empty()
         && (camera.brand == Brand::Reolink
@@ -164,14 +120,12 @@ impl CameraWatch {
         Self::start_with(camera, None)
     }
 
-    /// Starts watching `camera` as [`start`](Self::start) does, keeping its events for
-    /// [`take_events`](Self::take_events), grouped by `rules`, and each start with the camera's own
-    /// picture where it hands one out.
+    /// Starts watching `camera`, keeping its events, grouped by `rules`, for
+    /// [`take_events`](Self::take_events).
     pub fn start_logging(camera: &CameraConfig, rules: EventRules) -> Option<Self> {
         Self::start_with(camera, Some(rules))
     }
 
-    /// Starts the watch, logging events grouped by the rules `logging` gives when it gives them.
     fn start_with(camera: &CameraConfig, logging: Option<EventRules>) -> Option<Self> {
         if !watches(camera) {
             return None;
@@ -201,8 +155,7 @@ impl CameraWatch {
         self.watched.locked().clone()
     }
 
-    /// The events that started, changed or ended since this was last called, oldest first; none
-    /// for a watch that doesn't log them. Never waits on the camera.
+    /// The events seen since this was last called, oldest first. Never waits on the camera.
     pub fn take_events(&self) -> Vec<SeenEvent> {
         self.events
             .as_ref()
@@ -210,8 +163,7 @@ impl CameraWatch {
             .unwrap_or_default()
     }
 
-    /// Asks the thread to switch the spotlight. The answer comes on the returned channel once the
-    /// camera has answered; wait for it off the window's thread.
+    /// Asks the thread to switch the spotlight; the answer comes on the returned channel.
     pub fn set_spotlight(&self, spotlight: Spotlight) -> mpsc::Receiver<Result<(), String>> {
         let (answer, answered) = mpsc::channel();
         if self
@@ -224,9 +176,7 @@ impl CameraWatch {
         answered
     }
 
-    /// Switches the spotlight on, at the brightness it had (full when the camera never said), or
-    /// off, as [`set_spotlight`](Self::set_spotlight) does. Refused at once, in the user's words,
-    /// for a camera that told the watch it has none the app can switch.
+    /// Switches the spotlight on at its last brightness, or off; refused for a camera without one.
     pub fn switch_spotlight(&self, on: bool) -> Result<mpsc::Receiver<Result<(), String>>, String> {
         let watched = self.watched();
         if !watched
@@ -246,24 +196,18 @@ impl CameraWatch {
     }
 }
 
-/// What the thread asks a camera, over whichever protocol its brand speaks.
 trait Watcher {
-    /// What the camera is and can do, as far as it says.
     fn learn(&mut self) -> (Option<DeviceInfo>, Option<CameraFeatures>);
-    /// What it sees now.
     fn activity(&mut self) -> Result<CameraActivity, Failure>;
-    /// Switches its spotlight.
     fn set_spotlight(&mut self, spotlight: Spotlight) -> Result<(), String>;
-    /// How long to wait for a request between polls: a poll that waits on the camera itself
-    /// needs none.
+    /// How long to wait for a request between polls: none when a poll waits on the camera itself.
     fn pause(&self) -> Duration;
-    /// The camera's own picture of what it sees now, a JPEG, for a camera that hands one out.
     fn still(&mut self) -> Option<Vec<u8>> {
         None
     }
 }
 
-/// Why watching stopped: for good (a refused login), or until the camera is tried again.
+/// `Final` for a refused login, never retried.
 enum Failure {
     Final(String),
     Retry(String),
@@ -296,11 +240,9 @@ impl From<OnvifError> for Failure {
     }
 }
 
-/// A Reolink, over its HTTP API.
 struct ReolinkWatcher {
     client: ReolinkClient,
     channel: u32,
-    /// Whether it has a spotlight, which each poll then asks about.
     spotlight: bool,
 }
 
@@ -330,16 +272,13 @@ impl Watcher for ReolinkWatcher {
     }
 }
 
-/// A Dahua with `http_api` on, over Dahua's HTTP API: its light; and its motion over ONVIF's events
-/// when `onvif_events` is on too.
+/// A Dahua's light over its HTTP API, and its motion over ONVIF's events when those are on.
 struct DahuaWatcher {
     client: DahuaHttp,
     device: DeviceInfo,
     features: CameraFeatures,
     light: Option<DahuaLight>,
-    /// Its ONVIF events, for a camera with `onvif_events` on that has them.
     events: Option<OnvifEvents>,
-    /// Its light as last asked or switched, and when it was asked.
     lit: Option<Spotlight>,
     asked: Option<Instant>,
 }
@@ -391,24 +330,20 @@ impl Watcher for DahuaWatcher {
     }
 }
 
-/// Any other camera, over ONVIF: its events when it has an event service, and its light when its
-/// PTZ service lists one.
 struct OnvifWatcher {
     link: Link,
     device: DeviceInfo,
     features: CameraFeatures,
     light: Option<Light>,
-    /// Whether the light is on, as it was last switched: ONVIF can't ask.
+    /// As last switched: ONVIF can't ask.
     lit: bool,
 }
 
-/// How an ONVIF camera is reached: through its event subscription, or plainly, with none.
 enum Link {
     Events(OnvifEvents),
     Plain(OnvifClient),
 }
 
-/// What switching an ONVIF camera's light needs.
 pub(crate) struct Light {
     ptz: String,
     profile: String,
@@ -424,7 +359,6 @@ impl OnvifWatcher {
         }
     }
 
-    /// Its light as it was last switched, for a camera with one.
     fn spotlight(&self) -> Option<Spotlight> {
         self.light.as_ref().map(|_| Spotlight {
             on: self.lit,
@@ -473,25 +407,16 @@ impl Watcher for OnvifWatcher {
     }
 }
 
-/// What an ONVIF camera is and has, as one login learned it.
 pub(crate) struct OnvifCamera {
-    /// The client that made the login.
     pub(crate) client: OnvifClient,
-    /// What the camera says it is.
     pub(crate) device: DeviceInfo,
-    /// What it can do: motion and detections from its event service, PTZ and a light from its
-    /// PTZ service.
     pub(crate) features: CameraFeatures,
-    /// The event service's path, for a camera that has one.
     pub(crate) events: Option<String>,
-    /// The media service's path, for a camera that has one: where its streams are listed.
     pub(crate) media: Option<String>,
-    /// What switching its light needs, for a camera with one.
     pub(crate) light: Option<Light>,
 }
 
-/// What an ONVIF camera is and has, and what switching its light needs, with one login. Detect
-/// asks it too ([`crate::camera_detect`]).
+/// What an ONVIF camera is and has, with one login.
 pub(crate) fn learn_onvif(camera: &CameraConfig) -> Result<OnvifCamera, OnvifError> {
     let (mut client, device) = OnvifClient::connect(
         &camera.host,
@@ -540,10 +465,8 @@ pub(crate) fn learn_onvif(camera: &CameraConfig) -> Result<OnvifCamera, OnvifErr
     })
 }
 
-/// `camera`'s ONVIF events, for a watch that reaches it another way first, with the motion and
-/// detections they report added to `features`. A camera that has none, or whose ONVIF doesn't
-/// answer, is watched without them; a refused ONVIF login ends the watch, so it is never tried
-/// again.
+/// `camera`'s ONVIF events, if it has them; a refused ONVIF login ends the watch, so it is never
+/// tried again.
 fn onvif_events(
     camera: &CameraConfig,
     features: &mut CameraFeatures,
@@ -569,7 +492,6 @@ fn onvif_events(
     }
 }
 
-/// Logs in to `camera` over the protocol its brand speaks, and learns what its events need.
 fn connect(camera: &CameraConfig) -> Result<Box<dyn Watcher>, Failure> {
     if camera.brand == Brand::Dahua && camera.http_api {
         let (mut client, device) = DahuaHttp::connect(
@@ -649,17 +571,13 @@ fn connect(camera: &CameraConfig) -> Result<Box<dyn Watcher>, Failure> {
     }))
 }
 
-/// What the thread shares with its [`CameraWatch`].
 struct Shared {
     watched: Arc<Mutex<Watched>>,
-    /// Where its events go, for a watch that logs them.
     events: Option<Arc<Mutex<Vec<SeenEvent>>>>,
-    /// How it groups what the camera sees into events.
     rules: EventRules,
 }
 
 impl Shared {
-    /// Keeps `seen` for the program, for a watch that logs events.
     fn keep(&self, seen: SeenEvent) {
         if let Some(events) = &self.events {
             let mut kept = events.locked();
@@ -670,7 +588,6 @@ impl Shared {
         }
     }
 
-    /// Keeps the end of the event open, when there is one.
     fn end(&self, tracker: &mut EventTracker) {
         if let Some(event) = tracker.end() {
             self.keep(SeenEvent {
@@ -683,14 +600,12 @@ impl Shared {
     }
 }
 
-/// Milliseconds since 1970.
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_millis() as u64)
 }
 
-/// The thread: log in, learn the camera, then poll until the watch is dropped.
 fn run(camera: &CameraConfig, requests: &mpsc::Receiver<Request>, shared: &Shared) {
     let watched = &*shared.watched;
     loop {
@@ -705,7 +620,6 @@ fn run(camera: &CameraConfig, requests: &mpsc::Receiver<Request>, shared: &Share
         };
 
         let (device, features) = watcher.learn();
-        // What counts as an event: what its AI tells apart, for a camera that has any.
         let tells_apart = features
             .as_ref()
             .is_some_and(|features| !features.detections.is_empty());
@@ -717,15 +631,13 @@ fn run(camera: &CameraConfig, requests: &mpsc::Receiver<Request>, shared: &Share
             seen.problem = None;
         }
 
-        // Polls until the watch is dropped or the camera stops answering.
         let failure = loop {
             match watcher.activity() {
                 Ok(activity) => {
                     if let Some((step, event)) = tracker.see(&activity, now_ms())
                         && shared.events.is_some()
                     {
-                        // The camera's picture as it starts: asked before the next poll, so it
-                        // is of what started it.
+                        // Asked before the next poll, so it shows what started the event.
                         let still = (step == EventStep::Started)
                             .then(|| watcher.still())
                             .flatten();
@@ -755,12 +667,12 @@ fn run(camera: &CameraConfig, requests: &mpsc::Receiver<Request>, shared: &Share
                     let _ = answer.send(done);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
-                // Nobody takes an end now: the program ends its events when it drops a watch.
+                // The program ends its own events when it drops a watch.
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
             }
         };
 
-        // The watcher logs out as it goes, where the camera still answers.
+        // Logs out before the wait, where the camera still answers.
         drop(watcher);
         if !stopped(watched, failure) || !wait(requests, RETRY_EVERY) {
             return;
@@ -768,7 +680,7 @@ fn run(camera: &CameraConfig, requests: &mpsc::Receiver<Request>, shared: &Share
     }
 }
 
-/// Says why watching stopped, and whether to try again: never after a refused login.
+/// Whether to try again: never after a refused login.
 fn stopped(watched: &Mutex<Watched>, failure: Failure) -> bool {
     let mut seen = watched.locked();
     seen.activity = CameraActivity::default();
@@ -785,8 +697,7 @@ fn stopped(watched: &Mutex<Watched>, failure: Failure) -> bool {
     }
 }
 
-/// Waits `how_long` while answering requests with "not connected"; false when the watch was
-/// dropped meanwhile.
+/// False when the watch was dropped meanwhile.
 fn wait(requests: &mpsc::Receiver<Request>, how_long: Duration) -> bool {
     let until = std::time::Instant::now() + how_long;
     loop {

@@ -1,14 +1,3 @@
-// The dashboard: the cameras and what they have saved and seen, at a glance.
-// Under the header the other pages have, with the period it looks back over in
-// its bar, a row of numbers (each opening the page it sums up, the disk's
-// Settings), then the cards
-// on a grid of twelve columns as wide as the window: how full the drives are
-// beside what was saved day by day, when the cameras saw something by weekday
-// and hour beside the hours of the day added up, then the latest events beside
-// the space each camera's files take. A narrower window takes two columns, then
-// one. The cameras themselves are the Cameras page's, which the first number
-// opens. What it shows is in `overview.ts`; the charts and cards are
-// `ui/chart.tsx`'s.
 import { createAnimatedValue, effect, Scroll, signal, Text, View } from "nsh";
 import { Snapshots, Videos } from "ipcamera/native";
 import {
@@ -58,16 +47,12 @@ import { showSettings } from "./preferences";
 import { reload as reloadVideos, totalLabel } from "./recordings";
 import { reload as reloadSnapshots } from "./snapshots";
 
-/** How often the dashboard reads the videos again while a camera records, so their length, size and the free space keep up. */
 const WHILE_RECORDING_EVERY = 5000;
 
-// Each thing in its chart color (`CHART`). The drive is the disk tile's color: its other files in
-// the full color, and its free space a wash of it.
 const VIDEOS = SERIES[CHART.videos];
 const SNAPSHOTS = SERIES[CHART.snapshots];
 const OTHER = SERIES[CHART.disk];
 const FREE = WASHES[CHART.disk];
-// The events take the cameras' color, as the events page's badge does.
 const EVENTS = SERIES[CHART.cameras];
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
@@ -77,26 +62,19 @@ const shortWeekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
 const longWeekday = new Intl.DateTimeFormat(undefined, { weekday: "long" });
 const hourOnly = new Intl.DateTimeFormat(undefined, { hour: "numeric" });
 
-/** How many of the latest events the dashboard lists. */
 const LATEST = 5;
 
-/** The heatmap's lines and columns, as its cells name them: the weekdays, Sunday first, and the hours, midnight first. */
 const WEEKDAYS = Array.from({ length: 7 }, (_, weekday) => String(weekday));
 const HOURS = Array.from({ length: 24 }, (_, hour) => String(hour));
-/** The hours named under the hours' charts: midnight, 6 AM, noon and 6 PM. */
 const HOUR_TICKS = [0, 6, 12, 18];
 
-/** A day that is weekday `weekday` (0 for Sunday): 1 January 2023 was a Sunday. */
+/** A date on weekday `weekday` (0 for Sunday): 1 January 2023 was a Sunday. */
 const onWeekday = (weekday: number, hour = 0) => new Date(2023, 0, 1 + weekday, hour);
-/** "6 PM". */
 const hourName = (hour: number) => hourOnly.format(onWeekday(0, hour));
-/** "6 PM – 7 PM". */
 const hourSpan = (hour: number) => `${hourName(hour)} – ${hourName((hour + 1) % 24)}`;
 
-/** "1 camera", "3 cameras". */
 const counted = (count: number, one: string, many: string) => `${countLabel(count)} ${count === 1 ? one : many}`;
 
-/** A line in a card saying there is nothing to show yet. */
 function Nothing(props: { text: string }) {
   return (
     <View class="min-h-24 items-center justify-center">
@@ -105,7 +83,6 @@ function Nothing(props: { text: string }) {
   );
 }
 
-/** The numbers across the top, each opening the page it sums up; what is on disk opens Settings over the dashboard, where the folders are. */
 function Numbers() {
   const sums = summary;
   const inPeriod = () => days().reduce((total, day) => total + day.snapshots, 0);
@@ -154,7 +131,6 @@ function Numbers() {
   );
 }
 
-/** What a day's bar says when the pointer or the keys pick it out. */
 function DayTip(props: { day: Day }) {
   return (
     <View class="min-w-40 gap-1">
@@ -168,7 +144,6 @@ function DayTip(props: { day: Day }) {
   );
 }
 
-/** The videos and snapshots saved each day of the period, piled up. */
 function Activity() {
   const videos = () => days().reduce((total, day) => total + day.videos, 0);
   const shots = () => days().reduce((total, day) => total + day.snapshots, 0);
@@ -204,7 +179,6 @@ function Activity() {
   );
 }
 
-/** One drive: a ring of what fills it, the free space in its hole (or the part the pointer is over), and the parts to its right. */
 function DriveRing(props: { drive: Drive }) {
   const hovered = signal<Slice | undefined>(undefined);
   const other = () => Math.max(0, props.drive.total - props.drive.free - props.drive.videos - props.drive.snapshots);
@@ -243,14 +217,12 @@ function DriveRing(props: { drive: Drive }) {
   );
 }
 
-/** How full the drives under the videos and snapshots folders are. */
 function Storage() {
   const detail = () =>
     drives().length > 1 ? "The drives the videos and the snapshots are saved on." : "The drive the videos and snapshots are saved on.";
   return (
     <ChartCard title="Storage" detail={detail()} class="grow">
       <If when={spaceProblem()}>{(problem) => <Nothing text={problem()} />}</If>
-      {/* In the middle of what the card has left, as tall as the chart beside it makes the row. */}
       <View class="grow justify-center gap-6">
         <Each of={drives()} key={(drive) => drive.drive}>
           {(drive) => <DriveRing drive={drive()} />}
@@ -260,7 +232,6 @@ function Storage() {
   );
 }
 
-/** The space each camera's files take, largest first, each bar against the largest. */
 function SpaceByCamera() {
   const largest = () => cameraSpace()[0]?.total ?? 0;
   return (
@@ -294,7 +265,6 @@ function SpaceByCamera() {
   );
 }
 
-/** What an hour's cell or bar says when the pointer or the keys pick it out. */
 function HourTip(props: { title: string; events: number }) {
   return (
     <View class="min-w-36 gap-1">
@@ -304,10 +274,8 @@ function HourTip(props: { title: string; events: number }) {
   );
 }
 
-/** "Tuesday, 6 PM – 7 PM". */
 const cellTitle = (cell: HourCell) => `${longWeekday.format(onWeekday(cell.weekday))}, ${hourSpan(cell.hour)}`;
 
-/** When the cameras saw something over the period: a cell for each hour of each weekday, the more events the fuller its color. */
 function EventHours() {
   const total = () => hourCells().reduce((sum, cell) => sum + cell.events, 0);
   const detail = () =>
@@ -336,7 +304,6 @@ function EventHours() {
   );
 }
 
-/** The hours of the day over the period, whatever the weekday: the heatmap's columns added up, as bars. */
 function BusiestHours() {
   const total = () => hourTotals().reduce((sum, hour) => sum + hour.events, 0);
   const busiest = () => hourTotals().reduce((most, hour) => (hour.events > most.events ? hour : most));
@@ -358,11 +325,6 @@ function BusiestHours() {
   );
 }
 
-/**
- * One of the latest events: its picture, what the camera saw, whose camera and
- * how long ago. A press shows it on the events page, in the preview, with its
- * picture open full size where it saved one.
- */
 function LatestEvent(props: { event: EventItem }) {
   const event = () => props.event;
   const ago = () => agoLabel(event().startedAt, now());
@@ -403,7 +365,6 @@ function LatestEvent(props: { event: EventItem }) {
   );
 }
 
-/** The newest events, whatever the period, and a button to all of them. */
 function LatestEvents() {
   const latest = () => events().slice(0, LATEST);
   const today = () => {
@@ -431,8 +392,6 @@ function LatestEvents() {
 /** The dashboard page, in place of the stage and the PTZ panel. */
 export function DashboardPage() {
   const scroll = createAnimatedValue(0);
-  // Reads each folder now, then again whenever a file comes or goes, by this app or anything else,
-  // and the drives with them.
   Snapshots.onChange(() => {
     reloadSnapshots();
     reloadSpace();
@@ -441,8 +400,7 @@ export function DashboardPage() {
     reloadVideos();
     reloadSpace();
   });
-  // A file being written doesn't change the folder's listing, so while a camera records the videos
-  // and the drives are read again on a timer.
+  // A file being written doesn't change the folder's listing, so while a camera records the videos are reread on a timer.
   effect(() => {
     if (!recording()) return;
     const timer = setInterval(() => {
@@ -480,10 +438,6 @@ export function DashboardPage() {
       <If when={ready()}>
         <View class="w-full gap-4 px-6 pb-12 pt-6">
           <Numbers />
-          {/* As wide as the window, as the header is: twelve columns on a wide window, the charts of
-              time taking the most of them, two on a narrower one and one on a narrow one. Each card is
-              as tall as its row. Where the app keeps no event log (the web), the space by camera
-              takes the events' place. */}
           <View class="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-12">
             <View class="min-w-0 xl:col-span-4">
               <Storage />

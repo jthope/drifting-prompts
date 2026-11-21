@@ -1,15 +1,7 @@
-// A page's table, as the Cameras page lists its cameras: a row of column titles
-// that stays under the page's header as the rows scroll, then a row per item,
-// whose fill follows the pointer and the selection in the theme's
-// (`Look.listRow`), and a footer that stays put under them, with what the
-// table counts and its pager; while some rows are selected, a bar floats over
-// the rows' foot with what can be done to them; and the title of a group of
-// rows, which folds them. The columns are the page's: it gives each cell its
-// width, the same in the titles and the rows.
 import { type JSX, Text, View, type ViewStyle } from "nsh";
 import { Button as BaseButton } from "nsh/base";
 import { Appear } from "./appear";
-import { EdgeLine, look } from "./brand";
+import { look } from "./brand";
 import { IconButton } from "./button";
 import { InlineSelect } from "./field";
 import { Icon } from "./icon";
@@ -23,10 +15,7 @@ export type SortDirection = "ascending" | "descending" | null;
 /** The height of a table's row, and of its titles' row, in points. */
 export const TABLE_ROW = 44;
 
-/**
- * A column's title: small and muted. With `onSort` it is a button, which shows
- * which way the column sorts the table (`sort`) with an arrow after it.
- */
+/** A column's title; with `onSort`, a button showing which way the column sorts. */
 export function ColumnTitle(props: { title: string; sort?: SortDirection; onSort?: () => void; style?: ViewStyle }) {
   const label = () => (
     <>
@@ -53,12 +42,7 @@ export function ColumnTitle(props: { title: string; sort?: SortDirection; onSort
   );
 }
 
-/**
- * The title of a run of rows or pictures, which folds them away under it and
- * opens them again: a chevron, down while they show and to the side while
- * folded, the title and how many it holds (`count`). It tells a screen reader
- * whether it is open, as nsh's `Collapsible` asks of its trigger.
- */
+/** The title of a run of rows or pictures, which folds them away. */
 export function GroupTitle(props: { title: string; count: string; open: boolean; onToggle: () => void }) {
   return (
     <View
@@ -79,7 +63,7 @@ export function GroupTitle(props: { title: string; count: string; open: boolean;
   );
 }
 
-/** The row of column titles, on the page's color so the rows pass under it, over a line. */
+/** The row of column titles, on the page's color so the rows pass under it. */
 export function TitleRow(props: { children: JSX.Element }) {
   return (
     <View class="flex-row items-center border-b border-border bg-background" style={{ height: TABLE_ROW }}>
@@ -88,35 +72,32 @@ export function TitleRow(props: { children: JSX.Element }) {
   );
 }
 
-/** The class of a row's main text: the theme's while the row is selected, the page's otherwise. */
+/** The class of a row's main text, selected or not. */
 export const rowText = (selected: boolean) => (selected ? (look().listRow.selectedText ?? "text-foreground") : "text-foreground");
 
-/**
- * A row of a table: `selected` fills it in the theme's selection, and the
- * pointer over it in the theme's hover. Its cells are the page's
- * (`children`), which say what the row is to a screen reader: its press, say.
- */
-export function TableRow(props: { selected: boolean; children: JSX.Element }) {
+/** Keeps a row's fill clear of the line under it. */
+const ROW_FILL_INSET = 2;
+
+/** A row of a table; `line` draws a line along its foot, for every row with another after it. */
+export function TableRow(props: { selected: boolean; line?: boolean; children: JSX.Element }) {
   const fill = () => (props.selected ? look().listRow.selected : look().listRow.hover);
   return (
-    <View class={`flex-row items-center rounded-md ${fill()}`} style={{ height: TABLE_ROW }}>
-      {props.children}
+    <View style={{ height: TABLE_ROW }}>
+      <View class={`flex-1 flex-row items-center rounded-md ${fill()}`} style={{ marginVertical: ROW_FILL_INSET }}>
+        {props.children}
+      </View>
+      <If when={props.line}>
+        <View class="absolute bottom-0 left-2 right-2 h-px bg-border" style={{ pointerEvents: "none" }} />
+      </If>
     </View>
   );
 }
 
-/**
- * The bar that floats over a page's foot while some of its items are
- * selected: how many (`count`, left out where a button says it), what can be
- * done to them (`children`), and a button that clears the selection. It sits
- * at the page's start, under the rows' checkboxes, leaving the window's bottom
- * right to the toasts its actions bring. It rises into place as it comes, and
- * is simply there with reduced motion.
- */
+/** The bar floating over a page's foot while items are selected, at its start, clear of the toasts. */
 export function SelectionBar(props: { count?: string; onClear: () => void; children: JSX.Element }) {
   const surface = () => popupSurface(`flex-row items-center gap-1 py-1.5 pr-1.5 ${props.count === undefined ? "pl-1.5" : "pl-4"}`);
   return (
-    // Across the page's foot, from the rows' start, letting presses through beside the bar.
+    // `box-none` lets presses through beside the bar.
     <View class="absolute bottom-6 left-0 right-0 items-start px-4" style={{ pointerEvents: "box-none" }}>
       <Appear>
         <View class={surface().class} style={surface().style}>
@@ -139,27 +120,17 @@ export function SelectionBar(props: { count?: string; onClear: () => void; child
 /** The height of a table's footer, in points: as tall as a page header's bar. */
 export const TABLE_FOOTER = 48;
 
-/**
- * The bar under a table, which stays put while its rows scroll above it, on
- * the page's color over the page's line: what the table counts at its start
- * (`children`), and its pager at its end (`pager`).
- */
+/** The bar under a table that stays put while its rows scroll: its counts and its pager. */
 export function TableFooter(props: { pager?: JSX.Element; children: JSX.Element }) {
   return (
-    <View class="flex-row items-center gap-4 bg-background px-6" style={{ height: TABLE_FOOTER }}>
+    <View class="flex-row items-center gap-4 border-t border-border bg-background px-6" style={{ height: TABLE_FOOTER }}>
       <View class="min-w-0 flex-1 flex-row items-center gap-2">{props.children}</View>
       {props.pager}
-      <EdgeLine edge="top" />
     </View>
   );
 }
 
-/**
- * A table's pager: how many rows a page holds (`size`, one of `sizes`), which
- * page shows (`page`, from 0) of how many (`pages`), and the buttons that turn
- * to the first, the previous, the next and the last. `onPage` is told the page
- * to turn to, `onSize` the rows a page should hold.
- */
+/** A table's pager: rows per page, which page (from 0) of how many, and the buttons to turn. */
 export function Pager(props: { page: number; pages: number; size: number; sizes: number[]; onPage: (index: number) => void; onSize: (size: number) => void }) {
   const first = () => props.page <= 0;
   const last = () => props.page >= props.pages - 1;

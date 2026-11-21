@@ -1,8 +1,4 @@
-//! Who the server answers: the page and its script, the packaged web build at the root, the players
-//! under this machine's other name, the this-machine-only check on the host and the origin, the
-//! one origin allowed across origins, and a server's password.
-//!
-//! Each test serves a library of its own from a temporary folder, on a free port.
+//! Who the server answers: this machine's host and origins, the one allowed origin, and a password.
 
 #[allow(dead_code)]
 #[path = "support/server.rs"]
@@ -160,7 +156,6 @@ fn a_server_with_a_password_answers_only_those_who_signed_in() {
         "the file holds a hash, never the password"
     );
 
-    // Nothing that tells or changes anything answers, whichever way it is asked.
     for path in [
         "/api/cameras".to_string(),
         "/api/library".to_string(),
@@ -182,7 +177,6 @@ fn a_server_with_a_password_answers_only_those_who_signed_in() {
     let made_up = get(port, "/api/cameras", &[("Authorization", "Bearer made-up")]);
     assert_eq!(made_up.status, 401);
 
-    // The pages' own files do, and so does asking whether to sign in.
     assert_eq!(get(port, "/watch", &[]).status, 200);
     assert_eq!(get(port, "/player.js", &[]).status, 200);
     let session = get(port, "/api/session", &[]);

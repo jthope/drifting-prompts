@@ -1,37 +1,19 @@
-// Editing a view's layout: its tiles moved, resized, added and removed on the
-// grid every view's tiles sit on (`Views.grid`, 12 × 12), as a draft that the
-// stage shows in place of the live tiles until Done saves it (`Views.arrange`)
-// or Cancel drops it. A draft keeps the library's rule
-// (`ipcamera_core::check_arrangement`): every tile on the grid, at least the
-// smallest size each way, and no two overlapping. A move or a resize that would
-// break it isn't made, so the tile goes back where it was. Like `model.ts`, the
-// draft is a module-level signal, so the header's layout menu and the stage
-// share it.
+// A draft keeps `ipcamera_core::check_arrangement`'s rule: every tile on the grid, at least the smallest size, none overlapping.
 import { computed, signal } from "nsh";
 import { type CellInfo, type LayoutInfo, type ShownStream, type ViewInfo, Views } from "ipcamera/native";
 import { failed } from "./actions";
 import { eachOnce, grid, layouts, playedIn, playedStream, refresh, views, zoomedTile } from "./model";
 
-/**
- * One tile of a draft: where it is, and which of the view's tiles it was, by
- * index (`null` for a new one), whose camera it keeps. `key` stays with it as it
- * moves, for the stage.
- */
+/** One tile of a draft: its cell, the view's tile it was (`null` for a new one), and a `key` that stays with it as it moves. */
 export type DraftTile = { key: number; was: number | null; cell: CellInfo };
 
 /** The layout being edited: the view's id, and its tiles as they are now; `null` while none is. */
 export const draft = signal<{ view: string; tiles: DraftTile[] } | null>(null);
 
-/** Where the draft's tiles are, in order: what the layout menu shows and checks while it is open. */
+/** Where the draft's tiles are, in order. */
 export const draftCells = computed(() => draft()?.tiles.map((tile) => tile.cell) ?? []);
 
-/**
- * The camera in `view`'s tile `was`, one it shows or one it keeps past its
- * cells (`hiddenTiles`), and the stream it plays: the one it played on the
- * stage (`played`, as `playedIn` has them) for one it shows, and for one it
- * keeps, which no picture has shown, the one it picks, its camera's own on
- * Auto. None for a new tile or an empty one.
- */
+/** The camera and stream in `view`'s tile `was`, shown or kept past its cells; none for a new or empty tile. */
 export function showingOf(view: ViewInfo, was: number | null, played = playedIn(view)): ShownStream | undefined {
   if (was === null) return undefined;
   const shown = was < view.tiles.length;
@@ -41,11 +23,7 @@ export function showingOf(view: ViewInfo, was: number | null, played = playedIn(
   return { camera, stream: (shown ? played[was] : playedStream(camera, view.hiddenStreams[past] ?? "", [])) ?? "" };
 }
 
-/**
- * How the picture of `view`'s tile `was` fills it, as `showingOf` finds the
- * tile: its own fit, which it keeps wherever it is moved, else the view's,
- * which a new tile takes.
- */
+/** How the picture of `view`'s tile `was` fills it: its own fit, else the view's. */
 export function fitOf(view: ViewInfo, was: number | null): string {
   if (was === null) return view.fit;
   const fit = was < view.tiles.length ? view.fits[was] : view.hiddenFits[was - view.tiles.length];
@@ -58,11 +36,7 @@ export function streamsOf(view: ViewInfo, tiles: DraftTile[]): ShownStream[] {
   return eachOnce(tiles.flatMap((tile) => showingOf(view, tile.was, played) ?? []));
 }
 
-/**
- * The streams the draft's tiles show, each once, while a layout is edited:
- * the stage's in place of its view's own, so a camera a layout brings back
- * from past the cells plays at once. `undefined` while none is.
- */
+/** The streams the draft's tiles show, each once, so a camera a layout brings back plays at once; `undefined` while none is edited. */
 export const draftStreams = computed(() => {
   const current = draft();
   const view = current && views().find((each) => each.id === current.view);
@@ -107,7 +81,6 @@ export function fits(tiles: DraftTile[], cell: CellInfo, moving?: number): boole
 
 const within = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
 
-/** Puts the draft's tile keyed `key` at `to(cell)`, when that fits; says whether it did. */
 function place(key: number, to: (cell: CellInfo) => CellInfo): boolean {
   const current = draft();
   const tile = current?.tiles.find((each) => each.key === key);
@@ -118,10 +91,7 @@ function place(key: number, to: (cell: CellInfo) => CellInfo): boolean {
   return true;
 }
 
-/**
- * Moves the tile keyed `key` by `columns` and `rows`, stopping at the grid's
- * edges; says whether it moved, which it doesn't onto another tile.
- */
+/** Moves tile `key` by `columns` and `rows` within the grid; says whether it moved. */
 export function moveTile(key: number, columns: number, rows: number): boolean {
   return place(key, (cell) => ({
     ...cell,
@@ -130,22 +100,16 @@ export function moveTile(key: number, columns: number, rows: number): boolean {
   }));
 }
 
-/** How far a resize moves each of a tile's edges, in cells, right and down being positive; an edge left out stays put. */
+/** How far a resize moves each of a tile's edges, in cells, right and down positive. */
 export type EdgeMoves = { left?: number; top?: number; right?: number; bottom?: number };
 
-/** One axis of a resize: the tile's start and span along it after its start edge moved by `start` and its end edge by `end`, no smaller than the smallest and within the grid. */
 function stretch(at: number, span: number, start: number, end: number): [number, number] {
   const from = within(at + start, 0, at + span - grid.smallest);
   const to = within(at + span + end, from + grid.smallest, grid.size);
   return [from, to - from];
 }
 
-/**
- * Moves the edges of the tile keyed `key` by `edges`, each no closer to the
- * one across from it than the smallest size and no further than the grid's
- * edge, so a tile resizes from any edge or corner with the others staying put;
- * says whether it changed, which it doesn't over another tile.
- */
+/** Moves tile `key`'s edges by `edges`, within the grid and no smaller than the smallest; says whether it changed. */
 export function resizeTile(key: number, edges: EdgeMoves): boolean {
   return place(key, (cell) => {
     const [column, columnSpan] = stretch(cell.column, cell.columnSpan, edges.left ?? 0, edges.right ?? 0);
@@ -154,7 +118,7 @@ export function resizeTile(key: number, edges: EdgeMoves): boolean {
   });
 }
 
-/** Where a new tile goes among `tiles`: the first room from the top left for one 4, then 3, then the smallest cells square; `null` when there is none. */
+/** Where a new tile goes among `tiles`: the first room from the top left, largest first; `null` for none. */
 export function roomFor(tiles: DraftTile[]): CellInfo | null {
   for (const span of [4, 3, grid.smallest]) {
     for (let row = 0; row + span <= grid.size; row++) {
@@ -196,11 +160,7 @@ export function matchingLayout(cells: CellInfo[]): LayoutInfo | undefined {
   return layouts.find((layout) => layout.cells.length === cells.length && layout.cells.every((cell, index) => sameCell(cell, cells[index])));
 }
 
-/**
- * Saves the draft to its view and stops editing; resolves with whether it was
- * saved. A draft no different from the view closes with nothing to save; one
- * the library refuses stays open, saying why.
- */
+/** Saves the draft to its view and stops editing; a draft the library refuses stays open. */
 export async function finishEditing(view: ViewInfo): Promise<boolean> {
   const current = draft();
   if (!current || current.view !== view.id) return false;

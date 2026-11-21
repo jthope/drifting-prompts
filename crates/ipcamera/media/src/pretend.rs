@@ -1,10 +1,5 @@
 //! A pretend camera on this machine: a moving test pattern, encoded to H.264 by Media Foundation
-//! and served over RTSP by glass2glass at `/stream`, with no login and no sound.
-//!
-//! It reaches a session as a camera stream does, so everything a stream feeds works on it. The
-//! `pretend_camera` example serves one for trying the app, and this crate's tests and the server's
-//! stand one up so they never touch a real camera. It needs Media Foundation's encoder, so it is
-//! Windows only, and it is behind the `pretend-camera` feature so the app never carries it.
+//! and served over RTSP at `/stream`, with no login and no sound.
 
 use std::{net::TcpListener, thread};
 
@@ -28,7 +23,7 @@ pub struct Pattern {
     pub width: u32,
     /// The picture's height, in pixels.
     pub height: u32,
-    /// Pictures a second, paced in real time as a camera sends them.
+    /// Pictures a second, paced in real time.
     pub fps: u32,
     /// How many pictures it sends before it stops.
     pub frames: u64,
@@ -75,15 +70,13 @@ pub fn serve(listener: TcpListener, pattern: Pattern) -> Result<()> {
     })
 }
 
-/// Serves `pattern` on a free local port, from a thread of its own, and returns the settings of a
-/// camera that reaches it.
+/// Serves `pattern` on a free local port from its own thread; returns a camera that reaches it.
 pub fn start(pattern: Pattern) -> Result<CameraConfig> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
     thread::Builder::new()
         .name("ipcamera-pretend-camera".into())
         .spawn(move || {
-            // A test that needs the camera fails on its own when the camera is gone.
             let _ = serve(listener, pattern);
         })?;
     Ok(setting(port))

@@ -7,7 +7,7 @@ import { grid, layouts } from "./model";
 
 const percent = (cells: number): `${number}%` => `${(cells / grid.size) * 100}%`;
 
-/** A small picture of a view's tiles (`cells`, on its grid): each a block, recolored with its menu item's text while that is hovered. */
+/** A small picture of a view's tiles. */
 export function LayoutThumb(props: { cells: CellInfo[] }) {
   return (
     <View style={{ width: 24, height: 16 }}>
@@ -31,13 +31,7 @@ export function LayoutThumb(props: { cells: CellInfo[] }) {
   );
 }
 
-/**
- * How the view divides the stage. The button shows its tiles as they are; its
- * menu shows each layout as a picture beside its name, the view's checked when
- * its tiles are one, and Edit layout, which moves and resizes them tile by
- * tile. While the layout is edited, a layout picked here lays the draft out
- * rather than the saved view. `class` places the button.
- */
+/** How the view divides the stage; while the layout is edited, a layout picked here lays out the draft. */
 export function LayoutMenu(props: { view: ViewInfo; class?: string }) {
   const editing = () => draft()?.view === props.view.id;
   const cells = () => (editing() ? draftCells() : props.view.cells);

@@ -1,6 +1,5 @@
-//! What the server's tests share: a server of their own on a free local port, with a library and a
-//! `settings.json` in a temporary folder, and plain HTTP and WebSocket requests to it, as a browser
-//! makes them. Each test file takes it in with `#[path]`, so it is no test program of its own.
+//! What the server's tests share: a server on a free local port, from a temporary folder, and
+//! plain HTTP and WebSocket requests to it.
 
 use std::{
     io::{Read, Write},
@@ -39,7 +38,7 @@ impl Running {
     }
 }
 
-/// Serves `cameras` from a library of their own. Returns the server and the cameras' ids.
+/// Serves `cameras` from a library of their own; returns the server and the cameras' ids.
 pub fn serve(cameras: Vec<CameraConfig>) -> (Running, Vec<CameraId>) {
     serve_with(cameras, ipcamera_server::Options::default())
 }
@@ -65,8 +64,7 @@ pub fn serve_with_a_password(cameras: Vec<CameraConfig>) -> (Running, Vec<Camera
     })
 }
 
-/// Serves `cameras` from a library of their own, as `options` say, once `set_up` has changed the
-/// server's `settings.json`.
+/// Serves `cameras` as `options` say, once `set_up` has changed the server's `settings.json`.
 pub fn serve_set_up(
     cameras: Vec<CameraConfig>,
     options: ipcamera_server::Options,
@@ -115,7 +113,7 @@ pub fn serve_set_up(
     (running, ids)
 }
 
-/// What a request brought back: the status code, the head and the body, as text and as bytes.
+/// What a request brought back.
 pub struct Answer {
     /// The status code.
     pub status: u16,
@@ -149,7 +147,7 @@ pub fn eventually(within: Duration, what: &str, mut check: impl FnMut() -> bool)
     }
 }
 
-/// Sends `GET path` with `headers`, naming this machine as the host unless `headers` name one.
+/// Sends `GET path` with `headers`.
 pub fn get(port: u16, path: &str, headers: &[(&str, &str)]) -> Answer {
     send(port, "GET", path, headers, "")
 }
@@ -165,8 +163,7 @@ pub fn post(port: u16, path: &str, body: &str) -> Answer {
     )
 }
 
-/// Sends `method path` with `headers` and `body`, naming this machine as the host unless `headers`
-/// name one.
+/// Sends `method path` with `headers` and `body`, to this machine as the host unless they name one.
 pub fn send(port: u16, method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> Answer {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("the server answers");
     stream

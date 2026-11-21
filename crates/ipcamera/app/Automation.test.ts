@@ -1,7 +1,3 @@
-// The menus in Settings' Automation section (`views/automation.tsx`): what each
-// event saves, how long it stays open, how its videos are made
-// (`views/eventvideo.ts`, which a camera's Events part shares), and the storage
-// limits; what each choice reads as, and a hand-edited number kept among them.
 import { expect, test } from "nsh/test";
 import { Automation } from "ipcamera/native";
 import { CAPTURES, limitItems, limitLabel, windowItems, windowLabel } from "./views/automation";
@@ -36,14 +32,11 @@ test("the kinds that save a video stay in the app's order, and a camera offers t
   expect(animals.kinds).toEqual(["animal"]);
   expect(withKind(animals, "person", true).kinds).toEqual(["person", "animal"]);
   expect(withKind(animals, "animal", false).kinds).toEqual([]);
-  // Save videos of lists every kind once, people over animals, vehicles over faces, then packages.
   expect(KIND_COLUMNS.map((column) => column.map((kind) => kind.title))).toEqual([["People", "Animals"], ["Vehicles", "Faces"], ["Packages"]]);
   expect(KIND_COLUMNS.flat().length).toBe(KINDS.length);
 
-  // A camera that listed none: its own, or its brand's main or sub stream.
   expect(cameraStreams({ streams: [], eventVideo: video }).map((each) => each.value)).toEqual(["own", "main", "sub"]);
   const listed = { name: "main", path: "/live/1", detail: "", title: "1920×1080 · H.264 · main", lens: "" };
-  // One that listed some offers those, and keeps a saved one it no longer lists.
   expect(cameraStreams({ streams: [listed], eventVideo: { ...video, stream: "/gone" } }).map((each) => each.value)).toEqual(["own", "/live/1", "/gone"]);
 });
 

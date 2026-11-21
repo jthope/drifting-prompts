@@ -1,10 +1,5 @@
-//! PTZ through ONVIF's PTZ service: `ContinuousMove`, which lasts until a `Stop`, for a camera
-//! that is neither Dahua's (DVRIP) nor Reolink's (its own API). A light bulb camera on a pan and
-//! tilt base is one.
-//!
-//! The probe logs in once, finds the PTZ and media services, the media profile a move names, and
-//! whether the camera pans, tilts or zooms. A refused login is final: the client remembers it and
-//! sends nothing after it.
+//! PTZ through ONVIF's PTZ service, for a camera of another brand: `ContinuousMove`, which lasts
+//! until a `Stop`.
 
 use std::{thread, time::Duration};
 
@@ -14,7 +9,6 @@ use crate::{
     onvif::{OnvifClient, OnvifError},
 };
 
-/// What a move needs: the logged-in client, the PTZ service's path and the profile a move names.
 struct Ready {
     client: OnvifClient,
     ptz: String,
@@ -25,13 +19,13 @@ struct Ready {
 pub struct OnvifPtz {
     camera: CameraConfig,
     ready: Option<Ready>,
-    /// Why the camera refused the login, which is never tried again.
+    /// A refused login is never tried again.
     refused: bool,
     status: String,
 }
 
 impl OnvifPtz {
-    /// A client for `camera`'s ONVIF port. It logs in on the first [`Driver::probe`].
+    /// A client for `camera`'s ONVIF port, logging in on the first probe.
     pub fn new(camera: &CameraConfig) -> Self {
         Self {
             camera: camera.clone(),
@@ -41,7 +35,7 @@ impl OnvifPtz {
         }
     }
 
-    /// Logs in and finds what a move needs; `Ok(false)` for a camera with nothing to move.
+    /// `Ok(false)` for a camera with nothing to move.
     fn open(&mut self) -> Result<bool, OnvifError> {
         let camera = &self.camera;
         let (mut client, _) = OnvifClient::connect(
@@ -68,7 +62,6 @@ impl OnvifPtz {
         Ok(true)
     }
 
-    /// Says why a call failed, and forgets a connection that broke or a login that was refused.
     fn failed(&mut self, error: OnvifError) {
         self.status = format!("ONVIF PTZ: {error}");
         match error {
@@ -81,8 +74,7 @@ impl OnvifPtz {
         }
     }
 
-    /// Sends a move, or a stop for a still velocity, logging in again first when the connection
-    /// broke; whether the camera took it.
+    /// Sends a move, or a stop for a still velocity, logging in again after a broken connection.
     fn send(&mut self, velocity: PtzVelocity) -> bool {
         if self.refused {
             return false;
@@ -150,7 +142,7 @@ impl Driver for OnvifPtz {
     }
 
     fn move_by(&mut self, velocity: PtzVelocity) -> bool {
-        // A still velocity is a stop, which `PtzSession` sends as one.
+        // A still velocity arrives as a stop of its own.
         velocity.is_still() || self.send(velocity)
     }
 

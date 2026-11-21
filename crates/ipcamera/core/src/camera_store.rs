@@ -1,17 +1,5 @@
-//! Every camera the app knows, each entered once: `data\settings\cameras.json`.
-//!
-//! The file keeps them in the order the app lists them (the sidebar's All cameras, and where every
-//! other list of cameras starts): the order they were added, until one is moved
-//! ([`CameraStore::move_camera`]).
-//!
-//! This store knows nothing about groups. Groups refer to cameras by id, so changing a camera here
-//! changes it in every group at once. To delete a camera from the groups too, use
-//! [`Library::delete_camera`](crate::library::Library::delete_camera).
-//!
-//! The cameras in memory hold their passwords as they are, for the media and PTZ code to log in
-//! with. The file never does on Windows: each one is encrypted for the Windows account as it is
-//! written, and decrypted as it is read (`saved_password.rs`). Elsewhere it is kept as it is, in a
-//! file only its owner can read.
+//! Every camera the app knows, in order: `data\settings\cameras.json`. Passwords are in the clear
+//! in memory and sealed in the file (`saved_password.rs`).
 
 use std::{collections::HashSet, path::PathBuf};
 
@@ -26,15 +14,14 @@ use crate::{
     saved_password,
 };
 
-/// `cameras.json`: its cameras, each password as it is, which the file keeps as
-/// `saved_password.rs` says.
+/// `cameras.json`, each password in the clear.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CameraFile {
     version: u32,
     cameras: Vec<CameraConfig>,
 }
 
-/// The file's text as it is: each password as `saved_password.rs` keeps it.
+/// The file as written, each password sealed.
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
 struct OnDisk {
@@ -74,16 +61,13 @@ impl<'de> Deserialize<'de> for CameraFile {
 impl Document for CameraFile {
     type Format = Json;
     const VERSION: u32 = 1;
-    /// The passwords: on Windows they are encrypted for the account, elsewhere only this keeps
-    /// them from other accounts.
+    /// Without DPAPI, only this keeps the passwords from other accounts.
     const OWNER_ONLY: bool = true;
 
     fn version_mut(&mut self) -> Option<&mut u32> {
         Some(&mut self.version)
     }
 
-    /// A camera added by hand may have no id, or a copy of another's. Each gets a new one; the
-    /// first camera with a repeated id keeps it, so groups that list it still mean that camera.
     fn repair(&mut self) -> bool {
         give_unique_ids(&mut self.cameras)
     }
@@ -106,22 +90,19 @@ impl CameraStore {
     /// The file's name inside `data\settings`.
     pub const FILE: &'static str = "cameras.json";
 
-    /// Opens the cameras saved at `path`. A missing file is an empty list, and nothing is written
-    /// until the first change.
+    /// Opens the cameras saved at `path`; a missing file is an empty list.
     pub fn open(path: impl Into<PathBuf>) -> Self {
         Self {
             file: FileStore::open(path.into()),
         }
     }
 
-    /// No cameras, and no file: changes are kept in memory only.
     pub(crate) fn in_memory() -> Self {
         Self {
             file: FileStore::in_memory(),
         }
     }
 
-    /// `cameras`, ids and all, and no file: a copy whose changes are kept in memory only.
     pub(crate) fn holding(cameras: Vec<CameraConfig>) -> Self {
         Self {
             file: FileStore::holding(CameraFile {
@@ -131,8 +112,7 @@ impl CameraStore {
         }
     }
 
-    /// Every camera, in the order they are shown: the order they were added, unless one was moved
-    /// since ([`move_camera`](Self::move_camera)).
+    /// Every camera, in order.
     pub fn list(&self) -> Vec<CameraConfig> {
         self.file.read(|file| file.cameras.clone())
     }
@@ -157,8 +137,7 @@ impl CameraStore {
         self.file.read(|file| find(&file.cameras, id).is_some())
     }
 
-    /// Adds `camera` at the end of the list and returns the new id it is given. Any id it already
-    /// had is replaced, so adding a copy of a camera makes a second camera.
+    /// Adds `camera` at the end under a new id, which it returns.
     pub fn add(&self, mut camera: CameraConfig) -> Result<CameraId, StoreError> {
         let id = CameraId::generate();
         camera.id = id.clone();
@@ -169,9 +148,7 @@ impl CameraStore {
         Ok(id)
     }
 
-    /// Replaces several cameras' settings in one save. Each id stays as it was, whatever its
-    /// settings say, so every group that lists it still does. An unknown id changes nothing at
-    /// all, so the file never holds half of a change.
+    /// Replaces cameras' settings in one save, keeping their ids; an unknown id changes none.
     pub fn update_many(&self, cameras: Vec<(CameraId, CameraConfig)>) -> Result<(), StoreError> {
         self.file.update(|file| {
             for (id, mut camera) in cameras {
@@ -183,8 +160,7 @@ impl CameraStore {
         })
     }
 
-    /// Moves camera `id` to `index` in the list, which is where the sidebar's All cameras shows it.
-    /// An index past the end moves it to the end. Moving it to where it is already saves nothing.
+    /// Moves camera `id` to `index` in the list, or to the end past it.
     pub fn move_camera(&self, id: &CameraId, index: usize) -> Result<(), StoreError> {
         self.file.update(|file| {
             let from = position(&file.cameras, id)?;
@@ -195,8 +171,7 @@ impl CameraStore {
         })
     }
 
-    /// Removes camera `id` from the list. Groups that list it are left as they are: use
-    /// [`Library::delete_camera`](crate::library::Library::delete_camera) to clear those too.
+    /// Removes camera `id` from the list, leaving the groups that list it as they are.
     pub fn remove(&self, id: &CameraId) -> Result<(), StoreError> {
         self.file.update(|file| {
             let index = position(&file.cameras, id)?;
@@ -434,7 +409,6 @@ mod tests {
     fn a_password_this_account_cannot_decrypt_reads_as_none_and_is_saved_as_none() {
         let folder = TempDir::new().unwrap();
         let path = folder.path().join(CameraStore::FILE);
-        // Base64 that no DPAPI call on this account made, as from another account or machine.
         fs::write(
             &path,
             r#"{ "cameras": [ { "id": "a", "name": "Porch", "password": "c2VjcmV0" } ] }"#,

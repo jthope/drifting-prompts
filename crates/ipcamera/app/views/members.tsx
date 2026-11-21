@@ -1,9 +1,3 @@
-// A group's dialog: its name across the top, then two lists side by side, its
-// cameras on the left in the order the sidebar lists them, each moved up or
-// down or taken out, and the other cameras on the right, each put in with a
-// press, under a search. Each list scrolls on its own. Save writes the name and
-// the cameras together, in one save (`Groups.save`); Create makes a new group of
-// them (`Groups.add`). Cancel, Escape and the backdrop discard the edits.
 import { computed, effect, type JSX, Scroll, signal, Text, untracked, View } from "nsh";
 import { type CameraState, Groups } from "ipcamera/native";
 import { Button, EditorDialog, IconButton, look, SearchField, StatusDot, TextField } from "../../../dp/ui";
@@ -11,10 +5,8 @@ import { groupAdded, groupEditing } from "./actions";
 import { countLabel } from "./library";
 import { groups, refresh, states } from "./model";
 
-/** "1 camera", "3 cameras". */
 const cameraCount = (count: number) => (count === 1 ? "1 camera" : `${countLabel(count)} cameras`);
 
-/** A camera in one of the dialog's lists: its status and name, then its buttons (`children`). */
 function CameraLine(props: { camera: CameraState; children: JSX.Element }) {
   return (
     <View class={`h-9 flex-row items-center gap-2.5 rounded-md pl-2.5 pr-1 ${look().listRow.hover}`}>
@@ -27,11 +19,6 @@ function CameraLine(props: { camera: CameraState; children: JSX.Element }) {
   );
 }
 
-/**
- * One of the dialog's two lists, sharing its width with the other: its title,
- * a line about it (`note`) or a search over it (`search`), and its cameras
- * (`children`), which scroll under them.
- */
 function Pane(props: { title: string; note?: string; search?: JSX.Element; children: JSX.Element }) {
   return (
     <View class="min-w-0 flex-1 gap-2 pt-3">
@@ -53,16 +40,12 @@ function Pane(props: { title: string; note?: string; search?: JSX.Element; child
 
 export function GroupDialog() {
   const name = signal("");
-  /** The group's cameras, by id, in its order, as edited so far. */
   const members = signal<string[]>([]);
-  /** What the search over the other cameras holds. */
   const search = signal("");
-  /** Why the last save failed. It stays until the next try, rather than closing as if it had worked. */
   const failure = signal("");
   const adding = () => groupEditing()?.group === null;
 
-  // Each opening starts from what is saved, or from nothing for a new group, which is what makes
-  // closing discard the edits.
+  // Each opening starts from what is saved, which is what makes closing discard the edits.
   effect(() => {
     const asked = groupEditing();
     if (!asked) return;
@@ -75,9 +58,8 @@ export function GroupDialog() {
     });
   });
 
-  /** The group's cameras that exist, in its order: one deleted while the dialog is open drops out. */
+  /** The group's cameras that still exist: one deleted while the dialog is open drops out. */
   const inGroup = computed(() => members().flatMap((id) => states().find((camera) => camera.id === id) ?? []));
-  /** The cameras not in it, in the order they were added, that every word of the search finds. */
   const others = computed(() => {
     const words = search().toLowerCase().split(/\s+/).filter((word) => word !== "");
     return states().filter((camera) => !members().includes(camera.id) && words.every((word) => camera.name.toLowerCase().includes(word)));
@@ -87,7 +69,7 @@ export function GroupDialog() {
 
   const close = () => groupEditing.set(null);
 
-  // Saving takes a moment, so a second press while it does is ignored rather than saved twice.
+  // A second press while saving is ignored rather than saved twice.
   let saving = false;
   const save = async () => {
     const asked = untracked(groupEditing);
@@ -112,7 +94,6 @@ export function GroupDialog() {
     }
   };
 
-  /** Moves camera `id` by `step` places in the group's order. */
   const move = (id: string, step: number) => {
     const list = inGroup().map((camera) => camera.id);
     const from = list.indexOf(id);
@@ -125,7 +106,6 @@ export function GroupDialog() {
   const takeOut = (id: string) => members.set(members().filter((each) => each !== id));
   const putIn = (id: string) => members.set([...members(), id]);
 
-  /** The group's cameras, each with where it stands, for the buttons that move it. */
   const placed = () => inGroup().map((camera, index) => ({ camera, index }));
 
   return (

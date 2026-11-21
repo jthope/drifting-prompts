@@ -1,5 +1,3 @@
-// How Split's two sides line up (`views/scrollsync.ts`): the places they share,
-// and where a scroll on one side falls on the other.
 import { expect, test } from "nsh/test";
 import { anchorsOf, follow } from "./views/scrollsync";
 
@@ -19,7 +17,6 @@ test("a scroll on one side falls in proportion between the places around it on t
   expect(follow(100, raw, page)).toBe(150);
   expect(follow(200, raw, page)).toBe(325);
   expect(follow(800, raw, page)).toBe(1200);
-  // And back, the same places the other way.
   expect(follow(325, page, raw)).toBe(200);
   // Past either end, it stays at the end.
   expect(follow(900, raw, page)).toBe(1200);

@@ -1,18 +1,3 @@
-// The events page: what the cameras saw, each with what it saved, laid out like
-// the snapshots (the collapsing header over the grid of `grid.tsx`) and
-// narrowed, sorted, grouped and selected the same way. It opens as a log, the
-// grid's table at the List size: a row each, under a heading for each day that
-// folds its rows away, saying when, what, whose camera and what it saved, and
-// ending at its columns' width. Beside it, where the page has room, the
-// preview shows one event at a time: its picture, or its videos in place,
-// which play when asked to, with the ways to its camera and its files; the
-// line between the two drags the table wider or narrower. A press of a row shows it
-// there, and Up and Down step through the rows; Control and Shift select, as
-// on the Cameras page, and a double press opens what it saved full size. Where
-// the page is too narrow for the preview, a plain press selects, as Explorer's does.
-// The View menu's other sizes show the events as pictures, as the snapshots
-// page does. The log itself is followed by `eventlog.ts`, whatever the page;
-// the way from an event to its files, and back, is `linked.ts`.
 import { type Accessor, computed, Image, signal, Text, Video, View, type ViewStyle } from "nsh";
 import { Automation, Preferences, Videos } from "ipcamera/native";
 import { Button, Card, ColumnTitle, EmptyState, Icon, IconButton, MediaTile, MenuOpener, OverlayChip, Press, RecMark, rowText, StatusDot } from "../../../dp/ui";
@@ -55,19 +40,12 @@ import { PictureViewer } from "./viewer";
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
 
-/** What a screen reader calls an event: what, where and when. */
 const eventLabel = (event: EventItem) => `${whatLabel(event)} at ${cameraName(event.camera)}, ${startedInFull(event)}`;
 
 /** `Seen 6 times`: how often the camera saw an event within its window; `""` for one pass. */
 export const sightingsLabel = (event: EventItem) => (event.sightings > 1 ? `Seen ${countLabel(event.sightings)} times` : "");
 
-/**
- * An event's picture, filling its frame: its snapshot's thumbnail, never the
- * snapshot itself, which decodes to 8 MB at 1080p; else its first video's;
- * else nothing, the frame alone. Over a tile's, `Now` in its corner while the
- * camera sees it now. A row's is too small for the corner (`small`): its row
- * says Now instead. The dashboard's latest events show it too.
- */
+/** An event's picture: its snapshot's thumbnail, never the full snapshot, else its first video's. */
 export function EventPicture(props: { event: EventItem; small?: boolean }) {
   const still = () => (props.event.thumbnail !== "" ? props.event.thumbnail : (eventVideos(props.event)[0]?.thumbnail ?? ""));
   return (
@@ -84,11 +62,6 @@ export function EventPicture(props: { event: EventItem; small?: boolean }) {
   );
 }
 
-/**
- * One event at a picture size: its picture over what the camera saw, whose
- * camera and when. A press opens what it saved, or picks it while others are
- * selected.
- */
 function Tile(props: { event: EventItem }) {
   const name = () => props.event.name;
   return (
@@ -109,12 +82,6 @@ function Tile(props: { event: EventItem }) {
   );
 }
 
-/**
- * Each column's width in a row of the table, the same in the titles and the
- * rows. What the camera saw takes what is left, down to its narrowest, so the
- * table fits a narrow page; at most the table is `TABLE_WIDTH` wide, unless it
- * is dragged wider beside the preview.
- */
 const COLUMN: Record<"time" | "what" | "camera" | "saved" | "actions", ViewStyle> = {
   time: { width: 92 },
   what: { flex: 1, minWidth: 120 },
@@ -123,12 +90,9 @@ const COLUMN: Record<"time" | "what" | "camera" | "saved" | "actions", ViewStyle
   actions: { width: 44 },
 };
 
-/** The table's cells at their widest: what the camera saw gets 200 points of it. */
 const TABLE_WIDTH = 92 + 200 + 150 + 72 + 44;
-/** The table's cells at their narrowest, what the camera saw at its least: the table is dragged no narrower. */
 const TABLE_LEAST = 92 + 120 + 150 + 72 + 44;
 
-/** The table's column titles. Time sorts the events newest or oldest first, as the header's order does. */
 function EventTitles() {
   const newest = () => eventLibrary.order() === "newest";
   return (
@@ -144,7 +108,6 @@ function EventTitles() {
   );
 }
 
-/** What an event saved, as marks at its row's end: a picture, and its videos with how many past one; nothing for what it didn't save, or what was deleted since. */
 function Saved(props: { event: EventItem }) {
   return (
     <View class="flex-row items-center gap-2">
@@ -165,14 +128,6 @@ function Saved(props: { event: EventItem }) {
   );
 }
 
-/**
- * An event's cells in the table: when, what the camera saw, with how many
- * times it saw it and Now while it sees it now, whose camera, and what it
- * saved, all one press: beside the preview (`beside`) a plain press shows it
- * there, elsewhere it selects as Explorer does, and Control and Shift select
- * either way; a double press opens what it saved full size. Then its menu,
- * which a right press anywhere on the row opens too.
- */
 function EventCells(props: { event: EventItem; beside: boolean }) {
   const event = () => props.event;
   const on = () => eventLibrary.isSelected(event().name);
@@ -231,7 +186,6 @@ function EventCells(props: { event: EventItem; beside: boolean }) {
   );
 }
 
-/** The page's table, which the grid shows at the List size, its rows stepping the preview. */
 const TABLE: LibraryTable<EventItem> = {
   titles: () => <EventTitles />,
   cells: (event, beside) => <EventCells event={event()} beside={beside()} />,
@@ -242,24 +196,19 @@ const TABLE: LibraryTable<EventItem> = {
   step: stepPreview,
 };
 
-/** The preview's thumbnails of what an event saved, in points, at 16:9. */
 const SHOT = { width: 96, height: 54 };
-/** The preview's padding and the gaps between its parts. */
 const PAD = 16;
 const GAP = 12;
-/** Under the preview's picture: what the camera saw and its line under it (two lines at most), and the buttons over their rule. */
 const PREVIEW_TEXT = 68;
 const PREVIEW_BUTTONS = 45;
-/** The least height the preview's picture gets, however short the page. */
 const LEAST_PICTURE = 120;
+const BESIDE_TEXT = 300;
 
-/** What the preview's picture area shows, for the event it was picked on: its picture (-1) or one of its videos, by place. */
+/** The preview's pick for an event: its picture (-1) or one of its videos, by place. */
 const shot = signal<{ event: string; index: number } | null>(null);
 
-/** One of an event's things saved, as the preview's strip shows it: its picture (`index` -1) or a video. */
 type Shot = { index: number; thumbnail: string; label: string; length: string; recording: boolean };
 
-/** What `event` saved, in the strip's order: its picture, then its videos as the folder lists them. */
 function shotsOf(event: EventItem): Shot[] {
   const picture: Shot[] = event.picture === "" ? [] : [{ index: -1, thumbnail: event.thumbnail, label: "Show its picture", length: "", recording: false }];
   const clips = eventVideos(event);
@@ -275,7 +224,6 @@ function shotsOf(event: EventItem): Shot[] {
   ];
 }
 
-/** Which of `event`'s things the preview shows: the one picked, while it still has it, else its picture, else its first video; `null` with neither. */
 function shownOf(event: EventItem): number | null {
   const picked = shot();
   const count = eventVideos(event).length;
@@ -284,19 +232,12 @@ function shownOf(event: EventItem): number | null {
   return count > 0 ? 0 : null;
 }
 
-/**
- * The preview's picture area: the event's picture, which a press opens full
- * size; or one of its videos in place with the platform's controls, at its
- * first picture until its play button is pressed, or playing once picked from
- * the strip (`play`), so opening the page or stepping through the rows plays
- * nothing by itself (one still being written shows its first picture until it
- * stops); or, for one that saved nothing, a line saying so.
- */
-function PreviewPicture(props: { event: EventItem; shown: number | null; play: boolean; height: number }) {
+/** A video plays only once picked from the strip (`play`), so stepping through the rows plays nothing. */
+function PreviewPicture(props: { event: EventItem; shown: number | null; play: boolean; height: number; width?: number }) {
   const video = () => (props.shown !== null && props.shown >= 0 ? eventVideos(props.event)[props.shown] : undefined);
   const nothing = () => props.event.picture === "" && props.event.videos.length === 0;
   return (
-    <View class={`overflow-hidden rounded-md ${nothing() ? "border border-border" : "bg-black"}`} style={{ height: props.height }}>
+    <View class={`overflow-hidden rounded-md ${nothing() ? "border border-border" : "bg-black"}`} style={{ height: props.height, width: props.width }}>
       <If when={props.shown === -1}>
         <Press label={`Open the picture of ${eventLabel(props.event)} full size`} testID="preview:picture" scale={1} class="flex-1" onPress={() => viewing.set(props.event.name)}>
           <Image src={props.event.picture} fadeDuration={150} accessibilityLabel={eventLabel(props.event)} style={{ flex: 1, objectFit: "contain" }} />
@@ -331,7 +272,6 @@ function PreviewPicture(props: { event: EventItem; shown: number | null; play: b
   );
 }
 
-/** The strip of what an event saved, under its picture, when it saved more than one thing: a press shows that one. */
 function PreviewStrip(props: { event: EventItem; shots: Shot[]; shown: number | null }) {
   return (
     <View class="flex-row flex-wrap gap-2">
@@ -369,75 +309,90 @@ function PreviewStrip(props: { event: EventItem; shots: Shot[]; shown: number | 
   );
 }
 
-/**
- * The preview beside the table, in `room`: the event's picture or the video
- * picked under it, as large as fits under the header at the top of the page;
- * what the camera saw, whose camera, when, for how long and how many times;
- * the strip of what it saved, when that is more than one thing; and the ways
- * to its camera and to its files on their pages, and its Delete.
- */
 function Preview(props: { event: EventItem; room: { width: number; height: number } }) {
   const event = () => props.event;
   const shots = computed(() => shotsOf(event()));
   const shown = () => shownOf(event());
-  /** Whether what shows was picked from the strip, which plays a video; what shows by itself waits for its play button. */
   const picked = () => {
     const chosen = shot();
     return chosen !== null && chosen.event === event().name && chosen.index === shown();
   };
   const strip = () => shots().length > 1;
-  /** As wide as the card, at 16:9, unless that is taller than the page leaves it. */
-  const pictureHeight = () => {
+  const layout = () => {
     const across = props.room.width - 2 * PAD - 2;
+    const tall = props.room.height - 2 * PAD - 2;
     const below = PREVIEW_TEXT + PREVIEW_BUTTONS + 2 * GAP + (strip() ? SHOT.height + GAP : 0);
-    return Math.max(LEAST_PICTURE, Math.min((across * 9) / 16, props.room.height - 2 * PAD - 2 - below));
+    const stacked = Math.max(LEAST_PICTURE, Math.min((across * 9) / 16, tall - below));
+    const besideHeight = Math.min(tall, ((across - GAP - BESIDE_TEXT) * 9) / 16);
+    return besideHeight > stacked
+      ? { beside: true, width: (besideHeight * 16) / 9, height: besideHeight }
+      : { beside: false, width: undefined, height: stacked };
   };
   const detail = () => [cameraName(event().camera), startedInFull(event()), event().ongoing ? lastedLabel(event()) : `Lasted ${lastedLabel(event())}`, sightingsLabel(event())].filter((part) => part !== "").join("  ·  ");
 
-  return (
-    <Card class="gap-3" style={{ padding: PAD }} testID="preview">
-      <PreviewPicture event={event()} shown={shown()} play={picked()} height={pictureHeight()} />
-
-      <View class="gap-1">
-        <View class="flex-row items-center gap-2">
-          <Text class="min-w-0 text-base font-semibold text-card-foreground" style={{ numberOfLines: 1, flexShrink: 1 }}>
-            {whatLabel(event())}
-          </Text>
-          <If when={event().ongoing}>
-            <View class="flex-row items-center gap-1">
-              <StatusDot tone="warn" />
-              <Text class="text-xs font-medium text-warning">Now</Text>
-            </View>
-          </If>
-        </View>
-        <Text class="text-sm text-muted-foreground" style={{ numberOfLines: 2, ...tabular }}>
-          {detail()}
+  const about = () => (
+    <View class="gap-1">
+      <View class="flex-row items-center gap-2">
+        <Text class="min-w-0 text-base font-semibold text-card-foreground" style={{ numberOfLines: 1, flexShrink: 1 }}>
+          {whatLabel(event())}
         </Text>
+        <If when={event().ongoing}>
+          <View class="flex-row items-center gap-1">
+            <StatusDot tone="warn" />
+            <Text class="text-xs font-medium text-warning">Now</Text>
+          </View>
+        </If>
       </View>
-
-      <If when={strip()}>
-        <PreviewStrip event={event()} shots={shots()} shown={shown()} />
+      <Text class="text-sm text-muted-foreground" style={{ numberOfLines: 2, ...tabular }}>
+        {detail()}
+      </Text>
+    </View>
+  );
+  const saved = () => (
+    <If when={strip()}>
+      <PreviewStrip event={event()} shots={shots()} shown={shown()} />
+    </If>
+  );
+  const actions = () => (
+    <View class="flex-row flex-wrap items-center gap-1 border-t border-border pt-3">
+      <Button icon="cctv" label="Show camera" disabled={!cameraOf(event().camera)} onPress={() => showCamera(event())} />
+      <If when={event().snapshot !== ""}>
+        <Button kind="ghost" icon="images" label="Show in Snapshots" onPress={() => showEventsSnapshot(event())} />
       </If>
+      <If when={event().videos.length > 0}>
+        <Button kind="ghost" icon="film" label="Show in Videos" onPress={() => showEventsVideos(event())} />
+      </If>
+      <View class="flex-1" />
+      <IconButton icon="trash-2" label="Delete event" disabled={event().ongoing} onPress={() => deleteEvent(event())} />
+    </View>
+  );
 
-      <View class="flex-row flex-wrap items-center gap-1 border-t border-border pt-3">
-        <Button icon="cctv" label="Show camera" disabled={!cameraOf(event().camera)} onPress={() => showCamera(event())} />
-        <If when={event().snapshot !== ""}>
-          <Button kind="ghost" icon="images" label="Show in Snapshots" onPress={() => showEventsSnapshot(event())} />
-        </If>
-        <If when={event().videos.length > 0}>
-          <Button kind="ghost" icon="film" label="Show in Videos" onPress={() => showEventsVideos(event())} />
-        </If>
-        <View class="flex-1" />
-        <IconButton icon="trash-2" label="Delete event" disabled={event().ongoing} onPress={() => deleteEvent(event())} />
-      </View>
+  return (
+    <Card class={layout().beside ? "flex-row gap-3" : "gap-3"} style={{ padding: PAD }} testID="preview">
+      <PreviewPicture event={event()} shown={shown()} play={picked()} height={layout().height} width={layout().width} />
+      <If
+        when={layout().beside}
+        else={
+          <>
+            {about()}
+            {saved()}
+            {actions()}
+          </>
+        }
+      >
+        <View class="min-w-0 flex-1 gap-3">
+          {about()}
+          {saved()}
+          <View class="flex-1" />
+          {actions()}
+        </View>
+      </If>
     </Card>
   );
 }
 
-/** How wide the table is beside the preview, as it was last dragged to, in `settings.json`; `null` until it is, for its columns' own width. */
 const tableWidth = signal(Preferences.eventsTableWidth());
 
-/** The preview beside the table, where the page leaves it at least this wide, and the table's width beside it, saved as each drag ends. */
 const ASIDE: TableAside = {
   least: 420,
   view: (room: Accessor<{ width: number; height: number }>) => <If when={previewed()}>{(event) => <Preview event={event()} room={room()} />}</If>,
@@ -448,10 +403,8 @@ const ASIDE: TableAside = {
   },
 };
 
-/** The events that saved a picture, in the page's order: those the viewer steps through. */
 const pictured = computed(() => ordered().filter((event) => event.picture !== ""));
 
-/** An event's picture at full size: what the camera saw, whose camera and when, and the button that shows that camera. */
 function Viewer() {
   return (
     <PictureViewer
@@ -471,7 +424,6 @@ function Viewer() {
   );
 }
 
-/** The header: how many show and what the filters keep, the stats and what goes on now, and the filters and buttons in its bar. */
 function EventsHeader() {
   const live = () => (totals().ongoing > 0 ? `${countLabel(totals().ongoing)} going on now` : undefined);
 
@@ -479,7 +431,6 @@ function EventsHeader() {
     <LibraryHeader
       scroll={eventsScroll}
       icon="bell"
-      // The cameras' color, as the Groups page's: what the cameras saw.
       chart={CHART.cameras}
       title="Events"
       library={eventLibrary}
@@ -504,7 +455,6 @@ function EventsHeader() {
   );
 }
 
-/** Before the first event: what makes one, and which cameras are watched; or that nothing is logged. */
 function NoEvents() {
   const text = () => {
     if (!kept) return "The desktop app logs what the cameras see. The server doesn't keep an event log yet.";
@@ -517,7 +467,7 @@ function NoEvents() {
 /** The events page, in place of the stage and the PTZ panel. */
 export function EventsPage() {
   eventsScroll.set(0);
-  // The videos folder, read now and whenever a file comes or goes, for what each event recorded: the preview plays them.
+  // The preview plays each event's videos, so this page follows the videos folder too.
   Videos.onChange(() => reloadVideos());
 
   return (

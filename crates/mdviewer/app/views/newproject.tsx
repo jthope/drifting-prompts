@@ -1,11 +1,7 @@
 import { Button, EmptyState } from "../../../dp/ui";
 import { chooseFolder } from "./actions";
 
-/**
- * New: what the window shows with no project open. A folder chosen here, or
- * dropped anywhere on the window, becomes a project: it joins the sidebar's
- * Projects, and its Markdown files list on the right.
- */
+/** New: what the window shows with no project open. */
 export function NewProject() {
   return (
     <EmptyState

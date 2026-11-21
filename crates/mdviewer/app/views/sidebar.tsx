@@ -4,10 +4,7 @@ import { EdgedScroll, IconButton, look, NavRow, NavSection, SidebarFrame } from 
 import { chooseFolder, openProject, projectMenu, showNew, showSettings } from "./actions";
 import { page, projects } from "./model";
 
-/**
- * The narrowest and widest the sidebar is dragged to, in points. Its width is
- * the user's, saved with the preferences (`sidebarWidth`, 232 at first).
- */
+/** The narrowest and widest the sidebar is dragged to, in points. */
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 400;
 
@@ -23,13 +20,7 @@ function ProjectRow(props: { project: ProjectInfo }) {
   );
 }
 
-/**
- * The app's navigation, as IP Camera's: New, which opens a folder as a
- * project, then the projects, newest first, each by its folder's name, and
- * Settings pinned at the bottom, which opens in a dialog over the window. Only
- * the projects scroll, under their heading, which keeps its button in reach
- * (`EdgedScroll`).
- */
+/** The sidebar: New, the projects, and Settings. */
 export function Sidebar(props: { onHide: () => void }) {
   return (
     <SidebarFrame product="mdviewer" name="Markdown Viewer" onHide={props.onHide}>
@@ -49,7 +40,6 @@ export function Sidebar(props: { onHide: () => void }) {
         </If>
       </EdgedScroll>
 
-      {/* Over the project or New, which stays selected behind it. */}
       <View class="gap-1 p-2">
         <NavRow label="Settings" icon="settings" onPress={showSettings} />
       </View>

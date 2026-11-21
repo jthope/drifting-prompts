@@ -1,8 +1,4 @@
-// How an event's videos are made, as Settings → Automation offers it for every
-// camera and a camera's Events part offers it for that camera alone, in place
-// of the app's (`ownEventVideo`): the choices each menu holds, how they read,
-// and the kinds that save a video. Rust brings any number outside its ranges
-// back within them as it saves (`EventVideo::within_limits`).
+// Rust brings any number outside these ranges back within them as it saves (`EventVideo::within_limits`).
 import type { CameraForm, EventVideoSettings } from "ipcamera/native";
 
 /** How long a video keeps recording after the camera last saw something, in seconds. */
@@ -23,7 +19,7 @@ export const KINDS: { key: string; title: string }[] = [
   { key: "package", title: "Packages" },
 ];
 
-/** The kinds as Save videos of lays them out, a column each: people over animals, vehicles over faces, then packages alone. */
+/** The kinds as Save videos of lays them out, a column each. */
 export const KIND_COLUMNS = [
   ["person", "animal"],
   ["vehicle", "face"],
@@ -63,12 +59,7 @@ export const APP_STREAMS = [
   { value: "sub", title: "Sub stream" },
 ];
 
-/**
- * The streams a camera's Events part offers its videos: its own, then each
- * stream it listed when Connect asked it, or, for a camera that listed none,
- * the main and sub streams its brand gives; and the saved one when it is none
- * of those, so opening the form loses nothing.
- */
+/** The streams a camera's Events part offers its videos, keeping the saved one even when it is none of those, so opening the form loses nothing. */
 export function cameraStreams(form: Pick<CameraForm, "streams" | "eventVideo">): { value: string; title: string }[] {
   const listed =
     form.streams.length > 0

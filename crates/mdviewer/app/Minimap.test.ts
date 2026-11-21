@@ -1,7 +1,3 @@
-// Where the reader's marks of a whole file go (`views/minimap.ts`): the
-// sections, Raw's ruler, a place on the page's scroll bar, the heading rail,
-// and the maps of Raw and of the page, with the line under a place on the page
-// and the block of lines its preview shows.
 import { expect, test } from "nsh/test";
 import { TextView } from "nsh/base";
 import type { HeadingInfo, MarkInfo } from "mdviewer/native";
@@ -10,7 +6,6 @@ import { blockAround, blockWeight, lineAtPage, MAP_COLUMNS, MARKS, onTrack, page
 
 const heading = (level: number, title: string, line: number): HeadingInfo => ({ level, title, line });
 
-/** A file of 41 lines: two top headings, and two under the first. */
 const HEADINGS = [heading(1, "One", 0), heading(2, "Two", 10), heading(3, "Three", 20), heading(1, "Four", 30)];
 
 test("a section runs from its heading to the line before the next one", () => {
@@ -63,7 +58,6 @@ test("the page's map shares each section's measured height among its blocks by t
   expect(map.labels).toEqual([{ y: 100, text: "One" }]);
   const one = sections[1].blocks.map(blockWeight);
   const total = one.reduce((sum, weight) => sum + weight, 0);
-  // The code block, last, starts where the heading's and the paragraph's shares end.
   const band = map.bars.find((bar) => bar.ink === "band");
   expect(Math.abs((band?.y ?? 0) - (100 + (300 * (one[0] + one[1])) / total)) < 0.001).toBe(true);
   // A section not measured yet draws nothing.
@@ -82,7 +76,6 @@ test("the line under a place on the page is as far into its section's lines as t
 test("the preview shows the block of lines around a line, under its heading", () => {
   const lines = ["# One", "", "a", "b", "c", "", "d"];
   expect(blockAround(lines, 3, [heading(1, "One", 0)])).toEqual({ first: 2, lines: ["a", "b", "c"], heading: 0 });
-  // A long block shows the lines around the line, at most as many as asked.
   const long = Array.from({ length: 40 }, (_, at) => `line ${at}`);
   const block = blockAround(long, 20, [], 6);
   expect(block.lines.length).toBe(6);

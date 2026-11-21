@@ -1,14 +1,3 @@
-// The Cameras page: every camera in a table, to find them and change many at
-// once. Under the header the other pages have, with the search and the filters
-// in its bar, a row for each camera: its name and status, address, stream,
-// login and groups, sortable by each. Rows select as files do in Explorer (a
-// press for one, Control for one more, Shift for a run) or by their
-// checkboxes, and the bar that floats up while some are selected edits them
-// together, duplicates them onto the next channels of their recorders, puts
-// them in groups or deletes them. A row's pencil opens that camera's own
-// settings. The rows come a page at a time, and scroll between the column
-// titles, which stick under the header's bar, and a footer that stays put
-// under them with the totals and the pager. What it shows is in `roster.ts`.
 import { computed, createAnimatedValue, effect, keymap, List, Scroll, type ScrollRef, signal, Text, View, type ViewStyle } from "nsh";
 import { Library } from "ipcamera/native";
 import {
@@ -75,56 +64,45 @@ import {
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
 
-/** Either side of the table, as the header's banner is set in. */
 const GUTTER = 24;
 
-/**
- * Each column's share of a row, the same in the titles and the rows: a fixed
- * width, or a share of what is left with the narrowest it gets.
- */
 const COLUMN: Record<"check" | "name" | "address" | "stream" | "login" | "groups" | "actions", ViewStyle> = {
   check: { width: 40 },
-  name: { flex: 2, minWidth: 140 },
-  address: { flex: 1.4, minWidth: 130 },
+  name: { flex: 2, minWidth: 140, maxWidth: 280 },
+  address: { flex: 1.4, minWidth: 130, maxWidth: 210 },
   stream: { width: 160 },
   login: { width: 150 },
-  groups: { flex: 1.4, minWidth: 110 },
+  groups: { flex: 1.4, minWidth: 110, maxWidth: 320 },
   actions: { width: 64 },
 };
 
-/** The page's width from which each column that can give way shows: below it, the column goes and its room goes to the rest. */
 const SHOWN_FROM = { stream: 620, login: 760, groups: 900 };
 
 type Columns = { stream: boolean; login: boolean; groups: boolean };
 
-/** "1 camera", "3 cameras". */
 const cameraCount = (count: number) => (count === 1 ? "1 camera" : `${countLabel(count)} cameras`);
 
-/** Which way the table is sorted by `key`, for its title. */
 const directionOf = (key: SortKey): SortDirection => {
   const by = sort();
   return by?.key === key ? (by.descending ? "descending" : "ascending") : null;
 };
 
-/** A row's menu, from its right press or its `…`: the selection's on a row of a selection of several, else the row's own, with the row alone selected. */
 function rowMenu(row: CameraRow): MenuEntries {
   if (selected().includes(row.id) && chosen().length > 1) return selectionMenu(chosen().map((each) => each.state));
   pick(row.id, "only");
   return [{ label: "Show live video", onSelect: () => show({ kind: "camera", id: row.id }) }, { type: "separator" }, ...cameraMenu(row.state)];
 }
 
-/** One camera's row: its checkbox, its cells, and its pencil and menu at the end. */
-function CameraLine(props: { row: CameraRow; columns: Columns }) {
+function CameraLine(props: { row: CameraRow; columns: Columns; line: boolean }) {
   const on = () => selected().includes(props.row.id);
   const row = () => props.row;
   return (
     <View style={{ paddingHorizontal: GUTTER - 8 }} onContextMenu={(event) => popup(rowMenu(row()), event.pagePosition)}>
-      <TableRow selected={on()}>
+      <TableRow selected={on()} line={props.line}>
         <View class="items-center" style={COLUMN.check}>
           <CheckBox label={`Select ${row().name}`} checked={on()} onChange={() => pick(row().id, "toggle")} />
         </View>
 
-        {/* The cells are one press: a click selects as Explorer does, a double click opens the camera's settings. */}
         <View
           role="button"
           accessibilityLabel={`${row().name}, ${addressOf(row()) || "no address"}`}
@@ -194,7 +172,6 @@ function CameraLine(props: { row: CameraRow; columns: Columns }) {
   );
 }
 
-/** The column titles, which stay under the header's bar as the rows scroll, with the checkbox for the page (`PageCheck`). */
 function Titles(props: { columns: Columns }) {
   return (
     <View class="bg-background" style={{ paddingHorizontal: GUTTER - 8 }}>
@@ -221,7 +198,6 @@ function Titles(props: { columns: Columns }) {
   );
 }
 
-/** The search and the filters, in the header's bar. */
 function Filters() {
   const groupLabel = () => {
     const chosenGroup = groupFilter();
@@ -266,7 +242,6 @@ function Filters() {
   );
 }
 
-/** The header: how many cameras show and what the filters keep, their stats, and the search, filters and buttons in its bar. */
 function CamerasHeader(props: { scroll: ReturnType<typeof createAnimatedValue> }) {
   const counted = () => `${filtered() ? `${countLabel(shown().length)} of ` : ""}${cameraCount(rows().length)}`;
   const subtitle = () => [counted(), summary()].filter((part) => part !== "").join("  ·  ");
@@ -296,12 +271,10 @@ function CamerasHeader(props: { scroll: ReturnType<typeof createAnimatedValue> }
         />
       }
     >
-      {/* The filters scroll sideways in a window too narrow for them, rather than pushing the buttons out. */}
       <Scroll horizontal scrollbar={false} class="min-w-0 flex-1" contentClass="flex-row items-center pr-2">
         <Filters />
       </Scroll>
       <View class="flex-row items-center gap-2">
-        {/* The count the masthead said, once the masthead has gone. */}
         <Text class="text-sm text-muted-foreground" style={{ numberOfLines: 1, opacity: collapsedness(props.scroll), ...tabular }}>
           {counted()}
         </Text>
@@ -314,11 +287,6 @@ function CamerasHeader(props: { scroll: ReturnType<typeof createAnimatedValue> }
   );
 }
 
-/**
- * The selection's keys, bound while the page shows: Control+A, Delete, Return
- * to edit and Control+D to duplicate; never while a field has the keyboard or
- * a dialog is open.
- */
 function SelectionKeys() {
   // A group's dialog opens from the sidebar too, so it can be over this page.
   const free = () => editing() === null && bulkEditing() === null && groupEditing() === null;
@@ -329,7 +297,6 @@ function SelectionKeys() {
   return null;
 }
 
-/** The bar over the page's foot while some cameras are selected: edit them together, duplicate them, group them, delete them. */
 function Selection() {
   const ids = () => chosen().map((row) => row.id);
   return (
@@ -346,7 +313,6 @@ function Selection() {
   );
 }
 
-/** Before the first camera: what the page is for, and the button that adds one. */
 function NoCameras() {
   return (
     <EmptyState
@@ -358,7 +324,6 @@ function NoCameras() {
   );
 }
 
-/** When the search and the filters leave nothing: the button that clears them. */
 function NothingMatches() {
   return (
     <View class="items-center gap-3 px-6 py-12">
@@ -368,7 +333,6 @@ function NothingMatches() {
   );
 }
 
-/** A row of the list: the titles, or a camera's. */
 type Line = { kind: "titles"; key: string } | { kind: "camera"; key: string; row: CameraRow };
 
 /** The Cameras page, in place of the stage and the PTZ panel. */
@@ -379,7 +343,6 @@ export function CamerasPage() {
     (): Columns => ({ stream: width() >= SHOWN_FROM.stream, login: width() >= SHOWN_FROM.login, groups: width() >= SHOWN_FROM.groups }),
   );
 
-  // Reads every camera's settings now, then after each saved change, by this page or anywhere else.
   Library.onChange(() => reload());
   // A camera added or deleted changes the states before the library's listener hears of it.
   const ids = computed(() => states().map((state) => state.id).join(" "));
@@ -394,13 +357,9 @@ export function CamerasPage() {
   });
 
   const lines = computed((): Line[] => (onPage().length === 0 ? [] : [{ kind: "titles", key: "titles" }, ...onPage().map((row) => ({ kind: "camera" as const, key: row.id, row }))]));
+  const lastKey = computed(() => lines().at(-1)?.key);
 
   let scroller: ScrollRef | undefined;
-  /**
-   * Turns to page `index`, and brings its first row into view: scrolled past
-   * the header's collapse, the list goes back to where its first row sits
-   * under the column titles; above it, the header stays as open as it was.
-   */
   const turn = (index: number) => {
     turnTo(index);
     scroll.getValue().then((at) => {
@@ -412,7 +371,6 @@ export function CamerasPage() {
     <View class="flex-1 bg-background" onLayout={(event) => width.set(event.bounds.size.width)}>
       <SelectionKeys />
       <If when={states().length > 0} else={<NoCameras />}>
-        {/* The rows scroll between the column titles, which stick under the header's bar, and the footer, which stays put. */}
         <View class="flex-1">
           <Scroll ref={(ref: ScrollRef) => (scroller = ref)} testID="cameras" scrollValue={scroll} class="flex-1">
             <CamerasHeader scroll={scroll} />
@@ -424,12 +382,11 @@ export function CamerasPage() {
               stickyHeaderIndices={[0]}
               stickyHeaderOffset={HEADER_BAR}
               estimatedItemSize={TABLE_ROW}
-              // Room under the last row for the selection's bar to float over.
               contentStyle={{ paddingTop: 8, paddingBottom: 96 }}
             >
               {(line) => (
                 <If when={line().kind === "camera" ? (line() as Extract<Line, { kind: "camera" }>).row : undefined} else={<Titles columns={columns()} />}>
-                  {(row) => <CameraLine row={row()} columns={columns()} />}
+                  {(row) => <CameraLine row={row()} columns={columns()} line={line().key !== lastKey()} />}
                 </If>
               )}
             </List>

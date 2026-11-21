@@ -1,17 +1,6 @@
-//! The video branch's own two elements: one that notes the stream's picture size, and the last
-//! one, which copies each BGRA picture into the [`FrameSlot`](crate::FrameSlot), unless nothing
-//! shows it ([`crate::gate`]).
-//!
-//! [`SlotSink`] is where pictures leave the pipeline, with no pull loop or global channel: the
-//! pipeline hands it a picture, it packs the rows and replaces the slot's frame, and the UI paints
-//! whatever is in the slot when it repaints.
-//!
-//! [`SizeTap`] sits between the parser and the decoder. A decoder may hand back the coded picture,
-//! which is rounded up to whole 16-pixel macroblocks: Media Foundation's, which decoded H.264 here
-//! once, turned a 1080-line camera into 1088 lines, the last eight of them junk. The parser reads
-//! the real size from the stream's SPS and announces it, so the tap keeps it and the sink crops
-//! each picture to it. The Rust decoders crop their pictures themselves, so for them it changes
-//! nothing.
+//! The video branch's own elements: [`SizeTap`] notes the size the stream declares, and
+//! [`SlotSink`] stores each BGRA picture cropped to it, since a decoder may hand back the coded
+//! size (1088 lines for 1080).
 
 use std::{
     future::{Ready, ready},
@@ -33,8 +22,6 @@ use crate::{
     tap::{Tap, Watch},
 };
 
-/// The picture size the stream declares, shared by the [`SizeTap`] that hears it and the
-/// [`SlotSink`] that crops to it.
 #[derive(Clone, Default)]
 pub(crate) struct DisplaySize(Arc<Mutex<Option<(u32, u32)>>>);
 
@@ -48,7 +35,6 @@ impl DisplaySize {
     }
 }
 
-/// The fixed width and height `caps` give, raw or compressed.
 pub(crate) fn fixed_size(caps: &Caps) -> Option<(u32, u32)> {
     match caps {
         Caps::RawVideo {
@@ -65,13 +51,11 @@ pub(crate) fn fixed_size(caps: &Caps) -> Option<(u32, u32)> {
     }
 }
 
-/// Notes each picture size the parser announces, as soon as it is offered, passing everything on.
 pub(crate) struct SizeTap {
     size: DisplaySize,
 }
 
 impl SizeTap {
-    /// The tap, as the element the graph takes.
     pub(crate) fn new(size: DisplaySize) -> Tap<Self> {
         Tap(Self { size })
     }
@@ -102,16 +86,11 @@ impl Watch for SizeTap {
     }
 }
 
-/// Where decoded pictures leave the pipeline.
 pub(crate) struct SlotSink {
-    /// The frame slot, and whether anything shows it ([`crate::gate`]).
     visibility: Arc<Visibility>,
-    /// Set by the first picture, so the session can report that the camera is live.
     live: Arc<AtomicBool>,
-    /// The size the stream declares, which the picture is cropped to.
     display: DisplaySize,
-    /// The decoded picture's size, from the caps. A decoder announces a new one before the first
-    /// frame of a new size, so this is always the size of the next frame.
+    /// From the caps, which a decoder announces before the first frame of a new size.
     decoded: Option<(u32, u32)>,
 }
 
@@ -139,11 +118,9 @@ impl SlotSink {
         let Some((width, height)) = self.decoded else {
             return Ok(());
         };
-        // A picture the decoder is catching up through is not worth copying.
         if self.visibility.skips(frame.timing.pts_ns) {
             return Ok(());
         }
-        // The declared size, where it fits inside the decoded one; the decoded size otherwise.
         let (shown_width, shown_height) = self
             .display
             .get()
@@ -166,7 +143,7 @@ impl AsyncElement for SlotSink {
     where
         Self: 'a;
 
-    /// Only BGRA, so the converter in front of this sink settles on the order the UI uploads.
+    /// Only BGRA, so the converter in front settles on the order the UI uploads.
     fn intercept_caps(&self, upstream: &Caps) -> Result<Caps, G2gError> {
         match upstream {
             Caps::RawVideo {

@@ -1,14 +1,5 @@
-//! A pretend camera on this machine, for trying the app without a real one: a moving test pattern,
-//! encoded to H.264 by Media Foundation and served over RTSP by glass2glass, with no login and no
-//! sound. Unlike `IPCAMERA_SOURCE=pattern`, it reaches the app as a camera stream does, so
-//! everything a stream feeds works on it, recording and the server included.
-//!
-//! ```text
-//! cargo run -p ipcamera-media --features pretend-camera --example pretend_camera -- [port] [minutes]
-//! ```
-//!
-//! It listens on `127.0.0.1:8554` for 20 minutes unless told otherwise. Add a camera in the app
-//! with the address `127.0.0.1`, that RTSP port and the RTSP path `/stream`, then press Connect.
+//! A pretend camera on this machine: a moving H.264 test pattern over RTSP at `/stream`, with no
+//! login and no sound.
 
 #[cfg(windows)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -1,24 +1,6 @@
-//! Every change to the cameras, groups and views, as one value: [`Change`], applied by
-//! [`Library::apply`].
-//!
-//! The app's buttons and menus describe what they want as a `Change`, and whoever holds the files
-//! applies it. On the desktop that is the app itself. In the web build it is the server: the
-//! browser sends the change over HTTP, the server applies the same value to its own library, and
-//! the browser takes a fresh copy. So each rule is written once, in [`Library`], and every client
-//! is refused in the same words. In C# terms, a `Change` is a command object, and `apply` its one
-//! handler.
-//!
-//! Ids are made where the files are, never by the client: a change that adds something returns
-//! the new id in its [`Applied`].
-//!
-//! A camera is checked here ([`CameraConfig::validate`], in the settings form's words), not in its
-//! store: `CameraStore` and `Library::add_camera` and `update_cameras` save what they are given,
-//! so a hand-edited `cameras.json` is read as it is and stays diagnosable, never quietly corrected.
-//! `apply` is the only way the app and the server change cameras; anything that changes them
-//! another way would need the check moved into the store.
-//!
-//! A client that is never told the cameras' passwords (the web build) sends an update with
-//! [`CameraUpdate::keep_password`] set, and the saved password stays.
+//! Every change to the cameras, groups and views as one value, [`Change`], applied by
+//! [`Library::apply`] wherever the files are. Cameras are validated here, not in their store, so
+//! `apply` must stay the only way the app and the server change cameras.
 
 use serde::{Deserialize, Serialize};
 
@@ -31,12 +13,11 @@ use crate::{
     records::not_found,
 };
 
-/// One change to the cameras, groups or views. As JSON, its kind is in `change`:
-/// `{ "change": "rename_group", "id": "…", "name": "Outside" }`.
+/// One change to the cameras, groups or views, tagged by `change` in JSON.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "change", rename_all = "snake_case")]
 pub enum Change {
-    /// Adds a camera at the end of the list. Its id is made anew.
+    /// Adds a camera at the end of the list, under a new id.
     AddCamera {
         /// Its settings.
         camera: CameraConfig,
@@ -51,7 +32,7 @@ pub enum Change {
         /// The camera.
         id: CameraId,
     },
-    /// Moves a camera among the cameras: the order All cameras shows. Groups keep their own.
+    /// Moves a camera in the list of all cameras; groups keep their own order.
     MoveCamera {
         /// The camera.
         id: CameraId,
@@ -72,7 +53,7 @@ pub enum Change {
         /// Its new name.
         name: String,
     },
-    /// Gives a group a name and cameras, in one save: what its sheet saves.
+    /// Gives a group a name and cameras, in one save.
     SaveGroup {
         /// The group.
         id: GroupId,
@@ -133,8 +114,7 @@ pub enum Change {
         /// Its new layout.
         layout: Layout,
     },
-    /// Moves, resizes, adds and removes a view's tiles at once, each keeping the camera of the
-    /// tile it was.
+    /// Rearranges a view's tiles at once, each keeping the camera of the tile it was.
     ArrangeTiles {
         /// The view.
         id: ViewId,
@@ -148,7 +128,7 @@ pub enum Change {
         /// The new fit.
         fit: Fit,
     },
-    /// Sets how one tile's picture fills it. The tile keeps it as its camera or stream changes.
+    /// Sets how one tile's picture fills it, kept as its camera or stream changes.
     SetTileFit {
         /// The view.
         id: ViewId,
@@ -165,8 +145,7 @@ pub enum Change {
         index: usize,
         /// The camera, or `None` for an empty tile.
         camera: Option<CameraId>,
-        /// The stream it picks; `None`, and left out of the JSON, for Auto, which plays the one
-        /// the size the tile is drawn at calls for.
+        /// The stream it picks; `None` for Auto.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream: Option<TileStream>,
     },
@@ -179,8 +158,7 @@ pub struct CameraUpdate {
     pub id: CameraId,
     /// Its new settings.
     pub camera: CameraConfig,
-    /// Keeps the saved password, whatever `camera` says: what a client sends when it was never
-    /// told the password and the user left it alone.
+    /// Keeps the saved password, for a client never told it.
     #[serde(default)]
     pub keep_password: bool,
 }
@@ -192,7 +170,7 @@ pub struct Applied {
     pub added: Option<Added>,
 }
 
-/// What a change added, by the id made for it. As JSON, `{ "camera": "…" }`.
+/// What a change added, by the id made for it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Added {
@@ -220,7 +198,7 @@ impl Applied {
         Self { added: Some(added) }
     }
 
-    /// The text of the id it added, or `""` when it added nothing: what the app's TSX is told.
+    /// The text of the id it added, or `""` when it added nothing.
     pub fn added_id(&self) -> String {
         self.added
             .as_ref()
@@ -230,8 +208,7 @@ impl Applied {
 }
 
 impl Library {
-    /// Makes `change`, with every rule the library keeps, and says what it added. A refused
-    /// change changes nothing, and its error is a sentence for the user.
+    /// Makes `change` and says what it added; a refused change changes nothing.
     pub fn apply(&self, change: &Change) -> Result<Applied, StoreError> {
         let nothing_added = |done: Result<(), StoreError>| done.map(|()| Applied::default());
         match change {
@@ -299,7 +276,6 @@ impl Library {
     }
 }
 
-/// Refuses a camera that can't be saved, in the settings form's words.
 fn saveable(camera: &CameraConfig) -> Result<(), StoreError> {
     camera
         .validate()

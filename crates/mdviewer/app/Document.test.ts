@@ -1,6 +1,3 @@
-// What the document views work out from a file (`views/document.ts`): the
-// rendered view's sections, the raw view's folds, the heading a line is under,
-// where a link goes and where a relative picture is.
 import { expect, test } from "nsh/test";
 import { TextView } from "nsh/base";
 import type { HeadingInfo } from "mdviewer/native";

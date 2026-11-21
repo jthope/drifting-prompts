@@ -1,9 +1,3 @@
-// The window's status bar, along its bottom: how many cameras are live, how
-// many record, the events of the day, and what the snapshots and videos take,
-// each a colored icon and a number that opens its page. The colors are the
-// ones each thing takes everywhere (`CHART`), and red is recording. Under a
-// media limit (Settings → Automation) the sizes give way to a gauge of the
-// media against it. A camera's own numbers are on its tiles.
 import { computed, signal, Text, View } from "nsh";
 import { type MediaUsage, Storage } from "ipcamera/native";
 import { LiveDot, look, Meter, Press, StatusItem } from "../../../dp/ui";
@@ -23,7 +17,6 @@ export function shareOfLimit(usage: MediaUsage): number {
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
 
-/** What the videos, the snapshots and the drive under them take and have left, each opening its page. */
 function Sizes(props: { usage: MediaUsage }) {
   return (
     <>
@@ -42,7 +35,6 @@ function Sizes(props: { usage: MediaUsage }) {
   );
 }
 
-/** The snapshots and videos against the media limit, amber near it, opening Settings on Automation. */
 function Gauge(props: { usage: MediaUsage }) {
   const used = () => props.usage.videos + props.usage.snapshots;
   const text = () => `Media ${sizeLabel(used())} of ${sizeLabel(props.usage.limit)}`;
@@ -59,7 +51,7 @@ function Gauge(props: { usage: MediaUsage }) {
   );
 }
 
-/** The status bar, along the window's bottom under the sidebar, the stage and the pages alike, with no line over it. */
+/** The status bar, along the window's bottom. */
 export function StatusBar() {
   const usage = signal<MediaUsage | null>(null);
   Storage.onUsage((next) => usage.set(next));
@@ -83,7 +75,6 @@ export function StatusBar() {
       <If when={recording() > 0}>
         <StatusItem mark={<LiveDot />} text={`${countLabel(recording())} recording`} label={`${countLabel(recording())} recording. Show the videos`} onPress={() => show({ kind: "videos" })} />
       </If>
-      {/* Only where the app keeps an event log: the desktop. */}
       <If when={kept}>
         <StatusItem
           icon="bell"

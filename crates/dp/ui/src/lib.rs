@@ -1,28 +1,7 @@
-//! What the suite's apps share to look and behave alike, on the Rust side: the themes' colors
-//! (`Themes`, which each app registers in its own native module), how the window looks and where
-//! it was left, as each app saves them ([`SavedAppearance`], [`WindowPlace`], from `dp_store`'s
-//! `Appearance` and `WindowState`), where an app saves under nsh's tools ([`is_test_runner`],
-//! [`development_folder`]), and on Windows the folder picker (`folder_dialog`) and showing files
-//! in Explorer (`explorer`). [`listen`] and [`listen_later`] are how every bridge's listeners look
-//! for changes.
-//!
-//! The styled controls themselves are TSX, beside this crate (`index.ts`): each app imports them
-//! by path and hands them its `Themes` module (`connectThemes`), since each app's native module
-//! goes by its own name (`ipcamera/native`).
-//!
-//! An app registers the module with the rest of its own:
-//!
-//! ```ignore
-//! #[native_module("ipcamera/native")]
-//! fn native(registry: &mut Registry) {
-//!     registry.module::<dp_ui::Themes>();
-//! }
-//! ```
+//! The Rust under the suite's styled TSX controls: the themes' colors, the saved appearance and
+//! window place, folders, and the bridges' listeners.
 
-#[cfg(windows)]
-pub mod explorer;
-#[cfg(windows)]
-pub mod folder_dialog;
+pub mod folders;
 mod listen;
 
 use std::path::{Path, PathBuf};
@@ -31,42 +10,26 @@ use nsh_core::prelude::*;
 
 pub use crate::listen::{listen, listen_later};
 
-/// The end of the name nsh gives its headless test runner.
 const TEST_RUNNER_SUFFIX: &str = "-test";
 
-/// The end of the name nsh gives its development host (`nsh-app-mdviewer-windows-host`), which
-/// `nsh run` starts.
 const DEVELOPMENT_HOST_SUFFIX: &str = "-host";
 
-/// The folder beside the development host that it saves in: one nsh's development server never
-/// looks in.
+/// nsh's development server never looks in a folder of this name.
 const DEVELOPMENT_FOLDER: &str = ".nsh";
 
 /// Whether this is `nsh test`'s headless runner.
-///
-/// It sits beside the development host, so an app that keeps its settings beside its executable
-/// would read and write the same ones from every test. An app gives the runner settings of its own
-/// in a throwaway folder instead.
 pub fn is_test_runner() -> bool {
     std::env::current_exe()
         .ok()
         .is_some_and(|exe| name_ends_with(&exe, TEST_RUNNER_SUFFIX))
 }
 
-/// Where an app keeps the files it saves when it runs in nsh's development host: a `.nsh` folder
-/// beside the host. `None` for any other executable, which saves beside itself.
-///
-/// A workaround for nsh 0.5.1, whose development server takes a change to any `.json` file in the
-/// app's folder for a change to its TSX and builds the app again, `target` included, which it
-/// skips only when it looks for Rust changes. The development host is in the app's
-/// `target\debug`, so every window move, preference or tab saved beside it showed as a build. The
-/// server never looks in a folder named `.nsh`. A release whose server skips `target` for TSX too
-/// replaces this with the folder beside the executable, as for a packaged app.
+/// Where an app saves when run in nsh's development host; `None` for any other executable.
+/// Workaround: nsh's development server rebuilds on any `.json` change outside `.nsh` folders.
 pub fn development_folder() -> Option<PathBuf> {
     development_folder_of(&std::env::current_exe().ok()?)
 }
 
-/// [`development_folder`] for the executable at `exe`.
 fn development_folder_of(exe: &Path) -> Option<PathBuf> {
     if !name_ends_with(exe, DEVELOPMENT_HOST_SUFFIX) {
         return None;
@@ -74,7 +37,6 @@ fn development_folder_of(exe: &Path) -> Option<PathBuf> {
     Some(exe.parent()?.join(DEVELOPMENT_FOLDER))
 }
 
-/// Whether the name of the executable at `exe`, without its `.exe`, ends with `suffix`.
 fn name_ends_with(exe: &Path, suffix: &str) -> bool {
     exe.file_stem()
         .is_some_and(|name| name.to_string_lossy().ends_with(suffix))
@@ -89,17 +51,14 @@ pub struct NamedColor {
     pub value: String,
 }
 
-/// How the window looks, as an app saves it in its `settings.json` (`dp_store::Appearance`) and
-/// hands it to `showAppearance` and `keepAppearance` (`appearance.tsx`) among its preferences.
+/// How the window looks, as an app saves it.
 #[derive(Clone, Debug, PartialEq, JsObject)]
 pub struct SavedAppearance {
-    /// Whether the window is dark: the mode chosen, or the one the system showed last while it
-    /// follows the system.
+    /// Whether the window is dark: the chosen mode, or the system's last while following it.
     pub dark: bool,
     /// Whether the window follows the system's light or dark mode, rather than `dark`.
     pub follow_system: bool,
-    /// The theme for when the window is dark: `default-dark` or a theme file's name
-    /// (`dark-modern`).
+    /// The theme for when the window is dark: `default-dark` or a theme file's name.
     pub dark_theme: String,
     /// The theme for when the window is light: `default-light` or a theme file's name.
     pub light_theme: String,
@@ -135,10 +94,7 @@ impl From<SavedAppearance> for dp_store::Appearance {
     }
 }
 
-/// Where the window was left, as an app saves it in its `settings.json` and hands it to
-/// `keepWindowPlace` (`window.ts`), which gives it to nsh: the window's bounds out of maximized and
-/// full screen, in points on the screen as `nsh/desktop` measures them, and whether it was
-/// maximized.
+/// Where the window was left: its bounds out of maximized and full screen, in points.
 #[derive(Clone, Copy, Debug, Default, PartialEq, JsObject)]
 pub struct WindowPlace {
     /// The left edge, in points from the primary display's left.
@@ -177,12 +133,8 @@ impl From<WindowPlace> for dp_store::WindowState {
     }
 }
 
-/// The apps' own theme file, which each app's `nsh.json` names too. A theme from `themes/` goes
-/// over it while it shows, so the tokens a theme leaves alone (`radius`) stay as this file has
-/// them.
 const APP_THEME: &str = include_str!("../theme.json");
 
-/// The theme files in `themes/`, by name: each one as `theme.json` is, with a value for every token.
 macro_rules! theme_files {
     ($($name:literal),* $(,)?) => {
         &[$(($name, include_str!(concat!("../themes/", $name, ".json")))),*]
@@ -221,18 +173,14 @@ impl Themes {
             .collect()
     }
 
-    /// Draws the app with theme file `name` over its own theme, or with its own theme again when it
-    /// is `None`. Classes and `token()` follow at once. Async because nsh takes a new set of tokens
-    /// from a task, not from a plain call. Rejects a name with no file, and the app keeps the
-    /// colors it had.
+    /// Draws the app with theme file `name` over its own theme, or its own when `None`.
+    /// Async because nsh takes new tokens from a task, not a plain call.
     pub async fn apply(name: Option<String>) -> Result<(), String> {
         set_tokens(theme_tokens(name.as_deref())?);
         Ok(())
     }
 
-    /// Every color of theme file `name` over the app's own theme, or of the app's own theme when it
-    /// is `None`, in the light (`dark` false) or the dark, whatever theme the app shows now: what a
-    /// theme picker draws each theme in.
+    /// Every color of theme file `name` (or the app's own) in the light or the dark.
     pub fn colors(name: Option<String>, dark: bool) -> Result<Vec<NamedColor>, String> {
         let mut colors: Vec<NamedColor> = theme_tokens(name.as_deref())?
             .colors()
@@ -246,8 +194,6 @@ impl Themes {
     }
 }
 
-/// The tokens the app draws with for theme file `name`: nsh's default theme with `theme.json` over
-/// it, as nsh draws the app before it picks another, and the theme file over that.
 fn theme_tokens(name: Option<&str>) -> Result<nsh_core::element::Tokens, String> {
     let own = nsh_base::tokens_of(Some(APP_THEME))?;
     let Some(name) = name else { return Ok(own) };
@@ -262,7 +208,6 @@ fn theme_tokens(name: Option<&str>) -> Result<nsh_core::element::Tokens, String>
 mod tests {
     use super::*;
 
-    /// The tokens `json` (a theme file) gives a value.
     fn named(json: &str) -> Vec<String> {
         let value: serde_json::Value = serde_json::from_str(json).expect("a theme file is JSON");
         value["cssVars"]["theme"]
@@ -293,8 +238,6 @@ mod tests {
         }
     }
 
-    /// A theme sets every token the apps' own theme file adds and every one of nsh's they draw
-    /// with, so nothing of the apps' own colors shows through it.
     #[test]
     fn every_theme_sets_every_token() {
         let mut wanted = named(APP_THEME);
@@ -347,7 +290,6 @@ mod tests {
             development_folder_of(&debug.join("nsh-app-mdviewer-windows-host.exe")),
             Some(debug.join(".nsh"))
         );
-        // A packaged app and the test runner are not the development host.
         assert_eq!(development_folder_of(&debug.join("mdviewer.exe")), None);
         assert_eq!(
             development_folder_of(&debug.join("nsh-app-mdviewer-test.exe")),
@@ -363,7 +305,6 @@ mod tests {
             monokai.color("background").map(|c| c.dark.to_hex()),
             Some("#272822".into())
         );
-        // What a theme sets is its own, in place of the app's.
         assert_ne!(monokai.color("ring"), own.color("ring"));
         assert!(theme_tokens(Some("sunset")).is_err());
     }

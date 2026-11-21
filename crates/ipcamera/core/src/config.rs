@@ -1,20 +1,5 @@
-//! Application settings, persisted as one JSON file beside the executable.
-//!
-//! [`Config`] holds the app's preferences, grouped by area so a new setting has an obvious home:
-//! `ui`, `window`, `storage`, `automation` and `server`. [`ConfigStore`] owns the file and the
-//! in-memory copy, and [`ConfigStore::update`] is the one way to change it: it applies the change
-//! to a copy, writes the file, and only then adopts the copy. That is the same file store the
-//! JSON files in `data\settings` use (`dp_store`), with `settings.json` a document of its own and
-//! no layout number.
-//!
-//! The file is `settings.json` beside the app's executable, so it is the first thing found next
-//! to it. Generated files, such as snapshots, live in a `data` folder beside it unless [`Storage`]
-//! names other folders, and so do the cameras, groups and views, in `data\settings` (see
-//! [`crate::Library`]).
-//!
-//! [`ConfigStore`] is an ordinary value rather than a process-wide global: the app builds exactly one
-//! and holds it, and the tests build one over a temporary folder. Nothing here reads or writes
-//! outside the path it was given, which is also why the tests are safe to run in parallel.
+//! The app's settings, `settings.json` beside the executable. [`ConfigStore::update`] is the one
+//! way to change them, and adopts a change only once it is written.
 
 use std::path::{Path, PathBuf};
 
@@ -24,35 +9,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::StoreError;
 
-/// The folder beside the executable that holds the app's data: snapshots, videos, cameras and
-/// groups.
 const DATA_DIR: &str = "data";
-/// The settings file. It sits beside the executable rather than inside `data`, so it is the
-/// obvious file to find and hand-edit.
 const FILE: &str = "settings.json";
-/// Snapshots go in this folder inside [`ConfigStore::data_dir`].
 const SNAPSHOTS_DIR: &str = "snapshots";
-/// Recordings go in this folder inside [`ConfigStore::data_dir`].
 const VIDEOS_DIR: &str = "videos";
-/// The cameras and their groups go in this folder inside [`ConfigStore::data_dir`].
 const SETTINGS_DIR: &str = "settings";
 
-/// The whole settings tree.
-///
-/// Deliberately not `deny_unknown_fields`: a field this version doesn't have must load as if it
-/// were not there rather than fail the whole file.
+/// The whole settings tree. Not `deny_unknown_fields`: an unknown field must not fail the file.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// `ui`: the app's preferences.
+    /// The app's preferences.
     pub ui: Ui,
-    /// `window`: where the window was last seen.
+    /// Where the window was last seen.
     pub window: WindowState,
-    /// `storage`: where snapshots and recordings go.
+    /// Where snapshots and recordings go.
     pub storage: Storage,
-    /// `automation`: what the app does by itself, and how much media it may keep.
+    /// What the app does by itself, and how much media it may keep.
     pub automation: Automation,
-    /// `server`: who may use `ipcamera-server`. The desktop app keeps what it finds here.
+    /// Who may use `ipcamera-server`.
     pub server: ServerAccess,
 }
 
@@ -60,9 +35,7 @@ pub struct Config {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ServerAccess {
-    /// The server's password as `ipcamera-server --set-password` saves it: a salted Argon2 hash,
-    /// from which the password can be checked but not read back. Empty for a server with no
-    /// password, which then asks for none. It is not something to write by hand.
+    /// The password's salted Argon2 hash, from `--set-password`; empty for no password.
     pub password: String,
 }
 
@@ -78,21 +51,16 @@ pub struct Ui {
     pub rail_collapsed: bool,
     /// The PTZ panel's width, in points.
     pub rail_width: f32,
-    /// The sidebar's width, in points, as it was last dragged to.
+    /// The sidebar's width, in points.
     pub sidebar_width: f32,
-    /// How the window looks: its mode, themes, texture and elevation, among these fields in the
-    /// file as in every product's.
+    /// How the window looks, flattened among these fields.
     #[serde(flatten)]
     pub appearance: Appearance,
-    /// The page the nsh app last showed, which it opens on at the next launch: `dashboard`,
-    /// `cameras`, `groups`, `snapshots`, `videos`, `events`, or `view:<id>` or `camera:<id>` for a
-    /// view or a camera by its id. Empty, or a view or camera since deleted, opens on the first
-    /// view.
+    /// The page last shown (`dashboard`, `view:<id>`, `camera:<id>`); empty for the first view.
     pub page: String,
-    /// Whether the app shows a message when a camera starts seeing something (an event starts).
+    /// Whether the app shows a message as an event starts.
     pub alerts: bool,
-    /// The Events page's table beside its preview, in points, as wide as it was last dragged to;
-    /// none until it is dragged, for its columns' own width.
+    /// The Events page's table width, in points; `None` for its columns' own width.
     pub events_table_width: Option<f32>,
 }
 
@@ -112,9 +80,7 @@ impl Default for Ui {
     }
 }
 
-/// Where the app saves what it makes. An empty folder is the default one in `data` beside the
-/// executable, so a fresh install needs no setting and a cleared one goes back to it. A relative
-/// folder is taken from beside the executable.
+/// Where the app saves what it makes; a relative folder is taken from beside the executable.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Storage {
@@ -124,11 +90,10 @@ pub struct Storage {
     pub videos: String,
 }
 
-/// A megabyte, as the app counts sizes and the system shows them: 1,048,576 bytes.
+/// A megabyte: 1,048,576 bytes.
 pub const MEGABYTE: u64 = 1024 * 1024;
 
-/// What each event saves into the snapshots and videos folders, tagged with what the camera saw:
-/// Settings' Automation section.
+/// What each event saves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventCapture {
@@ -137,8 +102,7 @@ pub enum EventCapture {
     /// A snapshot as the event starts.
     #[default]
     Picture,
-    /// A video of each sighting, from a little before the camera sees something until it has seen
-    /// nothing for a while, as [`EventVideo`](crate::EventVideo) says.
+    /// A video of each sighting, as [`EventVideo`](crate::EventVideo) says.
     Video,
     /// Both.
     PictureAndVideo,
@@ -156,33 +120,23 @@ impl EventCapture {
     }
 }
 
-/// What the app does by itself, and how much media it may keep: Settings' Automation section.
-/// Events are logged, each with a picture, grouped within five minutes, and the rest is off and
-/// unlimited until the user says otherwise.
+/// What the app does by itself, and how much media it may keep.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Automation {
-    /// Whether the app watches every camera it can, on screen or not, and logs what they see as
-    /// events. Off, a camera is watched only while it streams, for its badge and its spotlight,
-    /// and nothing that follows events happens: no log, no alert, nothing saved.
+    /// Whether the app watches every camera it can and logs what they see as events.
     pub log_events: bool,
     /// What each event saves.
     pub event_capture: EventCapture,
-    /// How long after a camera last saw something, in minutes, what it sees still joins the same
-    /// event: a car that stops, waits and leaves is one event, not one each time the camera loses
-    /// sight of it. 0 groups nothing: an event then ends ten seconds after the camera last saw it.
+    /// How long after the last sighting, in minutes, a new one joins the same event; 0 groups none.
     pub event_window_minutes: u32,
-    /// The most the snapshots and videos may hold together, in megabytes ([`MEGABYTE`]); 0 for
-    /// no limit. At it the app takes no more, unless `overwrite_oldest` lets it make room.
+    /// The most the snapshots and videos may hold together, in megabytes; 0 for no limit.
     pub media_limit_mb: u64,
-    /// The largest a video file may grow, in megabytes, before the recording goes on in a new
-    /// file, from the next keyframe; 0 for no limit.
+    /// The largest a video file may grow, in megabytes, before it goes on in a new one; 0 for none.
     pub video_limit_mb: u64,
-    /// Whether, at the media limit, the oldest snapshots and videos are deleted to make room for
-    /// new ones, rather than nothing new being taken.
+    /// Whether, at the media limit, the oldest files are deleted to make room.
     pub overwrite_oldest: bool,
-    /// How the videos events save are made, for every camera that doesn't have its own
-    /// (`CameraConfig::event_video`).
+    /// How event videos are made for a camera without its own settings.
     pub event_video: crate::EventVideo,
 }
 
@@ -201,8 +155,7 @@ impl Default for Automation {
 }
 
 impl Automation {
-    /// The event window in milliseconds, never shorter than the quiet that ends a sighting
-    /// ([`QUIET_FOR_MS`](crate::QUIET_FOR_MS)).
+    /// The event window in ms, never shorter than [`QUIET_FOR_MS`](crate::QUIET_FOR_MS).
     pub fn event_window_ms(&self) -> u64 {
         (u64::from(self.event_window_minutes) * 60_000).max(crate::QUIET_FOR_MS)
     }
@@ -218,8 +171,6 @@ impl Automation {
     }
 }
 
-/// `settings.json` is a document like the files in `data\settings`, with no layout number. When
-/// it can't be used the app runs on the defaults, and its problems say so.
 impl Document for Config {
     type Format = Json;
 
@@ -241,34 +192,17 @@ impl Document for Config {
     }
 }
 
-/// The settings file and the copy of it the app is running with.
-///
-/// One of these exists per process, built by the app; tests build their own over a temporary
-/// folder. The in-memory copy is only replaced after a write succeeds, so a failed save cannot
-/// leave the running app using settings that are not on disk. The window watcher's thread and the
-/// UI thread both save, and the file store keeps either from losing the other's change.
+/// The settings file and the copy the app runs with, replaced only after a write succeeds.
 pub struct ConfigStore {
     file: FileStore<Config>,
 }
 
 impl ConfigStore {
-    /// Loads the file at `path`, creating it from the defaults when it is missing, so it can be
-    /// inspected and edited from the first launch.
-    ///
-    /// A file that is there but cannot be used never stops the app from starting, and is never
-    /// written over, as the JSON stores in `data\settings` do it:
-    ///
-    /// - A file that is not valid JSON is moved aside to `settings.json.broken-<seconds>`, and a
-    ///   new one is written from the defaults.
-    /// - A file that cannot be read, or cannot be moved aside, stays as it is. The app runs on
-    ///   the defaults and every save is refused, saying why.
-    ///
-    /// Either way [`ConfigStore::problem`] says what happened, for the app to tell the user.
+    /// Loads the file at `path`, creating it from the defaults when missing. A file that can't be
+    /// used is never written over; [`problem`](Self::problem) says what happened.
     pub fn load(path: impl Into<PathBuf>) -> Self {
         let file = FileStore::open(path.into());
-        // A first launch, or a file just moved aside: write the defaults, so there is a file to look
-        // at and edit. If this fails, the first save writes it instead. A file that is there but
-        // could not be read is left alone, as every write to it is refused.
+        // An unreadable file is left alone: every write to it is refused.
         if !file.path().exists() {
             let _ = file.create_file();
         }
@@ -285,6 +219,11 @@ impl ConfigStore {
         Self::load(default_path())
     }
 
+    /// The settings kept in `folder` instead, with the `data` folder beside them.
+    pub fn in_folder(folder: &Path) -> Self {
+        Self::load(folder.join(FILE))
+    }
+
     /// Where the settings file lives.
     pub fn path(&self) -> &Path {
         self.file.path()
@@ -298,15 +237,13 @@ impl ConfigStore {
             .unwrap_or_else(|| PathBuf::from(DATA_DIR))
     }
 
-    /// Where snapshots are written: the folder `storage` names, else `data\snapshots` beside the
-    /// executable.
+    /// Where snapshots are written: the folder `storage` names, else `data\snapshots`.
     pub fn snapshots_dir(&self) -> PathBuf {
         self.chosen(&self.current().storage.snapshots)
             .unwrap_or_else(|| self.default_snapshots_dir())
     }
 
-    /// Where recordings are written: the folder `storage` names, else `data\videos` beside the
-    /// executable.
+    /// Where recordings are written: the folder `storage` names, else `data\videos`.
     pub fn videos_dir(&self) -> PathBuf {
         self.chosen(&self.current().storage.videos)
             .unwrap_or_else(|| self.default_videos_dir())
@@ -322,8 +259,6 @@ impl ConfigStore {
         self.data_dir().join(VIDEOS_DIR)
     }
 
-    /// The folder `storage` names, taken from beside the settings file when relative; `None`
-    /// when it names none.
     fn chosen(&self, folder: &str) -> Option<PathBuf> {
         let folder = folder.trim();
         if folder.is_empty() {
@@ -336,23 +271,17 @@ impl ConfigStore {
         })
     }
 
-    /// Where the cameras and their groups are saved: `data\settings` beside the executable.
+    /// Where the cameras, groups and views are saved: `data\settings`.
     pub fn settings_dir(&self) -> PathBuf {
         self.data_dir().join(SETTINGS_DIR)
     }
 
-    /// The settings as they are in memory right now.
-    ///
-    /// Taken even if a thread panicked holding the lock: the config is only ever replaced whole,
-    /// so it is still whole. Falling back to the defaults instead would have the next save write
-    /// them over the user's settings.
+    /// The settings as they are in memory now.
     pub fn current(&self) -> Config {
         self.file.current()
     }
 
-    /// Saves a change to the settings: preferences, window geometry and storage folders alike.
-    /// Applies `change` to a copy, writes the file, then adopts the copy. A change that changes
-    /// nothing writes nothing.
+    /// Saves a change to the settings; one that changes nothing writes nothing.
     pub fn update(&self, change: impl FnOnce(&mut Config)) -> Result<(), StoreError> {
         self.file.update(|config| {
             change(config);
@@ -366,8 +295,6 @@ pub fn default_path() -> PathBuf {
     exe_dir().join(FILE)
 }
 
-/// The folder the executable sits in. Settings and data belong here; the app never writes to
-/// AppData or the user's profile.
 fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -381,8 +308,6 @@ mod tests {
 
     use super::*;
 
-    /// Settings loaded from a folder of their own, removed when the test ends. Nothing here touches
-    /// the real `settings.json` beside the test executable.
     struct TempConfig {
         dir: tempfile::TempDir,
         config: ConfigStore,
@@ -462,7 +387,6 @@ mod tests {
             "the choice is saved"
         );
 
-        // Cleared, each goes back to its default; blank counts as cleared.
         temp.config
             .update(|config| {
                 config.storage.snapshots.clear();
@@ -490,7 +414,6 @@ mod tests {
         );
     }
 
-    /// The `settings.json.broken-<seconds>` files beside the settings file.
     fn moved_aside(temp: &TempConfig) -> Vec<PathBuf> {
         fs::read_dir(temp.dir.path())
             .expect("the folder must be there")
@@ -525,7 +448,6 @@ mod tests {
             "it fits one notification: {problem}"
         );
 
-        // A save no longer has anything of the user's to write over.
         config
             .update(|config| config.ui.volume = 12.0)
             .expect("the app saves as usual");
@@ -539,7 +461,7 @@ mod tests {
     #[test]
     fn a_file_that_cannot_be_read_is_never_written() {
         let temp = TempConfig::new();
-        // A folder can't be read as text, which stands in for a locked or forbidden file.
+        // A folder stands in for a file that can't be read.
         fs::remove_file(temp.file()).unwrap();
         fs::create_dir_all(temp.file()).unwrap();
 
@@ -583,8 +505,6 @@ mod tests {
         let config = &temp.config;
         config.update(|config| config.ui.volume = 0.0).unwrap();
 
-        // Each save adds one, so a save that started from a stale copy shows as a missing one,
-        // and two sharing the temporary file show as a failed save.
         std::thread::scope(|scope| {
             for _ in 0..THREADS {
                 scope.spawn(|| {

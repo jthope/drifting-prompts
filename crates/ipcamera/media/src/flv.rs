@@ -1,18 +1,7 @@
-//! A Reolink's FLV stream: what a session opens it with, and the glass2glass source that plays it.
+//! A Reolink's FLV stream: the login for its token, and the glass2glass source that plays it.
 //!
-//! Reolink's web server sends a camera's streams as FLV, some of them only that way (the one its
-//! apps call Balanced, a tracking lens's sub stream). A session for one
-//! ([`StreamPath::ReolinkFlv`](ipcamera_core::StreamPath::ReolinkFlv)) logs in to the camera's API
-//! once for a token ([`log_in`], before the session's runtime, since the client blocks), GETs the
-//! stream with it ([`open`]), reads the stream's head for whether it has sound, and drops the login,
-//! which logs out: the camera goes on sending. A reconnect logs in again, because the camera hangs
-//! up on a token whose session has ended.
-//!
-//! [`FlvSrc`] hands the same bytes to each of its outputs, one per track, and a glass2glass
-//! `flvdemux` behind each takes its own track out: H.264 in Annex-B, AAC in ADTS, as `rtspsrcn`'s
-//! two outputs carry them, so the rest of the graph is the same as for RTSP.
-//!
-//! The stream's address carries the token, which is a login too: no error here repeats it.
+//! A reconnect logs in again: the camera hangs up on a token whose login has ended. The address
+//! carries the token, a login too, so no error repeats it.
 
 use std::{future::Future, pin::Pin, time::Duration};
 
@@ -31,30 +20,22 @@ use crate::{
     pipeline::{AudioCodec, Offer},
 };
 
-/// How long the camera may take to take the connection.
 const CONNECT_WITHIN: Duration = Duration::from_secs(5);
 
-/// The most of a stream read for its head before it counts as saying nothing of itself: the head
-/// comes in the first few kilobytes.
 const HEAD_BYTES: usize = 256 * 1024;
 
-/// A stream that delivers nothing for this long counts as lost, as an RTSP one does
-/// (`pipeline`'s stall timeout), so it reconnects instead of showing the last picture forever.
+/// Without it a stalled stream would show its last picture forever.
 const STALL: Duration = Duration::from_secs(10);
 
-/// What a session opens a Reolink's FLV stream with: the stream's address, a token in it, and the
-/// client the token is from, which logs out when dropped.
+/// The stream's address with a token in it; the client logs out when dropped.
 pub(crate) struct FlvLogin {
     url: String,
     /// `None` only in tests, which have a stream and no camera to log in to.
     client: Option<ReolinkClient>,
 }
 
-/// Logs in to `camera`'s API once and makes the address of its FLV stream `name`
-/// (`channel0_ext.bcs`) with the login's token. Blocks for up to the client's timeout, so call it
-/// off any async runtime. A refused login is [`MediaError::LoginRejected`], which nothing
-/// retries; a camera with no password saved isn't logged in to at all, since a blank login counts
-/// against the account like a wrong one.
+/// Blocks, so never on an async runtime. A camera with no password is never logged in to, since a
+/// blank login counts against the account.
 pub(crate) fn log_in(camera: &CameraConfig, name: &str) -> Result<FlvLogin> {
     if camera.password.is_empty() {
         return Err(MediaError::CannotPlay(
@@ -80,25 +61,21 @@ pub(crate) fn log_in(camera: &CameraConfig, name: &str) -> Result<FlvLogin> {
     })
 }
 
-/// A Reolink's FLV stream, answering: the response, and the bytes already read for its head.
 pub(crate) struct FlvAnswer {
     response: reqwest::Response,
     head: Vec<u8>,
 }
 
-/// GETs the stream `login` names, reads its head, and logs out. The head becomes the offer: H.264
-/// video, or a stream that can't be played, and AAC sound where it has any.
 pub(crate) async fn open(login: FlvLogin) -> Result<(FlvAnswer, Offer)> {
     let FlvLogin { url, client } = login;
     let http = reqwest::Client::builder()
-        // The certificate a camera signs itself, which `ReolinkClient` accepts too.
+        // Cameras sign their own certificates.
         .tls_danger_accept_invalid_certs(true)
         .connect_timeout(CONNECT_WITHIN)
         .build()
         .map_err(|error| failed!("{}", error.without_url()))?;
     let sent = http.get(&url).send().await;
-    // The stream has started, or won't: the login can end, and the camera goes on sending. It
-    // waits for the camera's answer, which on this session's own runtime holds up nothing else.
+    // Once the stream has started the login can end; the camera goes on sending.
     drop(client);
     let mut response = sent.map_err(|error| {
         failed!(
@@ -149,15 +126,13 @@ pub(crate) async fn open(login: FlvLogin) -> Result<(FlvAnswer, Offer)> {
     Ok((FlvAnswer { response, head }, offer))
 }
 
-/// A Reolink's FLV stream as a glass2glass source: the same bytes on each of its outputs, one per
-/// track, for an `flvdemux` behind each.
+/// The same bytes on each output, one per track, for an `flvdemux` behind each.
 pub(crate) struct FlvSrc {
     answer: Option<FlvAnswer>,
     outputs: usize,
 }
 
 impl FlvSrc {
-    /// The source for `answer`, with `outputs` outputs: 1 for the video alone, 2 with the sound.
     pub(crate) fn new(answer: FlvAnswer, outputs: usize) -> Self {
         Self {
             answer: Some(answer),
@@ -166,8 +141,7 @@ impl FlvSrc {
     }
 }
 
-/// `bytes` of the stream as a frame of a byte stream, which carries no timing: `flvdemux` reads
-/// the tags' own.
+/// No timing: `flvdemux` reads the tags' own.
 fn chunk_frame(bytes: Vec<u8>, sequence: u64) -> Frame {
     Frame {
         domain: MemoryDomain::System(SystemSlice::from_boxed(bytes.into_boxed_slice())),
@@ -200,8 +174,7 @@ impl MultiOutputSource for FlvSrc {
         }
     }
 
-    // Live, as `rtspsrcn` is: a sink anchors presentation on the pipeline's start, so a slow start
-    // plays late and catches up rather than becoming the stream's standing delay.
+    // Live, so a slow start catches up rather than becoming a standing delay.
     fn latency(&self) -> LatencyReport {
         LatencyReport::live(0, None)
     }
@@ -258,8 +231,6 @@ mod tests {
         record::{RecordControl, Recorder},
     };
 
-    /// The start of an FLV stream as a Reolink sends it: the header with its flags unset, an
-    /// `onMetaData` script, and the first video tag, of video codec `codec` (7 is H.264).
     fn flv_start(codec: u8) -> Vec<u8> {
         fn tag(kind: u8, body: &[u8]) -> Vec<u8> {
             let size = body.len() as u32;
@@ -291,8 +262,6 @@ mod tests {
         bytes
     }
 
-    /// A web server on a loopback port that answers one request with `body` as an FLV stream,
-    /// and the address of a stream on it.
     fn serve_once(body: Vec<u8>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let port = listener.local_addr().expect("the bound address").port();
@@ -342,7 +311,7 @@ mod tests {
             Recorder::new(RecordControl::default()),
         )
         .expect("the graph should build");
-        // The RTSP graph with sound's 15, and an `flvdemux` for each of the video and the sound.
+        // RTSP's 15 with sound, plus an `flvdemux` per track.
         assert_eq!(graph.node_count(), 17);
     }
 

@@ -1,10 +1,4 @@
-//! An element that passes everything on untouched, showing it to something that watches.
-//!
-//! The pipeline has two of these: the size tap in front of the decoder (`sink`), which notes the
-//! picture size the stream declares, and a record tap after each parser (`record`), which copies
-//! the compressed stream into a recording. Each is a [`Watch`], and [`Tap`] is the element around
-//! it, written once. In C# terms, `Tap<W>` is a generic class and `Watch` the interface its type
-//! parameter must implement.
+//! An element that passes everything on untouched, showing it to a [`Watch`] first.
 
 use std::{future::Future, pin::Pin};
 
@@ -13,23 +7,18 @@ use g2g_core::{
     OutputSink, PipelinePacket,
 };
 
-/// What a [`Tap`] shows what passes through it to.
 pub(crate) trait Watch {
-    /// What the element is called in the graph.
     fn metadata(&self) -> ElementMetadata;
 
-    /// Caps offered from upstream, before the pipeline settles on them. Most watchers wait for
-    /// [`Watch::caps`].
+    /// Caps offered from upstream, before the pipeline settles on them.
     fn offered(&self, _caps: &Caps) {}
 
     /// The caps the pipeline settled on, at the start and whenever they change.
     fn caps(&self, caps: &Caps);
 
-    /// A frame on its way through.
     fn frame(&self, _frame: &Frame) {}
 }
 
-/// Passes everything on untouched, showing it to its [`Watch`] first.
 pub(crate) struct Tap<W>(pub(crate) W);
 
 impl<W: Watch> AsyncElement for Tap<W>

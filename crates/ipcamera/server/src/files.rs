@@ -1,20 +1,6 @@
-//! The snapshots and recordings the server saved, for the web build's Snapshots and Videos pages,
-//! and the folders they are in.
+//! The saved snapshots and recordings, served for the web build's pages, and their folders.
 //!
-//! They are files in the folders `settings.json` names, saved by the desktop's own rules
-//! (`ipcamera_storage`), so a folder the desktop app shares lists the same in both:
-//!
-//! - `GET /api/snapshots` and `GET /api/videos` list them, newest first, each with the URLs the
-//!   server serves it and its thumbnail at, as `core`'s [`SnapshotEntry`] and [`VideoEntry`].
-//!   Listing the snapshots also starts making the thumbnails any of them lack, which the status's
-//!   snapshots number then shows.
-//! - `GET /files/snapshots/<name>`, `GET /files/videos/<name>` and
-//!   `GET /files/{snapshots,videos}/thumbnails/<name>` serve one, with range requests, so a video
-//!   can be scrubbed while it plays. Only a file of its kind directly in its folder is served
-//!   ([`FileKind::locate`], [`thumbnail::locate`]), so a name can never reach another file.
-//! - `DELETE /api/snapshots/<name>` and `DELETE /api/videos/<name>` delete one for good. A video
-//!   still recording is refused, in the desktop's words.
-//! - `GET /api/storage` says where the two folders are and how full their drives are.
+//! Only a file of its kind directly in its folder is served, so a name never reaches another.
 
 use std::path::PathBuf;
 
@@ -43,12 +29,8 @@ use tower_http::services::ServeFile;
 
 use crate::Server;
 
-/// Why a recording can't be deleted yet, as the desktop says it.
 const STILL_RECORDING: &str = "That video is still recording. Stop recording first.";
 
-/// `GET /api/snapshots`: every snapshot, newest first. Each file's header is read for its size,
-/// so this reads off the runtime's threads. Thumbnails a snapshot lacks are made on a thread of
-/// their own, after this answers.
 pub(crate) async fn snapshots(State(server): State<Server>) -> Response {
     let folder = server.config.snapshots_dir();
     blocking(move || {
@@ -75,7 +57,6 @@ pub(crate) async fn snapshots(State(server): State<Server>) -> Response {
     .await
 }
 
-/// Where the server serves the thumbnail at `path`, of a file in the `kind` folder, if it has one.
 fn thumbnail_url(kind: &str, path: Option<&std::path::Path>) -> Option<String> {
     let name = path?.file_name()?;
     Some(format!(
@@ -84,8 +65,6 @@ fn thumbnail_url(kind: &str, path: Option<&std::path::Path>) -> Option<String> {
     ))
 }
 
-/// `GET /api/videos`: every recording, newest first, each saying whether it is still being
-/// written.
 pub(crate) async fn videos(State(server): State<Server>) -> Response {
     let folder = server.config.videos_dir();
     let writing = server.streams.writing();
@@ -117,7 +96,6 @@ pub(crate) async fn videos(State(server): State<Server>) -> Response {
     .await
 }
 
-/// `GET /files/snapshots/<name>`: the picture.
 pub(crate) async fn snapshot_file(
     State(server): State<Server>,
     Path(name): Path<String>,
@@ -126,7 +104,6 @@ pub(crate) async fn snapshot_file(
     serve(&SNAPSHOT, server.config.snapshots_dir(), &name, request).await
 }
 
-/// `GET /files/videos/<name>`: the video, scrubbing included.
 pub(crate) async fn video_file(
     State(server): State<Server>,
     Path(name): Path<String>,
@@ -135,7 +112,6 @@ pub(crate) async fn video_file(
     serve(&VIDEO, server.config.videos_dir(), &name, request).await
 }
 
-/// `GET /files/snapshots/thumbnails/<name>`: a snapshot made small, for the gallery.
 pub(crate) async fn snapshot_thumbnail(
     State(server): State<Server>,
     Path(name): Path<String>,
@@ -144,7 +120,6 @@ pub(crate) async fn snapshot_thumbnail(
     serve_thumbnail(server.config.snapshots_dir(), &name, request).await
 }
 
-/// `GET /files/videos/thumbnails/<name>`: a recording's first picture.
 pub(crate) async fn video_thumbnail(
     State(server): State<Server>,
     Path(name): Path<String>,
@@ -153,7 +128,6 @@ pub(crate) async fn video_thumbnail(
     serve_thumbnail(server.config.videos_dir(), &name, request).await
 }
 
-/// Serves the thumbnail called `name` of a file in `folder`, or says there is none.
 async fn serve_thumbnail(folder: PathBuf, name: &str, request: Request) -> Response {
     match thumbnail::locate(&folder, name) {
         Ok(path) => send(path, request).await,
@@ -161,7 +135,6 @@ async fn serve_thumbnail(folder: PathBuf, name: &str, request: Request) -> Respo
     }
 }
 
-/// Serves the file of `kind` called `name` in `folder`, or says there is none.
 async fn serve(kind: &FileKind, folder: PathBuf, name: &str, request: Request) -> Response {
     match kind.locate(&folder, name) {
         Ok(path) => send(path, request).await,
@@ -169,7 +142,6 @@ async fn serve(kind: &FileKind, folder: PathBuf, name: &str, request: Request) -
     }
 }
 
-/// The file at `path`, answering `request`'s range when it asks for one.
 async fn send(path: PathBuf, request: Request) -> Response {
     match ServeFile::new(path).oneshot(request).await {
         Ok(response) => response.map(Body::new),
@@ -177,7 +149,6 @@ async fn send(path: PathBuf, request: Request) -> Response {
     }
 }
 
-/// `DELETE /api/snapshots/<name>`: deletes the snapshot for good.
 pub(crate) async fn delete_snapshot(
     State(server): State<Server>,
     Path(name): Path<String>,
@@ -186,8 +157,6 @@ pub(crate) async fn delete_snapshot(
     deleted(blocking_result(move || snapshot::delete(&folder, &name)).await)
 }
 
-/// `DELETE /api/videos/<name>`: deletes the recording and its thumbnail for good, unless a camera
-/// still writes it.
 pub(crate) async fn delete_video(
     State(server): State<Server>,
     Path(name): Path<String>,
@@ -199,7 +168,6 @@ pub(crate) async fn delete_video(
     deleted(blocking_result(move || recording::delete(&folder, &name)).await)
 }
 
-/// What a delete answers: nothing when it is done, else the sentence that says why not.
 fn deleted(result: Option<Result<(), StorageError>>) -> Response {
     match result {
         Some(Ok(())) => StatusCode::NO_CONTENT.into_response(),
@@ -208,8 +176,6 @@ fn deleted(result: Option<Result<(), StorageError>>) -> Response {
     }
 }
 
-/// `GET /api/storage`: where the snapshots and the recordings go, and how full their drives are.
-/// Asking a drive can wait on it, so this asks off the runtime's threads.
 pub(crate) async fn storage(State(server): State<Server>) -> Response {
     let config = server.config.clone();
     blocking(move || Storage {
@@ -238,7 +204,6 @@ fn entry(folder: PathBuf, default: PathBuf) -> StorageEntry {
     entry
 }
 
-/// Runs `work` off the runtime's threads and answers with what it returns, as JSON.
 async fn blocking<T: serde::Serialize + Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Response {
@@ -248,7 +213,7 @@ async fn blocking<T: serde::Serialize + Send + 'static>(
     }
 }
 
-/// Runs `work` off the runtime's threads; `None` when the server stopped before it was done.
+/// `None` when the server stopped before it was done.
 async fn blocking_result(
     work: impl FnOnce() -> Result<(), StorageError> + Send + 'static,
 ) -> Option<Result<(), StorageError>> {

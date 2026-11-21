@@ -1,31 +1,6 @@
-//! Reolink's HTTP API: one URL, `/cgi-bin/api.cgi`, taking a JSON array of commands.
-//!
-//! Each command is `{"cmd": "GetMdState", "action": 0, "param": {...}}`. The camera answers with an
-//! array in the same order: `{"cmd", "code": 0, "value": {...}}` for a command that worked, and
-//! `{"cmd", "code": 1, "error": {"rspCode", "detail"}}` for one that didn't. `Login` returns a
-//! token that every other request carries in its query string, with a lease the camera sets (an
-//! hour, as a rule). The password goes only in `Login`'s body, never in a URL.
-//!
-//! Reolink describes the API in its *Camera HTTP API User Guide*, a PDF its support site hands out.
-//! The field names here follow `reolink_aio` (MIT), the library behind Home Assistant's Reolink
-//! integration, which records how the cameras actually answer, firmware quirks included.
-//!
-//! This file is the protocol as data: the commands to send and how to read the replies, in
-//! functions the tests call directly. [`ReolinkClient`] sends them and keeps the login. The web
-//! build has neither: its cameras are the server's, which talks to them.
-//!
-//! Reolink counts channels from 0. A camera's settings count them from 1, as Dahua does, and the
-//! client takes them that way.
-//!
-//! The camera's web server also sends its streams as FLV, at
-//! `/flv?port=1935&app=bcs&stream=channel0_ext.bcs`, among them some its RTSP server doesn't have:
-//! the one Reolink's apps call Balanced (`ext`), and a tracking lens's sub stream
-//! (`autotrack_sub`). No reply lists which it has, so Detect opens each name Reolink's guides give
-//! ([`FLV_STREAMS`]) for its first bytes ([`read_flv_head`]) and keeps those that send H.264, the
-//! only video FLV carries that this app plays. Reolink's guides put the login in the address; this
-//! app puts a token from `Login` there instead, so the password stays in `Login`'s body. A stream
-//! outlives the login it was opened with, but the camera takes a token only while its session
-//! lasts.
+//! Reolink's HTTP API, a JSON array of commands to `/cgi-bin/api.cgi`, as data; [`ReolinkClient`]
+//! sends it. The password goes only in `Login`'s body, never in a URL, an FLV stream's included.
+//! Reolink counts channels from 0, a camera's settings from 1.
 
 mod client;
 
@@ -41,30 +16,24 @@ use crate::{
 };
 
 /// Why a call to a Reolink camera failed.
-///
-/// In C# terms, one exception type per case, as an enum: the caller matches on it, and the two
-/// cases that must never be retried, [`LoginRejected`](Self::LoginRejected) and
-/// [`Locked`](Self::Locked), are told apart from the rest.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReolinkError {
-    /// The camera refused the login, for the reason it gave. Logging in again with the same
-    /// password could lock the account, so nothing retries it.
+    /// The camera refused the login. Retrying could lock the account, so nothing does.
     LoginRejected(String),
     /// The camera has locked the account after too many failed logins.
     Locked,
-    /// The camera no longer knows the token, after a restart for one. The client logs in again
-    /// once by itself, so a caller sees this only when that didn't help.
+    /// The camera no longer knows the token, even after one fresh login.
     SessionExpired,
-    /// The camera answered a command with an error, which can mean this model doesn't have it.
+    /// The camera answered a command with an error.
     Refused {
         /// The command, as Reolink names it: `SetWhiteLed`.
         command: String,
         /// The camera's reason.
         detail: String,
     },
-    /// The camera could not be reached, or the connection broke, for the reason given.
+    /// The camera could not be reached, or the connection broke.
     Unreachable(String),
-    /// The camera answered with something that isn't the API, for the reason given.
+    /// The camera answered with something that isn't the API.
     Protocol(String),
 }
 
@@ -96,14 +65,10 @@ impl fmt::Display for ReolinkError {
 
 impl std::error::Error for ReolinkError {}
 
-/// What a call to a Reolink camera returns.
 type Result<T> = std::result::Result<T, ReolinkError>;
 
-/// The reply to each command of a request, in the order they were sent: a command can fail while
-/// the others in the same request work.
 type Replies = Vec<Result<Value>>;
 
-/// What the AI detections are called in `GetAiState`'s reply, in [`Detection::ALL`]'s order.
 const AI_KEYS: [(&str, Detection); 5] = [
     ("people", Detection::Person),
     ("vehicle", Detection::Vehicle),
@@ -112,12 +77,11 @@ const AI_KEYS: [(&str, Detection); 5] = [
     ("package", Detection::Package),
 ];
 
-/// One command. `action` 0 is what nearly every command takes.
 fn command(name: &str, param: Value) -> Value {
     json!({ "cmd": name, "action": 0, "param": param })
 }
 
-/// The login, which carries the password. Never print or log it.
+/// Carries the password: never print or log it.
 fn login(user: &str, password: &str) -> Value {
     command(
         "Login",
@@ -125,37 +89,32 @@ fn login(user: &str, password: &str) -> Value {
     )
 }
 
-/// Ends the session a login opened. A camera allows only a few at once.
+/// A camera allows only a few sessions at once.
 fn logout() -> Value {
     command("Logout", json!({}))
 }
 
-/// What the camera is: model, firmware and hardware.
 fn get_dev_info() -> Value {
     command("GetDevInfo", json!({}))
 }
 
-/// What the camera can do, as far as `user` may use it.
 fn get_ability(user: &str) -> Value {
     command("GetAbility", json!({ "User": { "userName": user } }))
 }
 
-/// Whether the camera sees motion on `channel` now.
 fn get_md_state(channel: u32) -> Value {
     command("GetMdState", json!({ "channel": channel }))
 }
 
-/// What the camera's AI sees on `channel` now, and which detections it has.
 fn get_ai_state(channel: u32) -> Value {
     command("GetAiState", json!({ "channel": channel }))
 }
 
-/// Where the zoom and focus of `channel` are, with the range each takes (`action` 1).
+/// `action` 1 asks for each setting's range too.
 fn get_zoom_focus(channel: u32) -> Value {
     json!({ "cmd": "GetZoomFocus", "action": 1, "param": { "channel": channel } })
 }
 
-/// Zooms `channel` to `position`, in the camera's own numbers.
 fn start_zoom(channel: u32, position: i64) -> Value {
     command(
         "StartZoomFocus",
@@ -163,14 +122,10 @@ fn start_zoom(channel: u32, position: i64) -> Value {
     )
 }
 
-/// The RTSP addresses of `channel`'s streams, as the camera gives them.
 fn get_rtsp_url(channel: u32) -> Value {
     command("GetRtspUrl", json!({ "channel": channel }))
 }
 
-/// The streams in `GetRtspUrl`'s reply: every RTSP address the camera gave, under the name the
-/// camera gave it (`mainStream`), in the reply's order. Nothing is added to what it says, so a
-/// stream the camera doesn't list isn't offered.
 fn read_streams(value: &Value) -> Vec<CameraStream> {
     fn gather(name: &str, value: &Value, streams: &mut Vec<CameraStream>) {
         match value {
@@ -202,10 +157,7 @@ fn read_streams(value: &Value) -> Vec<CameraStream> {
     streams
 }
 
-/// The streams a Reolink's web server sends as FLV, by the names its addresses give them
-/// (`channel0_ext.bcs`), as Reolink's guides list them: every camera's main and sub streams and
-/// `ext` (Balanced, in Reolink's apps), a tracking lens's two, and a telephoto lens's two. A
-/// camera lists none of them: Detect opens each and keeps those that answer.
+/// The FLV streams Reolink's guides name: no reply lists which a camera has.
 const FLV_STREAMS: [&str; 7] = [
     "main",
     "sub",
@@ -216,28 +168,20 @@ const FLV_STREAMS: [&str; 7] = [
     "telephoto_sub",
 ];
 
-/// The port Reolink's FLV addresses name where `GetNetPort` doesn't say: RTMP's own, which the
-/// web server takes the stream from.
 const RTMP_PORT: u16 = 1935;
 
-/// FLV's number for H.264 video, the only video this app takes out of FLV.
 const FLV_H264: u8 = 7;
 
-/// FLV's number for AAC sound.
 const FLV_AAC: u8 = 10;
 
-/// `GetNetPort`: which of the camera's servers are on, and their ports.
 fn get_net_port() -> Value {
     command("GetNetPort", json!({}))
 }
 
-/// Whether `GetAbility`'s reply says the camera sends its streams as FLV over HTTP.
 fn sends_flv(ability: &Value, channel: u32) -> bool {
     ability_version(ability, channel, "httpFlv") > 0
 }
 
-/// The RTMP port in `GetNetPort`'s reply, which Reolink's FLV addresses name; [`RTMP_PORT`] when
-/// it doesn't say.
 fn read_rtmp_port(value: &Value) -> u16 {
     value["NetPort"]["rtmpPort"]
         .as_u64()
@@ -246,16 +190,11 @@ fn read_rtmp_port(value: &Value) -> u16 {
         .unwrap_or(RTMP_PORT)
 }
 
-/// The name Reolink's addresses give FLV stream `stream` of `channel`, counted from 0:
-/// `channel0_ext.bcs`.
 fn flv_name(channel: u32, stream: &str) -> String {
     format!("channel{channel}_{stream}.bcs")
 }
 
-/// The request for the FLV stream `name`, from the RTMP server on `rtmp_port`, with `token` for
-/// the login. Reolink's own form has `user` and `password` in its place, which this app never puts
-/// in an address. `name` comes from saved settings, so anything in it that would end the value
-/// is escaped.
+/// A token in the address, never the password; `name` comes from saved settings, so it is escaped.
 fn flv_request(rtmp_port: u16, name: &str, token: &str) -> String {
     let name: String = name
         .bytes()
@@ -269,25 +208,20 @@ fn flv_request(rtmp_port: u16, name: &str, token: &str) -> String {
     format!("/flv?port={rtmp_port}&app=bcs&stream={name}&token={token}")
 }
 
-/// The stream a Reolink RTSP path names after its channel: `sub` in `/h264Preview_01_sub`,
-/// `autotrack` in `/Preview_01_autotrack`; `None` for a path of another form.
+/// `sub` in `/h264Preview_01_sub`, `autotrack` in `/Preview_01_autotrack`.
 fn rtsp_stream_name(path: &str) -> Option<&str> {
     let path = path.split('?').next()?;
     let (_, after) = path.rsplit_once("Preview_")?;
     Some(after.split_once('_')?.1)
 }
 
-/// The lens a stream of a second lens is of, by the first part of its name (`autotrack` in
-/// `autotrack_sub`, and in RTSP's `autotrack`); `None` for the camera's own streams.
 fn lens_of(stream: &str) -> Option<&str> {
     let lens = stream.split('_').next()?;
     (!matches!(lens, "main" | "sub" | "ext")).then_some(lens)
 }
 
-/// Whether `listed`, the RTSP streams a camera listed, has FLV stream `stream` already. Reolink's
-/// RTSP path for a stream ends in the same name after the channel (`/Preview_01_sub`,
-/// `/h264Preview_01_sub`), but a lens's main stream drops the `_main` (`/Preview_01_autotrack`
-/// is `autotrack_main`).
+/// Whether RTSP lists FLV stream `stream` already; a lens's main stream drops the `_main` over
+/// RTSP (`/Preview_01_autotrack`).
 fn listed_over_rtsp(listed: &[CameraStream], stream: &str) -> bool {
     let twin = match stream.strip_suffix("_main") {
         Some(lens) if !lens.is_empty() => lens,
@@ -298,9 +232,6 @@ fn listed_over_rtsp(listed: &[CameraStream], stream: &str) -> bool {
     })
 }
 
-/// The names in [`FLV_STREAMS`] worth asking a camera for, given `listed`, the RTSP streams it
-/// listed: those RTSP doesn't have already, and of a second lens only the one RTSP names, when
-/// it names one ([`one_lens`]).
 fn flv_names_to_ask(listed: &[CameraStream]) -> Vec<&'static str> {
     let lens = listed
         .iter()
@@ -315,10 +246,7 @@ fn flv_names_to_ask(listed: &[CameraStream]) -> Vec<&'static str> {
         .collect()
 }
 
-/// Of the FLV streams a camera answered with, `answered` in [`FLV_STREAMS`]'s order, those of one
-/// second lens at most: a camera has one, and Reolink names it after what it does, but some
-/// answer to another lens's names for it as well (a tracking lens to `telephoto_` too). The
-/// first lens to answer is the one.
+/// One second lens at most: some cameras answer to another lens's names for theirs too.
 fn one_lens(answered: Vec<&'static str>) -> Vec<&'static str> {
     let lens = answered.iter().find_map(|stream| lens_of(stream));
     answered
@@ -327,16 +255,14 @@ fn one_lens(answered: Vec<&'static str>) -> Vec<&'static str> {
         .collect()
 }
 
-/// What the start of an FLV stream says of it: the picture's size and codec, and the sound's.
+/// What the start of an FLV stream says of it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FlvHead {
-    /// The picture's width and height, as its `onMetaData` gives them.
+    /// The picture's width and height.
     pub size: Option<(u32, u32)>,
-    /// FLV's number for its video: 7 for H.264, 12 for the H.265 some Reolinks send though FLV
-    /// has no number for it. A first video tag says it, else `onMetaData`'s `videocodecid`.
+    /// FLV's number for its video: 7 for H.264, 12 for the H.265 some Reolinks send.
     pub video: Option<u8>,
-    /// FLV's number for its sound: 10 for AAC. A first sound tag says it, else `onMetaData`'s
-    /// `audiocodecid`.
+    /// FLV's number for its sound: 10 for AAC.
     pub sound: Option<u8>,
 }
 
@@ -351,7 +277,7 @@ impl FlvHead {
         self.sound == Some(FLV_AAC)
     }
 
-    /// What the camera form says of the picture, as it says an RTSP stream's: `896×672, H264`.
+    /// `896×672, H264`.
     pub fn detail(&self) -> String {
         let codec = if self.h264() { "H264" } else { "not H.264" };
         match self.size {
@@ -361,10 +287,8 @@ impl FlvHead {
     }
 }
 
-/// What `bytes`, the start of an FLV stream, say of it, once they have said what its video is:
-/// in its `onMetaData` script or its first video tag (whose codec wins). `None` for bytes that
-/// aren't FLV, and for too few yet. The header's flags, which say whether there are video and
-/// sound, aren't read: Reolink's cameras leave them unset.
+/// What the start of an FLV stream says once it has said what its video is; `None` for bytes that
+/// aren't FLV, or too few yet. The header's flags go unread: Reolink's cameras leave them unset.
 pub fn read_flv_head(bytes: &[u8]) -> Option<FlvHead> {
     const SCRIPT: u8 = 18;
     const VIDEO: u8 = 9;
@@ -373,7 +297,7 @@ pub fn read_flv_head(bytes: &[u8]) -> Option<FlvHead> {
         return None;
     }
     let offset = u32::from_be_bytes(bytes[5..9].try_into().ok()?) as usize;
-    // Past the header, and the size of the tag before the first, which is 0.
+    // Past the header and the first tag's previous-tag size.
     let mut at = offset.checked_add(4)?;
     let mut head = FlvHead::default();
     let mut said = false;
@@ -414,8 +338,6 @@ pub fn read_flv_head(bytes: &[u8]) -> Option<FlvHead> {
     said.then_some(head)
 }
 
-/// The number `key` has in an AMF0 script body: the key as AMF0 writes a name, its length first,
-/// then a number's marker and its eight bytes.
 fn amf_number(body: &[u8], key: &str) -> Option<f64> {
     let mut name = u16::try_from(key.len()).ok()?.to_be_bytes().to_vec();
     name.extend_from_slice(key.as_bytes());
@@ -425,8 +347,7 @@ fn amf_number(body: &[u8], key: &str) -> Option<f64> {
     (number.is_finite() && number >= 0.0).then_some(number)
 }
 
-/// Where a camera's zoom is, and how far it goes, in the camera's own numbers, which differ from
-/// model to model: the range is whatever the camera says it is.
+/// Where a camera's zoom is, and how far it goes, in the camera's own numbers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ZoomPosition {
     /// Where it is now.
@@ -438,8 +359,7 @@ pub struct ZoomPosition {
 }
 
 impl ZoomPosition {
-    /// Where a step from here ends: `part` of the whole range (0 to 1) in or out, as `velocity`'s
-    /// sign says, and no further than either end.
+    /// Where a step of `part` of the range ends, in or out by `velocity`'s sign, within the range.
     pub fn stepped(self, velocity: f64, part: f64) -> i64 {
         let stride = ((self.max - self.min) as f64 * part).round().max(1.0) as i64;
         let to = if velocity > 0.0 {
@@ -451,7 +371,6 @@ impl ZoomPosition {
     }
 }
 
-/// `GetZoomFocus`'s reply, asked with its range; `None` from a camera that doesn't say both.
 fn read_zoom(value: &Value) -> Option<ZoomPosition> {
     let range = &value["range"]["ZoomFocus"]["zoom"]["pos"];
     let zoom = ZoomPosition {
@@ -462,13 +381,11 @@ fn read_zoom(value: &Value) -> Option<ZoomPosition> {
     (zoom.max > zoom.min).then_some(zoom)
 }
 
-/// The spotlight on `channel`.
 fn get_white_led(channel: u32) -> Value {
     command("GetWhiteLed", json!({ "channel": channel }))
 }
 
-/// Switches the spotlight on `channel`. Unlike the other commands, it has no `action`, as
-/// `reolink_aio` sends it.
+/// No `action`, unlike the other commands.
 fn set_white_led(channel: u32, spotlight: Spotlight) -> Value {
     json!({
         "cmd": "SetWhiteLed",
@@ -480,8 +397,6 @@ fn set_white_led(channel: u32, spotlight: Spotlight) -> Value {
     })
 }
 
-/// Moves the camera on `channel` (`op`: `Left`, `RightUp`, `ZoomInc`, ... or `Stop`), at `speed`
-/// (1 to 64) where the camera takes one.
 fn ptz_ctrl(channel: u32, op: &str, speed: Option<u8>) -> Value {
     let mut param = json!({ "channel": channel, "op": op });
     if let Some(speed) = speed {
@@ -490,8 +405,7 @@ fn ptz_ctrl(channel: u32, op: &str, speed: Option<u8>) -> Value {
     command("PtzCtrl", param)
 }
 
-/// Reolink's name for the move `velocity` asks for, and its speed from 1 to 64; `None` for no
-/// move. The directions are named as Dahua names them; only zoom differs.
+/// Reolink names directions as Dahua does; only zoom differs.
 fn ptz_op(velocity: PtzVelocity) -> Option<(&'static str, u8)> {
     let (op, fastest) = match crate::ptz::direction_code(velocity)? {
         "ZoomTele" => ("ZoomInc", velocity.zoom.abs()),
@@ -501,15 +415,12 @@ fn ptz_op(velocity: PtzVelocity) -> Option<(&'static str, u8)> {
     Some((op, ((fastest * 64.0).round() as u8).clamp(1, 64)))
 }
 
-/// Reolink's channel for a camera's settings' `channel`, which counts from 1.
 const fn reolink_channel(channel: u32) -> u32 {
     channel.saturating_sub(1)
 }
 
-/// Each command's reply in `text`, the body answering `sent` commands.
-///
 /// A login failure, a lock or an expired session fails the whole request, whichever command it
-/// came with: they are about the session, not one command.
+/// came with.
 fn read_replies(text: &str, sent: usize) -> Result<Replies> {
     let Ok(Value::Array(replies)) = serde_json::from_str::<Value>(text) else {
         // Some firmware answers a login problem with a short HTML page rather than JSON.
@@ -549,7 +460,6 @@ fn read_replies(text: &str, sent: usize) -> Result<Replies> {
     Ok(replies)
 }
 
-/// One command's reply: its `value`, or why it failed.
 fn read_reply(mut reply: Value) -> Result<Value> {
     let command = reply["cmd"].as_str().unwrap_or("a command").to_string();
     if reply["code"].as_i64() != Some(0) {
@@ -565,7 +475,7 @@ fn read_reply(mut reply: Value) -> Result<Value> {
     }
 
     let mut value = reply.get_mut("value").map(Value::take).unwrap_or_default();
-    // Asked with `action` 1, a command also says the range each setting takes, beside its value.
+    // Asked with `action` 1, a command also says each setting's range, beside its value.
     if let (Some(range), Some(fields)) = (reply.get_mut("range"), value.as_object_mut()) {
         fields.insert("range".into(), range.take());
     }
@@ -579,8 +489,7 @@ fn read_reply(mut reply: Value) -> Result<Value> {
     }
 }
 
-/// The session problem `detail` describes, if it is one. The cameras say it in words, not codes,
-/// and `reolink_aio` matches the same words.
+/// The cameras say a session problem in words, not codes.
 fn session_problem(detail: &str) -> Option<ReolinkError> {
     let said = detail.to_ascii_lowercase();
     if said.contains("locked") {
@@ -602,7 +511,6 @@ fn session_problem(detail: &str) -> Option<ReolinkError> {
     }
 }
 
-/// The token in `Login`'s reply, and how long it lasts.
 fn read_token(value: &Value) -> Result<(String, Duration)> {
     let token = &value["Token"];
     let name = token["name"]
@@ -616,7 +524,6 @@ fn read_token(value: &Value) -> Result<(String, Duration)> {
     Ok((name.to_string(), Duration::from_secs_f64(lease)))
 }
 
-/// `GetDevInfo`'s reply.
 fn read_device_info(value: &Value) -> DeviceInfo {
     let info = &value["DevInfo"];
     let text = |field: &str| info[field].as_str().unwrap_or_default().trim().to_string();
@@ -627,8 +534,7 @@ fn read_device_info(value: &Value) -> DeviceInfo {
     }
 }
 
-/// The version of `name` that `GetAbility`'s reply gives `channel`, or the camera as a whole when
-/// the channel doesn't have it; `None` when neither says.
+/// The channel's version of ability `name`, else the camera's as a whole.
 fn ability(value: &Value, channel: u32, name: &str) -> Option<i64> {
     let ability = &value["Ability"];
     ability["abilityChn"]
@@ -637,32 +543,24 @@ fn ability(value: &Value, channel: u32, name: &str) -> Option<i64> {
         .or_else(|| ability[name]["ver"].as_i64())
 }
 
-/// As [`ability`], with 0 for one the camera doesn't have at all.
 fn ability_version(value: &Value, channel: u32, name: &str) -> i64 {
     ability(value, channel, name).unwrap_or(0)
 }
 
-/// Whether `GetAbility`'s reply gives `channel` a spotlight the app can switch.
 fn has_spotlight(value: &Value, channel: u32) -> bool {
     ability_version(value, channel, "floodLight") > 0
         || ability_version(value, channel, "supportFLswitch") > 0
 }
 
-/// What `GetAbility`'s reply says `channel`'s PTZ does.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct PtzAbility {
-    /// It pans and tilts (or pans only).
     pan_tilt: bool,
-    /// It zooms.
     zoom: bool,
-    /// It takes a speed with a move.
     speed: bool,
 }
 
-/// `ptzType`, as `reolink_aio` reads it: 0 is none, 1 zoom only, 2 and 5 pan, tilt and zoom, 3 and
-/// 6 pan and tilt, 7 pan only. Only types 2 and 3 take a speed, unless the camera says otherwise
-/// (`supportPtzSpeed` 0); one that doesn't say takes it. A camera of another type that says it
-/// zooms (`supportZoom`) does too: a pan and tilt camera with a zoom lens reports type 3.
+/// `ptzType`: 0 none, 1 zoom, 2 and 5 pan, tilt and zoom, 3 and 6 pan and tilt, 7 pan. Only 2 and 3
+/// take a speed, unless `supportPtzSpeed` is 0; `supportZoom` adds a zoom to any type.
 fn read_ptz(value: &Value, channel: u32) -> PtzAbility {
     let kind = ability_version(value, channel, "ptzType");
     PtzAbility {
@@ -672,12 +570,11 @@ fn read_ptz(value: &Value, channel: u32) -> PtzAbility {
     }
 }
 
-/// Whether `GetMdState`'s reply says something moves.
 fn read_motion(value: &Value) -> bool {
     value["state"].as_i64() == Some(1)
 }
 
-/// The detections `GetAiState`'s reply says the camera has, and the ones it sees now.
+/// The detections the camera has, and the ones it sees now.
 fn read_ai(value: &Value) -> (Vec<Detection>, Vec<Detection>) {
     let mut supported = Vec::new();
     let mut detected = Vec::new();
@@ -687,7 +584,7 @@ fn read_ai(value: &Value) -> (Vec<Detection>, Vec<Detection>) {
                 state.get("support").and_then(Value::as_i64) == Some(1),
                 state.get("alarm_state").and_then(Value::as_i64) == Some(1),
             ),
-            // Firmware before 3.0.0.0-494 gives each detection's state as a bare number.
+            // Older firmware gives each detection's state as a bare number.
             Value::Number(state) => (true, state.as_i64() == Some(1)),
             _ => (false, false),
         };
@@ -701,7 +598,6 @@ fn read_ai(value: &Value) -> (Vec<Detection>, Vec<Detection>) {
     (supported, detected)
 }
 
-/// `GetWhiteLed`'s reply.
 fn read_spotlight(value: &Value) -> Spotlight {
     let led = &value["WhiteLed"];
     Spotlight {
@@ -1015,8 +911,6 @@ mod tests {
         assert!(!off.on);
     }
 
-    /// An FLV stream's start as a Reolink sends it: the header with its flags unset, an
-    /// `onMetaData` script with the picture's size and codecs, then `video` as the first video tag.
     fn flv_start(width: f64, height: f64, codec: f64, video: &[u8]) -> Vec<u8> {
         fn tag(kind: u8, body: &[u8]) -> Vec<u8> {
             let size = body.len() as u32;
@@ -1066,7 +960,6 @@ mod tests {
         assert!(head.h264() && head.aac());
         assert_eq!(head.detail(), "896×672, H264");
 
-        // What the bytes say of the video so far is enough; fewer than the script, not yet.
         assert!(read_flv_head(&start[..start.len() - 6]).is_some());
         assert_eq!(read_flv_head(&start[..20]), None);
         assert_eq!(read_flv_head(b"<html>please login first</html>"), None);

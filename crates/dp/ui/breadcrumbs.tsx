@@ -1,10 +1,3 @@
-// Breadcrumbs: the way to what a pane shows, a step at a time (a reader's
-// project, its folders, the file and the heading the reader is under), with a
-// chevron between one step and the next and the place itself emphasized. A
-// step with a menu opens it on a press (a folder's files, the file's
-// headings), with a toolbar button's hover under it; one without is plain
-// text. Small and muted, it reads as the top of what it names rather than as a
-// toolbar.
 import { Text, View } from "nsh";
 import { Button as BaseButton } from "nsh/base";
 import { look } from "./brand";
@@ -18,17 +11,16 @@ export type Crumb = {
   id: string;
   /** What it says. */
   label: string;
-  /** Its icon, before the label; none unless given. */
+  /** Its icon, before the label. */
   icon?: IconName;
-  /** The place itself (the file shown): emphasized. */
+  /** The place itself (the file shown). */
   current?: boolean;
-  /** What a press on it offers, as a menu (a folder's files); without one it is plain text. */
+  /** What a press on it offers, as a menu; without one it is plain text. */
   menu?: () => MenuEntries;
-  /** What its menu holds, for a screen reader and its hint ("Files in docs"); its label unless given. */
+  /** What its menu holds, for a screen reader and its hint; its label unless given. */
   menuLabel?: string;
 };
 
-/** A step's icon and label, emphasized while it is the place itself. */
 function CrumbText(props: { crumb: Crumb }) {
   return (
     <>
@@ -40,14 +32,7 @@ function CrumbText(props: { crumb: Crumb }) {
   );
 }
 
-/**
- * The way to what is shown, as breadcrumbs: each of `crumbs` in turn, a
- * chevron between two, the one that is the place itself emphasized. A step
- * with a `menu` opens it on a press; the others are text. Every step keeps the
- * same room either side, so its text sits in one place whether or not it takes
- * presses: the first step's text starts 4 points in. Short of room, the steps
- * shorten their names. `class` places the row; a test finds it as `testID`.
- */
+/** The way to what a pane shows, a step at a time; a step with a `menu` opens it on a press. */
 export function Breadcrumbs(props: { crumbs: Crumb[]; testID?: string; class?: string }) {
   return (
     <View testID={props.testID} class={`min-w-0 flex-row items-center ${props.class ?? ""}`}>

@@ -1,4 +1,4 @@
-// The Lucide icons the suite draws, from lucide-static 1.70.0.
+// The Lucide icons the suite draws, from lucide-static.
 // Lucide (https://lucide.dev), ISC License, Copyright (c) Lucide Contributors.
 
 /** One element of a Lucide icon, on its 24 x 24 grid. */
@@ -80,7 +80,7 @@ export const lucide = {
   "hard-drive": [{ tag: "line", x1: 22, y1: 12, x2: 2, y2: 12 }, { tag: "path", d: "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" }, { tag: "line", x1: 6, y1: 16, x2: 6.01, y2: 16 }, { tag: "line", x1: 10, y1: 16, x2: 10.01, y2: 16 }],
   "image-off": [{ tag: "line", x1: 2, y1: 2, x2: 22, y2: 22 }, { tag: "path", d: "M10.41 10.41a2 2 0 1 1-2.83-2.83" }, { tag: "line", x1: 13.5, y1: 13.5, x2: 6, y2: 21 }, { tag: "line", x1: 18, y1: 12, x2: 21, y2: 15 }, { tag: "path", d: "M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.052-.22 1.41-.59" }, { tag: "path", d: "M21 15V5a2 2 0 0 0-2-2H9" }],
   "images": [{ tag: "path", d: "m22 11-1.296-1.296a2.4 2.4 0 0 0-3.408 0L11 16" }, { tag: "path", d: "M4 8a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2" }, { tag: "circle", cx: 13, cy: 7, r: 1 }, { tag: "rect", x: 8, y: 2, width: 14, height: 14, rx: 2 }],
-  // Lucide fills the key's hole; drawn stroked here, as every icon is, it reads the same at this size.
+  // Lucide fills the key's hole; stroked, it reads the same at this size.
   "key-round": [
     { tag: "path", d: "M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" },
     { tag: "circle", cx: 16.5, cy: 7.5, r: 0.5 },
@@ -106,7 +106,7 @@ export const lucide = {
   "monitor": [{ tag: "rect", x: 2, y: 3, width: 20, height: 14, rx: 2 }, { tag: "line", x1: 8, y1: 21, x2: 16, y2: 21 }, { tag: "line", x1: 12, y1: 17, x2: 12, y2: 21 }],
   "moon": [{ tag: "path", d: "M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" }],
   "move": [{ tag: "path", d: "M12 2v20" }, { tag: "path", d: "m15 19-3 3-3-3" }, { tag: "path", d: "m19 9 3 3-3 3" }, { tag: "path", d: "M2 12h20" }, { tag: "path", d: "m5 9-3 3 3 3" }, { tag: "path", d: "m9 5 3-3 3 3" }],
-  // Lucide fills the palette's four dots; drawn stroked here, as every icon is, they read the same at this size.
+  // Lucide fills the palette's four dots; stroked, they read the same at this size.
   "palette": [{ tag: "path", d: "M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" }, { tag: "circle", cx: 13.5, cy: 6.5, r: 0.5 }, { tag: "circle", cx: 17.5, cy: 10.5, r: 0.5 }, { tag: "circle", cx: 6.5, cy: 12.5, r: 0.5 }, { tag: "circle", cx: 8.5, cy: 7.5, r: 0.5 }],
   "panel-left": [{ tag: "rect", x: 3, y: 3, width: 18, height: 18, rx: 2 }, { tag: "path", d: "M9 3v18" }],
   "panel-left-close": [{ tag: "rect", x: 3, y: 3, width: 18, height: 18, rx: 2 }, { tag: "path", d: "M9 3v18" }, { tag: "path", d: "m16 15-3-3 3-3" }],
@@ -132,7 +132,7 @@ export const lucide = {
   "settings": [{ tag: "path", d: "M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" }, { tag: "circle", cx: 12, cy: 12, r: 3 }],
   "square": [{ tag: "rect", x: 3, y: 3, width: 18, height: 18, rx: 2 }],
   "sun": [{ tag: "circle", cx: 12, cy: 12, r: 4 }, { tag: "path", d: "M12 2v2" }, { tag: "path", d: "M12 20v2" }, { tag: "path", d: "m4.93 4.93 1.41 1.41" }, { tag: "path", d: "m17.66 17.66 1.41 1.41" }, { tag: "path", d: "M2 12h2" }, { tag: "path", d: "M20 12h2" }, { tag: "path", d: "m6.34 17.66-1.41 1.41" }, { tag: "path", d: "m19.07 4.93-1.41 1.41" }],
-  // Lucide fills the tag's hole; drawn stroked here, as every icon is, it reads the same at this size.
+  // Lucide fills the tag's hole; stroked, it reads the same at this size.
   "tag": [
     { tag: "path", d: "M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" },
     { tag: "circle", cx: 7.5, cy: 7.5, r: 0.5 },

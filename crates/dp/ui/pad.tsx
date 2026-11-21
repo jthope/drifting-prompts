@@ -20,12 +20,7 @@ const ROWS: (PadButton | "stop")[][] = [
   ],
 ];
 
-/**
- * Eight directions around a Stop button, on the theme's card. Holding a
- * direction calls `onMove` with its pan and tilt, and letting go calls `onStop`,
- * as Stop does. The buttons are large because they are aimed at while watching
- * the video.
- */
+/** Eight directions around Stop: holding one calls `onMove` with its pan and tilt, letting go `onStop`. */
 export function DirectionPad(props: { onMove: (pan: number, tilt: number) => void; onStop: () => void }) {
   return (
     <BrandCard radius={14} class="items-center gap-1 p-1.5">

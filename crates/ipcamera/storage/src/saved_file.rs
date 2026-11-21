@@ -1,23 +1,7 @@
-//! What snapshots and recordings share: how a saved file is named, found and listed.
+//! What snapshots and recordings share: their names (`video-1762560000-<id>.person.mp4`), finding
+//! and listing them.
 //!
-//! Both name a file for when it was made and which camera made it,
-//! `<prefix><seconds>-<camera id>.<extension>`: `snapshot-1762560000-<id>.png` and
-//! `video-1762560000-<id>.mp4`. The id, not the camera's name, so renaming a camera keeps its
-//! files. Any other file of the kind put in the folder by hand lists with no camera.
-//!
-//! A file an event saved carries tags, what the camera saw as the file started, each after a dot
-//! before the extension: `snapshot-1762560000-<id>.vehicle.png`,
-//! `video-1762560000-<id>.person.vehicle.mp4`. A name keeps only a GUID's characters from the id
-//! and from each tag, so a dot always starts a tag and the two never run together. A file taken by
-//! hand has none. Tags in the name rather than beside it mean the listing is all a page reads to
-//! filter by them, on the desktop and from the server alike, and that Explorer shows them too.
-//!
-//! The two kinds differ only in those names and in the words a message uses, so each is a
-//! [`FileKind`] value rather than a type of its own: [`SNAPSHOT`] and [`VIDEO`]. What only one
-//! kind does, writing a PNG or a thumbnail, stays in `snapshot` and `recording`.
-//!
-//! Windows updates a folder listing's size and time for a file only once the file is closed, so
-//! [`FileKind::entries`] asks each file itself, which is up to date even while a camera writes it.
+//! A listing's size and time lag until a file closes, so [`FileKind::entries`] asks each file.
 
 use std::{
     fs,
@@ -31,13 +15,10 @@ use crate::error::{Result, StorageError};
 
 /// One kind of file the app saves.
 pub struct FileKind {
-    /// What every name of this kind starts with.
     prefix: &'static str,
-    /// Without the dot, as `Path::extension` gives it.
+    /// Without the dot.
     extension: &'static str,
-    /// One of them, as a message names it.
     noun: &'static str,
-    /// Their folder, as a message names it.
     folder: &'static str,
 }
 
@@ -61,17 +42,15 @@ pub const VIDEO: FileKind = FileKind {
 pub struct Entry {
     /// The file's name, which names it to every other call.
     pub name: String,
-    /// Absolute, so `<Image src>` and `<Video src>` read it as a file rather than one of the app's
-    /// own assets.
+    /// Absolute, so `<Image src>` reads it as a file rather than one of the app's own assets.
     pub path: PathBuf,
     /// Asked of the file itself, not the folder listing.
     pub metadata: fs::Metadata,
-    /// When its name says it was made, in milliseconds since 1970; `None` when the name doesn't say.
+    /// When its name says it was made, in ms since 1970; `None` when the name doesn't say.
     pub stamp_ms: Option<u64>,
     /// The id of the camera its name holds; `None` when it holds none.
     pub camera: Option<String>,
-    /// What its name tags it with, as an event saved it (`vehicle`, `person`); empty for a file
-    /// taken by hand.
+    /// What its name tags it with (`vehicle`); empty for a file taken by hand.
     pub tags: Vec<String>,
 }
 
@@ -82,12 +61,11 @@ pub struct Parsed<'a> {
     pub stamp: u64,
     /// The id of the camera that made it.
     pub camera: &'a str,
-    /// What it is tagged with, in the name's order; none for a file taken by hand.
+    /// What it is tagged with, in the name's order.
     pub tags: Vec<&'a str>,
 }
 
-/// Only the characters a GUID uses, so no id or tag can make a name Windows refuses, reach outside
-/// the folder, or run into the next part of the name.
+/// Only a GUID's characters, so no id or tag reaches outside the folder or into the next part.
 fn plain(text: &str) -> String {
     text.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
@@ -95,9 +73,7 @@ fn plain(text: &str) -> String {
 }
 
 impl FileKind {
-    /// The name of a file `camera` makes at `stamp`, in seconds, tagged with `tags`: what the
-    /// camera saw, for a file an event saved; none for one taken by hand. Only the characters a
-    /// GUID uses are kept from the id and from each tag.
+    /// The name of a file `camera` makes at `stamp`, in seconds, tagged with `tags`.
     pub fn name(&self, stamp: u64, camera: &str, tags: &[&str]) -> String {
         let (prefix, extension) = (self.prefix, self.extension);
         let mut name = format!("{prefix}{stamp}");
@@ -115,7 +91,7 @@ impl FileKind {
         format!("{name}.{extension}")
     }
 
-    /// What a name says, if it is one of this kind's names: when, which camera and what tags.
+    /// What a name says, if it is one of this kind's names.
     pub fn parse<'a>(&self, name: &'a str) -> Option<Parsed<'a>> {
         let rest = name
             .strip_prefix(self.prefix)?
@@ -145,8 +121,7 @@ impl FileKind {
             .is_some_and(|extension| extension.eq_ignore_ascii_case(self.extension))
     }
 
-    /// The file called `name` in `folder`. Only a file of this kind directly in the folder, so a
-    /// name can never reach another file.
+    /// Only a file of this kind directly in `folder`, so a name can never reach another file.
     pub fn locate(&self, folder: &Path, name: &str) -> Result<PathBuf> {
         let plain = Path::new(name).file_name().is_some_and(|file| file == name);
         let path = folder.join(name);
@@ -172,7 +147,7 @@ impl FileKind {
         Ok(path)
     }
 
-    /// Every file of this kind in `folder`, in no order. A folder that isn't there yet has none.
+    /// Every file of this kind in `folder`, in no order.
     pub fn entries(&self, folder: &Path) -> Vec<Entry> {
         let Ok(listing) = fs::read_dir(folder) else {
             return Vec::new();
@@ -207,8 +182,7 @@ impl FileKind {
     }
 }
 
-/// Sorts `files` newest first by `made_ms`. The name breaks ties, so two made in the same second
-/// keep one order.
+/// Sorts `files` newest first by `made_ms`, the name breaking ties.
 pub fn sort_newest_first<T>(
     files: &mut [T],
     made_ms: impl Fn(&T) -> u64,
@@ -221,9 +195,8 @@ pub fn sort_newest_first<T>(
     });
 }
 
-/// A number that changes whenever a file `keep` accepts, in any of `folders`, is added, removed or
-/// written to; 0 when there is none. It reads only the folder listings, never the files, so it is
-/// cheap enough to check every second.
+/// Changes whenever a file `keep` accepts is added, removed or written to; 0 when there is none.
+/// It reads only the folder listings, never the files.
 pub fn revision(folders: &[PathBuf], keep: impl Fn(&Path) -> bool) -> u64 {
     let mut seen: Vec<(String, u64, u128)> = Vec::new();
     for folder in folders {
@@ -269,7 +242,7 @@ pub fn now_ms() -> u64 {
     unix_ms(Ok(SystemTime::now()))
 }
 
-/// Now, in whole seconds since 1970, which is what snapshot and recording names carry.
+/// Now, in whole seconds since 1970, as file names carry it.
 pub fn now_seconds() -> u64 {
     now_ms() / 1000
 }

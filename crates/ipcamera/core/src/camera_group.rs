@@ -1,21 +1,18 @@
-//! A named group of cameras, such as "Outside" or "Garage".
-//!
-//! A group holds camera ids, never camera details. One camera can be in any number of groups, and
-//! its settings stay in one place: the cameras the [`Library`](crate::library::Library) keeps.
+//! A named group of cameras, which holds camera ids, never camera details.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{CameraId, GroupId};
 
-/// One group: its name and the cameras in it, in the order they are shown.
+/// One group: its name and its cameras, in order.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CameraGroup {
     /// What the group is found by; the name can change and repeat.
     pub id: GroupId,
-    /// The name the sidebar shows.
+    /// The group's name.
     pub name: String,
-    /// The cameras in the group, by id, in the order the sidebar lists them.
+    /// The cameras in the group, by id, in order.
     pub cameras: Vec<CameraId>,
 }
 

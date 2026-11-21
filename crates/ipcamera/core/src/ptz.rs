@@ -1,34 +1,6 @@
-//! Camera PTZ.
-//!
-//! There are three pieces: a velocity contract shared by every transport, each brand's way of
-//! sending it, and one worker that sends the camera the newest command it was given. A camera
-//! answers each command before the next goes out, so one that answers slower than the commands
-//! come would otherwise build a backlog, and the Stop at its end would wait for every Move ahead
-//! of it while the camera kept turning. So the worker skips what a newer command has replaced: a
-//! Stop waits for at most the one request already on its way, and is never followed by a Move
-//! older than it.
-//!
-//! One Move is never skipped: a press let go again before the worker got to it, while the camera
-//! is at rest. That is a click on a zoom button, or the first press while the connection is still
-//! being made, and sending only its Stop would make the click do nothing. So that Move goes out,
-//! and its Stop straight after it.
-//!
-//! A transport whose move is a step rather than a motion (a Reolink's zoom by position) asks for
-//! it again while the button is held (`Driver::repeat_every`); the same Move arriving again
-//! meanwhile, as the web sends a held one, is then that hold and not another step.
-//!
-//! The camera's [`Brand`](crate::Brand) picks the transport: Dahua's DVRIP (`DvripPtz`), the only
-//! one that works on the ASH21-B, whose ONVIF service exposes no PTZ methods and whose CGI API
-//! answered HTTP 500 on the port the app used to try; for a Dahua with `http_api` on, Dahua's HTTP
-//! API (`DahuaHttpPtz`, in `ptz/dahua_http.rs`), as Amcrest's light bulb cameras, which have no
-//! DVRIP, need; Reolink's HTTP API (`ReolinkPtz`, in `ptz/reolink.rs`); or, for a camera of any
-//! other brand, ONVIF's PTZ service (`OnvifPtz`, in `ptz/onvif.rs`). All but DVRIP are everywhere
-//! but the web build.
-//!
-//! Each reports what happened as a sentence for the PTZ panel. When nothing answers where the
-//! camera's settings send PTZ, all of them say the same plain one (`unreachable`): the camera can't
-//! be moved, and Detect, in its settings, finds how it is controlled or says it has no control the
-//! app can reach, as a light bulb camera whose video alone answers has.
+//! Camera PTZ: a velocity contract, each brand's transport, and a worker per camera that sends only
+//! the newest command, so a Stop never waits behind queued Moves while the camera turns. A click
+//! let go before it was sent still goes out, with its Stop straight after.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod dahua_http;
@@ -56,10 +28,8 @@ use serde_json::{Value, json};
 
 use crate::{camera_config::CameraConfig, sync::LockExt};
 
-/// How far from zero an axis has to be to move the camera: anything closer is a stick at rest.
 const DEAD_ZONE: f64 = 0.01;
 
-/// Whether `axis` asks the camera to move along it.
 fn moves(axis: f64) -> bool {
     axis.abs() > DEAD_ZONE
 }
@@ -81,7 +51,7 @@ impl PtzVelocity {
         Self { pan, tilt, zoom }
     }
 
-    /// Whether every part is too small to move the camera: a stop rather than a move.
+    /// Whether every part is too small to move the camera.
     pub fn is_still(self) -> bool {
         !moves(self.pan) && !moves(self.tilt) && !moves(self.zoom)
     }
@@ -99,7 +69,7 @@ pub struct DahuaCommand {
 }
 
 impl DahuaCommand {
-    /// Returns `None` when the velocity is no move at all.
+    /// `velocity` as a command; `None` when it is no move at all.
     pub fn from_velocity(velocity: PtzVelocity) -> Option<Self> {
         let code = direction_code(velocity)?;
 
@@ -115,7 +85,6 @@ impl DahuaCommand {
         let vertical = speed(velocity.tilt);
         let diagonal = moves(velocity.pan) && moves(velocity.tilt);
 
-        // Straight moves carry their speed in arg2. Diagonals: arg1 vertical, arg2 horizontal.
         Some(if diagonal {
             Self {
                 code,
@@ -136,9 +105,7 @@ impl DahuaCommand {
     }
 }
 
-/// What the status says when nothing answers where PTZ goes, `over` naming it (`DVRIP`): rather
-/// than the connection's error, what it means and what to do. A light bulb camera whose video alone
-/// answers has no control the app can reach, and Detect says so.
+/// What every transport's status says when nothing answers where PTZ goes, `over` naming it.
 pub(crate) fn unreachable(over: &str, port: u16) -> String {
     format!(
         "Can't move this camera: nothing answers for PTZ on its {over} port ({port}). Detect, in \
@@ -146,7 +113,7 @@ pub(crate) fn unreachable(over: &str, port: u16) -> String {
     )
 }
 
-/// Whether `error` says that nothing took the connection, rather than that one broke.
+/// Whether nothing took the connection, rather than one broke.
 fn refused_connection(error: &std::io::Error) -> bool {
     use std::io::ErrorKind;
     matches!(
@@ -159,13 +126,11 @@ fn refused_connection(error: &std::io::Error) -> bool {
     )
 }
 
-/// The API's speed scale is 1..8.
 fn speed(value: f64) -> i32 {
     ((value.abs() * 8.0).round() as i32).clamp(1, 8)
 }
 
-/// The direction `velocity` asks for, in Dahua's words, which Reolink shares but for zoom; `None`
-/// for no move. Zoom wins over pan and tilt.
+/// The direction `velocity` asks for, in Dahua's words; zoom wins over pan and tilt.
 pub(crate) fn direction_code(velocity: PtzVelocity) -> Option<&'static str> {
     if moves(velocity.zoom) {
         return Some(if velocity.zoom > 0.0 {
@@ -217,7 +182,7 @@ pub struct DvripPtz {
 }
 
 impl DvripPtz {
-    /// A client for `camera`'s DVRIP port. It connects on the first [`DvripPtz::probe`] or move.
+    /// A client for `camera`'s DVRIP port, connecting on the first probe or move.
     pub fn new(camera: &CameraConfig) -> Self {
         Self {
             host: camera.host.clone(),
@@ -233,7 +198,7 @@ impl DvripPtz {
         }
     }
 
-    /// What happened last, as a sentence for the status line.
+    /// What happened last, as a sentence.
     pub fn status(&self) -> &str {
         &self.status
     }
@@ -278,8 +243,7 @@ impl DvripPtz {
         true
     }
 
-    /// Starts moving at `velocity`; whether the camera took the command. No move at all is taken
-    /// as done.
+    /// Starts moving at `velocity`; whether the camera took the command.
     pub fn move_by(&mut self, velocity: PtzVelocity) -> bool {
         let Some(command) = DahuaCommand::from_velocity(self.straighten(velocity)) else {
             return true;
@@ -297,7 +261,7 @@ impl DvripPtz {
         }
     }
 
-    /// A lost Stop leaves the camera moving, so this is worth retrying.
+    /// Stops, retrying: a lost Stop leaves the camera moving.
     pub fn stop_with_retries(&mut self) -> bool {
         for attempt in 1..=3 {
             if self.stop() {
@@ -361,11 +325,8 @@ impl DvripPtz {
         false
     }
 
-    /// The session to use, opening one when needed. `fresh` replaces one that is getting old
-    /// rather than risk it dying mid-move.
-    ///
-    /// `None` when there is none to use: the camera refused the login, which is never tried again,
-    /// or did not answer. Either way the status says which.
+    /// The session to use, opening one when needed; `fresh` replaces an old one rather than risk it
+    /// dying mid-move. A refused login is never tried again.
     fn session(&mut self, fresh: bool) -> Option<&mut LiveSession> {
         if self.login_rejected {
             return None;
@@ -397,7 +358,7 @@ impl DvripPtz {
     fn open(&self) -> Result<LiveSession, DvripError> {
         let mut client = DvripClient::connect(&self.host, self.port, &self.user, &self.password)?;
 
-        // The API counts channels from 0; the camera setting, like the RTSP path, counts from 1.
+        // The API counts channels from 0; the camera's settings, from 1.
         let api_channel = self.channel.max(1) - 1;
         let reply = client.call(
             "ptz.factory.instance",
@@ -425,19 +386,12 @@ fn is_true(value: &Value) -> bool {
     value.as_bool() == Some(true)
 }
 
-/// What the worker drives: a camera's PTZ over one of the transports above, or a stand-in in the
-/// tests.
 trait Driver: Send + 'static {
-    /// Connects, and checks the camera reports something to drive.
     fn probe(&mut self) -> bool;
-    /// What happened last, as a sentence for the status line.
     fn status(&self) -> &str;
-    /// Starts moving at `velocity`; whether the camera took the command.
     fn move_by(&mut self, velocity: PtzVelocity) -> bool;
-    /// Stops the last move, retrying; whether the camera took the stop.
     fn stop_with_retries(&mut self) -> bool;
-    /// How often the move under way is to be sent again while it is held, for a move the camera
-    /// makes as one step; `None` for one that lasts until its stop, as most do.
+    /// How often a held move is sent again, for a camera that moves a step per command.
     fn repeat_every(&self) -> Option<Duration> {
         None
     }
@@ -461,7 +415,6 @@ impl Driver for DvripPtz {
     }
 }
 
-/// Commands queued for the worker.
 enum Command {
     Move(PtzVelocity),
     Stop,
@@ -475,8 +428,7 @@ pub struct PtzSession {
 }
 
 impl PtzSession {
-    /// Starts probing in the background, over the transport `camera`'s brand speaks; returns
-    /// immediately.
+    /// Starts probing in the background over `camera`'s brand's transport; returns at once.
     pub fn connect(camera: &CameraConfig) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         match camera.brand {
@@ -490,7 +442,6 @@ impl PtzSession {
         Self::start(DvripPtz::new(camera))
     }
 
-    /// Starts a worker driving `ptz`, which probes it first.
     fn start(ptz: impl Driver) -> Self {
         let (tx, rx) = mpsc::channel();
         let status = Arc::new(Mutex::new("PTZ: connecting\u{2026}".to_string()));
@@ -506,8 +457,7 @@ impl PtzSession {
         Self { tx, status, worker }
     }
 
-    /// Queues a move at `velocity`, or a stop when it is still. Returns at once: the worker sends
-    /// it unless a newer command replaces it first.
+    /// Queues a move at `velocity`, or a stop when it is still; a newer command replaces it.
     pub fn move_by(&self, velocity: PtzVelocity) {
         if velocity.is_still() {
             self.stop();
@@ -516,25 +466,22 @@ impl PtzSession {
         }
     }
 
-    /// Queues a stop, which the worker sends in place of any move still queued before it.
+    /// Queues a stop, sent in place of any move still queued before it.
     pub fn stop(&self) {
         let _ = self.tx.send(Command::Stop);
     }
 
-    /// What the worker reported last, as a sentence for the status line.
+    /// What the worker reported last, as a sentence.
     pub fn status(&self) -> String {
         self.status.locked().clone()
     }
 }
 
 impl Drop for PtzSession {
-    /// Closes the queue and waits for the worker, which leaves what is still queued unsent and
-    /// stops the camera on its way out: a session never goes leaving the camera moving.
+    /// Waits for the worker, which stops the camera on its way out.
     fn drop(&mut self) {
-        // The worker waits on the queue until every sender is gone, so this one goes before the
-        // join. Kept until after it, as a field is, it left the worker waiting for a command that
-        // never came, and the join waiting for the worker: a tile dropped on the main thread after
-        // a PTZ move froze the window for good.
+        // The worker waits on the queue until every sender is gone, so this sender must go before
+        // the join, or the two wait on each other for good.
         let (closed, _) = mpsc::channel();
         drop(std::mem::replace(&mut self.tx, closed));
         if let Some(worker) = self.worker.take() {
@@ -551,9 +498,7 @@ fn run(mut ptz: impl Driver, rx: mpsc::Receiver<Command>, status: Arc<Mutex<Stri
     let ready = ptz.status().to_string();
     set_status(&status, &ready);
 
-    // Whether the camera is moving, as far as what was sent to it says.
     let mut moving = false;
-    // The move held now, which a transport that moves in steps is sent again.
     let mut held: Option<PtzVelocity> = None;
     loop {
         let first = match held.zip(ptz.repeat_every()) {
@@ -570,7 +515,7 @@ fn run(mut ptz: impl Driver, rx: mpsc::Receiver<Command>, status: Arc<Mutex<Stri
                 Err(_) => break,
             },
         };
-        // A session that is going sends only the stop below.
+        // A closed queue sends only the stop below.
         let Some(next) = newest(first, &rx, moving) else {
             break;
         };
@@ -578,7 +523,7 @@ fn run(mut ptz: impl Driver, rx: mpsc::Receiver<Command>, status: Arc<Mutex<Stri
             start(&mut ptz, velocity, &ready, &status);
         }
         match next.command {
-            // The held move sent again, as the web does: the steps are already being repeated.
+            // The held move sent again: its steps are already being repeated.
             Command::Move(velocity) if held == Some(velocity) && ptz.repeat_every().is_some() => {}
             Command::Move(velocity) => {
                 start(&mut ptz, velocity, &ready, &status);
@@ -598,12 +543,10 @@ fn run(mut ptz: impl Driver, rx: mpsc::Receiver<Command>, status: Arc<Mutex<Stri
         }
     }
 
-    // Never leave the camera moving because the window closed.
+    // Never leave the camera moving.
     let _ = ptz.stop_with_retries();
 }
 
-/// Sends the camera a move, and says so in the status when it doesn't take it: the transport's
-/// own reason when it gave one since it was `ready`, which names what the camera said.
 fn start(ptz: &mut impl Driver, velocity: PtzVelocity, ready: &str, status: &Arc<Mutex<String>>) {
     if ptz.move_by(velocity) {
         return;
@@ -615,23 +558,16 @@ fn start(ptz: &mut impl Driver, velocity: PtzVelocity, ready: &str, status: &Arc
     }
 }
 
-/// What the worker sends next.
 struct Next {
-    /// A press that was let go again before it was sent, while the camera was at rest: the move
-    /// to send before `command`, which is its stop.
+    /// A press let go before it was sent, while the camera was at rest: sent before its stop.
     click: Option<PtzVelocity>,
-    /// The newest command.
     command: Command,
 }
 
-/// What to send now: the last of `first` and whatever else is queued, since each replaces the one
-/// before it, with the move of a click when that last one is the stop that ends it. `moving` is
-/// whether the camera is, by what was sent. `None` when the session has closed its queue, which
-/// leaves only the stop on the way out to send.
+/// The newest queued command, with a click's move; `None` once the queue has closed.
 fn newest(first: Command, rx: &mpsc::Receiver<Command>, moving: bool) -> Option<Next> {
-    // Whether the camera would be at rest had everything so far been sent, and the last move
-    // asked for since then: a move queued while the camera turns is the held button's repeat,
-    // which its stop replaces, but one that would have started the camera is a press.
+    // A move queued while the camera turns is a held button's repeat, which its stop replaces;
+    // one that would have started the camera is a press.
     let mut at_rest = !moving;
     let mut pressed = None;
     let mut newest = first;
@@ -727,7 +663,6 @@ mod tests {
         assert_eq!(command.arg2, 1);
     }
 
-    /// A camera's PTZ that takes everything and keeps what it was asked, in order.
     struct Recorder(Arc<Mutex<Vec<&'static str>>>);
 
     impl Driver for Recorder {
@@ -750,8 +685,6 @@ mod tests {
         }
     }
 
-    /// A light bulb camera whose video alone answers: whatever its settings say PTZ goes over,
-    /// the status says plainly that it can't be moved, and what to do.
     #[test]
     fn a_camera_where_nothing_answers_for_ptz_says_so_plainly() {
         use crate::Brand;
@@ -769,7 +702,7 @@ mod tests {
             ..CameraConfig::default()
         };
 
-        // Each asks at once: a closed port on this machine takes Windows about two seconds.
+        // All at once: the system takes seconds to refuse a closed local port.
         let sessions: Vec<(&str, PtzSession)> = [
             (Brand::Dahua, false, "DVRIP"),
             (Brand::Dahua, true, "HTTP API"),
@@ -795,7 +728,6 @@ mod tests {
         }
     }
 
-    /// Waits until the camera has been asked `count` things.
     fn asked_for(asked: &Arc<Mutex<Vec<&'static str>>>, count: usize) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while asked.locked().len() < count {
@@ -813,7 +745,6 @@ mod tests {
         let asked = Arc::new(Mutex::new(Vec::new()));
         let session = PtzSession::start(Recorder(asked.clone()));
         session.move_by(PtzVelocity::new(1.0, 0.0, 0.0));
-        // The worker has sent the move and waits on its queue: where a drop used to wait for good.
         asked_for(&asked, 1);
         session.move_by(PtzVelocity::new(0.0, 1.0, 0.0));
 
@@ -827,14 +758,12 @@ mod tests {
             dropped.recv_timeout(Duration::from_secs(5)).is_ok(),
             "dropping the session never returned"
         );
-        // The second move goes out only if the worker took it before the queue closed.
         let asked = asked.locked();
         assert_eq!(asked.first(), Some(&"move"));
         assert_eq!(asked.last(), Some(&"stop"), "the stop is the last word");
         assert!(asked.len() <= 3, "{asked:?}");
     }
 
-    /// A camera's PTZ that takes its time over a move: each waits until the test lets it go.
     struct Slow {
         asked: Arc<Mutex<Vec<&'static str>>>,
         go: mpsc::Receiver<()>,
@@ -851,7 +780,6 @@ mod tests {
 
         fn move_by(&mut self, _velocity: PtzVelocity) -> bool {
             self.asked.locked().push("move");
-            // An error is the test having finished: nothing waits any more.
             let _ = self.go.recv();
             true
         }
@@ -873,7 +801,6 @@ mod tests {
         session.move_by(PtzVelocity::new(1.0, 0.0, 0.0));
         asked_for(&asked, 1);
 
-        // The camera is still answering the first move while a held button sends more, then lets go.
         for _ in 0..5 {
             session.move_by(PtzVelocity::new(1.0, 0.0, 0.0));
         }
@@ -889,7 +816,6 @@ mod tests {
         );
     }
 
-    /// A camera's PTZ that is slow to connect: its probe waits until the test lets it go.
     struct SlowToConnect {
         asked: Arc<Mutex<Vec<&'static str>>>,
         go: mpsc::Receiver<()>,
@@ -925,7 +851,6 @@ mod tests {
             go: wait,
         });
 
-        // A click on Zoom in, down and up, while the connection is still being made.
         session.move_by(PtzVelocity::new(0.0, 0.0, 1.0));
         session.stop();
         go.send(()).unwrap();
@@ -942,7 +867,6 @@ mod tests {
             asked: asked.clone(),
             go: wait,
         });
-        // A held move the camera is still answering, let go, then a click, all before it answers.
         session.move_by(PtzVelocity::new(1.0, 0.0, 0.0));
         asked_for(&asked, 1);
         session.stop();
@@ -956,7 +880,6 @@ mod tests {
         assert_eq!(*asked.locked(), ["move", "move", "stop"]);
     }
 
-    /// A camera's PTZ that moves a step for each move it is sent, as a Reolink's zoom does.
     struct Stepper(Arc<Mutex<Vec<&'static str>>>);
 
     impl Driver for Stepper {
@@ -991,7 +914,6 @@ mod tests {
 
         session.move_by(zoom_in);
         asked_for(&asked, 4);
-        // The same move arriving again is the hold, as the web sends it: no extra step for it.
         let before = asked.locked().len();
         session.move_by(zoom_in);
         session.stop();
@@ -1015,7 +937,6 @@ mod tests {
         session.move_by(PtzVelocity::new(1.0, 0.0, 0.0));
         asked_for(&asked, 1);
 
-        // Let go and pressed again before the camera answered: it should end up moving.
         session.stop();
         session.move_by(PtzVelocity::new(0.0, 1.0, 0.0));
         go.send(()).unwrap();
@@ -1025,18 +946,10 @@ mod tests {
         drop(go);
     }
 
-    /// Manual check against a real camera: probes DVRIP, nudge-pans, and stops.
-    ///
-    /// ```text
-    /// $env:IPCAMERA_HOST = "<the camera's address>"
-    /// $env:IPCAMERA_USER = "..."
-    /// $env:IPCAMERA_PASSWORD = "..."
-    /// cargo test --offline ptz -- --ignored --nocapture
-    /// ```
+    /// Probes DVRIP on the camera `IPCAMERA_HOST`, `_USER` and `_PASSWORD` name, nudge-pans, stops.
     #[test]
     #[ignore = "needs a real camera with PTZ on the network"]
     fn drives_a_real_camera() {
-        // The defaults name no camera: the IPCAMERA_* overrides say which one, and how to log in.
         let mut camera = CameraConfig::default();
         camera.apply_env();
 

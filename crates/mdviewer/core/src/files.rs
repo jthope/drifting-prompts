@@ -1,16 +1,5 @@
-//! The Markdown files in a project's folder, and reading one.
-//!
-//! [`list`] walks the folder and the folders under it for Markdown files, in the order the files
-//! panel shows them: in each folder its files first, then its folders, each by name. It skips
-//! what is never a project's own writing (hidden folders such as `.git`, `node_modules`, build
-//! output in `target`) and doesn't follow links to other folders, which could loop. The app
-//! lists the folder again every few seconds, off the main thread, so a file added or changed
-//! outside the app shows by itself: each file's size and time are in the listing, so a changed
-//! file reads as a changed listing.
-//!
-//! A file is named by its path in the project, with `/` between its parts on every system
-//! (`docs/setup.md`), which is also how `projects.json` remembers the one open last. [`read`]
-//! refuses a name that would leave the project's folder.
+//! The Markdown files in a project's folder, and reading one. A file is named by its path in the
+//! project with `/` between parts (`docs/setup.md`), and a name never leaves the project's folder.
 
 use std::{
     fmt, fs, io,
@@ -18,19 +7,15 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-/// The extensions of the files listed: Markdown's, and MDX, which shows as Markdown.
 const EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkd", "mkdn", "mdx"];
 
-/// Folders never walked into: build output and dependencies, which hold other projects' files.
-/// Hidden folders (`.git`, `.nsh`) are skipped by their dot.
+/// Hidden folders are skipped by their dot.
 const SKIPPED: &[&str] = &["node_modules", "target"];
 
-/// The most files a listing holds. A folder with more (a whole drive opened as a project) lists
-/// these and says it stopped.
+/// The most files a listing holds.
 pub const MOST_FILES: usize = 5_000;
 
-/// The largest file read, in bytes. Markdown is text a person writes: a file this large is
-/// something else, and showing it would hold the window up.
+/// The largest file read, in bytes: a larger one would hold the window up.
 pub const MOST_BYTES: u64 = 8 << 20;
 
 /// A Markdown file in a project.
@@ -40,17 +25,17 @@ pub struct MarkdownFile {
     pub path: String,
     /// Its size, in bytes.
     pub size: u64,
-    /// When it last changed, in milliseconds since 1970; 0 when the system can't say.
+    /// When it last changed, in Unix milliseconds; 0 when unknown.
     pub modified_ms: u64,
 }
 
 impl MarkdownFile {
-    /// Its name, without the folders it is in: `setup.md`.
+    /// Its name without its folders.
     pub fn name(&self) -> &str {
         self.path.rsplit('/').next().unwrap_or(&self.path)
     }
 
-    /// The folder it is in, in the project: `docs`, or `""` at the project's top.
+    /// Its folder in the project, or `""` at the top.
     pub fn folder(&self) -> &str {
         self.path.rsplit_once('/').map_or("", |(folder, _)| folder)
     }
@@ -68,11 +53,11 @@ pub struct Listing {
 /// What couldn't be read.
 #[derive(Debug)]
 pub enum FilesError {
-    /// The project's folder isn't there: moved, renamed or deleted since it was opened.
+    /// The project's folder isn't there.
     MissingFolder(PathBuf),
     /// The file isn't there.
     MissingFile(PathBuf),
-    /// The name leaves the project's folder (`../secret.md`, an absolute path).
+    /// The name leaves the project's folder.
     OutsideProject(String),
     /// The file is larger than [`MOST_BYTES`].
     TooLarge {
@@ -81,7 +66,7 @@ pub enum FilesError {
         /// Its size, in bytes.
         size: u64,
     },
-    /// The system refused, saying why.
+    /// The system refused.
     Unreadable {
         /// The file or folder.
         path: PathBuf,
@@ -125,7 +110,7 @@ impl std::error::Error for FilesError {
     }
 }
 
-/// The Markdown files in `folder` and the folders under it.
+/// The Markdown files in `folder` and under it, each folder's files before its folders.
 pub fn list(folder: &Path) -> Result<Listing, FilesError> {
     if !folder.is_dir() {
         return Err(FilesError::MissingFolder(folder.to_path_buf()));
@@ -138,8 +123,7 @@ pub fn list(folder: &Path) -> Result<Listing, FilesError> {
     Ok(listing)
 }
 
-/// Adds the files of `dir` (at `prefix` in the project) to `listing`, then walks its folders. A
-/// folder under the top that can't be read is left out rather than failing the whole listing.
+/// A folder under the top that can't be read is left out rather than failing the listing.
 fn walk(dir: &Path, prefix: &str, listing: &mut Listing) -> io::Result<()> {
     let mut files = Vec::new();
     let mut folders = Vec::new();
@@ -196,7 +180,7 @@ fn join(prefix: &str, name: &str) -> String {
     }
 }
 
-/// Whether `name` is a Markdown file's, by its extension, whatever its case.
+/// Whether `name` has a Markdown extension, in any case.
 pub fn is_markdown(name: &str) -> bool {
     name.rsplit_once('.').is_some_and(|(stem, extension)| {
         !stem.is_empty()
@@ -206,8 +190,7 @@ pub fn is_markdown(name: &str) -> bool {
     })
 }
 
-/// Where file `name` (`docs/setup.md`) of the project in `folder` is on disk, or why that is not
-/// a file of the project: an absolute name, or one with `..` in it, would leave the folder.
+/// Where file `name` of the project in `folder` is on disk; refuses an absolute name or `..`.
 pub fn locate(folder: &Path, name: &str) -> Result<PathBuf, FilesError> {
     let relative = Path::new(name);
     let inside = !name.is_empty()
@@ -220,8 +203,7 @@ pub fn locate(folder: &Path, name: &str) -> Result<PathBuf, FilesError> {
     Ok(folder.join(relative))
 }
 
-/// The text of file `name` of the project in `folder`. A byte order mark is dropped; bytes that
-/// aren't UTF-8 show as `�` rather than refusing the file.
+/// The text of file `name` of the project in `folder`, without a byte order mark, lossily UTF-8.
 pub fn read(folder: &Path, name: &str) -> Result<String, FilesError> {
     let path = locate(folder, name)?;
     let metadata = fs::metadata(&path).map_err(|source| missing_or(&path, source))?;
@@ -236,8 +218,7 @@ pub fn read(folder: &Path, name: &str) -> Result<String, FilesError> {
     Ok(String::from_utf8_lossy(bytes).into_owned())
 }
 
-/// The size and time of file `name`, to tell whether it changed since it was read; `None` when
-/// it can't be looked at.
+/// The size and time of file `name`, to tell whether it changed; `None` when unreadable.
 pub fn stamp(folder: &Path, name: &str) -> Option<(u64, u64)> {
     let metadata = fs::metadata(locate(folder, name).ok()?).ok()?;
     let modified = metadata
@@ -265,7 +246,6 @@ mod tests {
 
     use super::*;
 
-    /// A project folder holding `files`, each with a line of text.
     fn project(files: &[&str]) -> TempDir {
         let dir = TempDir::new().expect("a temporary folder");
         for file in files {

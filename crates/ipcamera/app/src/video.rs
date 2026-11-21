@@ -1,38 +1,5 @@
-//! The live picture: a native component that draws a camera's newest frame with Direct2D.
-//!
-//! nsh's `<Video>` plays through Media Foundation and its `Canvas` has no pixel access, so neither
-//! can show what `ipcamera-media` decodes. A registered component can: nsh hands it the Direct2D
-//! context it is already drawing the window with, which makes the picture ordinary view content.
-//! Text, sheets and menus draw over it, and it clips and resizes like any `<View>`.
-//!
-//! The component only shows a camera's stream: its `camera` prop names the camera, and its
-//! `stream` prop which of its streams (a `ipcamera_core::TileStream` key, or `""` for its own). The
-//! session belongs to `camera`, so several tiles can show one stream, and removing a tile leaves it
-//! running. Its `fit` prop is a view's [`Fit`]: how the picture fills the tile.
-//!
-//! The work for a frame happens once per stream, however many tiles show it. [`Shown`] holds the
-//! stream's frame on the GPU, which every tile draws, and one thread that asks those tiles to draw
-//! when a new frame arrives. Done per tile, a 4 × 4 grid of one camera copied the same 8 MB frame to
-//! the GPU sixteen times, and the window drew two or three times for each frame.
-//!
-//! **Zoom.** The wheel over a picture zooms into it, and out again, around the point under the
-//! pointer, which stays where it is ([`Zoom`]): each tile its own, drawn from the same bitmap as
-//! the rest, so zooming costs no GPU memory. The component takes the wheel itself and keeps the
-//! zoom, so a step of the wheel never waits on JS. The component tells TSX how far
-//! in it is with its `zoom` event (`{ scale }`, 1 for the whole picture), and goes back to the
-//! whole picture on the `resetZoom` command, or when it is given another camera or stream.
-//!
-//! **Switching streams.** A tile given another of its camera's streams keeps drawing the one it
-//! showed, as it last was, until the new one's first picture, for [`KEEP_LEAVING`] at most: a new
-//! stream shows nothing until its first keyframe, seconds on some cameras, and a blank tile looked
-//! as if the switch had done nothing. The tile's own text says what it is waiting for.
-//!
-//! **Pan.** A zoomed picture follows the pointer as it is dragged. TSX binds the drag to two
-//! animated values that it passes on as the `panX` and `panY` props, which the platform sets here
-//! on every frame the drag moves, with no JavaScript in between. They add every drag up (TSX
-//! moves each drag into the values' offset as it ends), so a value never jumps: the part shown is
-//! the zoom as it was when the wheel last changed it, moved by how far the values have moved
-//! since ([`Zoom::dragged`]).
+//! The live picture: a native component that draws a camera's newest frame with Direct2D. A frame
+//! goes to the GPU once per stream, however many tiles show it.
 
 use std::{
     cell::{Cell, RefCell},
@@ -63,34 +30,23 @@ use serde_json::Value as JsonValue;
 
 use crate::camera::{self, Camera, Output, StreamKey};
 
-/// The name `views/picture.tsx` declares with `nativeComponent`.
+/// Must match the name `views/picture.tsx` declares.
 const COMPONENT: &str = "ipcamera.video";
 
-/// How often [`watch`] looks for a new frame. Well under one frame at 60 fps, so it adds little
-/// delay; a callback from `FrameSlot` could replace it, but that would mean changing `crates/ipcamera/media`.
+/// Well under one frame at 60 fps, so polling adds little delay.
 const POLL_EVERY: Duration = Duration::from_millis(4);
 
-/// Numbers the tiles, so the tiles of one stream can be told apart.
 static NEXT_TILE: AtomicU64 = AtomicU64::new(0);
 
-/// How long a tile switching streams keeps drawing the one it showed while the new one has no
-/// picture yet: a keyframe interval or two, after which a stream that still sends nothing has
-/// failed, and the old picture would only mislead.
+/// How long a tile switching streams keeps drawing the old one; past it the new one has failed.
 const KEEP_LEAVING: Duration = Duration::from_secs(10);
 
-/// The furthest a picture zooms in: an eighth of it across the tile.
 const MOST_ZOOM: f32 = 8.0;
 
-/// How much one notch of the wheel zooms in or out. A precision touchpad's fractions of a notch
-/// zoom as far in proportion.
 const ZOOM_PER_NOTCH: f32 = 1.25;
 
-/// How far a tile is zoomed into its picture, and where.
-///
-/// `scale` is 1 for the whole picture, and up to [`MOST_ZOOM`]. The part shown is `1 / scale` of
-/// the picture each way, and `left` and `top` say where, as fractions of the picture (each from 0
-/// to `1 - 1 / scale`), so a zoom stays where it was as the picture's size or the tile's fit
-/// changes.
+/// How far a tile is zoomed in, and where: `left` and `top` are fractions of the picture, so a zoom
+/// stays put as the picture's size or the tile's fit changes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Zoom {
     scale: f32,
@@ -113,9 +69,6 @@ impl Zoom {
         self.scale > 1.0
     }
 
-    /// The zoom with its picture dragged `by` points, in a tile that draws the part shown
-    /// `across` points wide and high: the part shown moves the other way, as far as the picture
-    /// goes. The whole picture doesn't move.
     fn dragged(self, by: (f32, f32), across: (f32, f32)) -> Self {
         if !self.zoomed() || across.0 <= 0.0 || across.1 <= 0.0 {
             return self;
@@ -128,11 +81,8 @@ impl Zoom {
         }
     }
 
-    /// The zoom `notches` of the wheel further in (fewer: out) around `at`, a point of the part
-    /// shown now as fractions of it (0 to 1 each way), which shows at the same place after.
     fn wheeled(self, notches: f32, at: (f32, f32)) -> Self {
         let scale = (self.scale * ZOOM_PER_NOTCH.powf(notches)).clamp(1.0, MOST_ZOOM);
-        // The point under the pointer, as fractions of the whole picture.
         let point = (self.left + at.0 / self.scale, self.top + at.1 / self.scale);
         let most = 1.0 - 1.0 / scale;
         Self {
@@ -142,8 +92,6 @@ impl Zoom {
         }
     }
 
-    /// The part of `source`, the part of the picture the fit draws (in its pixels), that this
-    /// zoom shows; `source` itself while it shows the whole picture.
     fn part_of(self, source: D2D_RECT_F) -> D2D_RECT_F {
         if !self.zoomed() {
             return source;
@@ -160,12 +108,10 @@ impl Zoom {
     }
 }
 
-/// A stream on screen: its camera's id, and which of the camera's streams.
 type ShownKey = (String, StreamKey);
 
 thread_local! {
-    /// The streams on screen. nsh makes, draws and drops the tiles on the main thread, so this
-    /// lives there and only the tiles use it.
+    /// The streams on screen; thread-local, as nsh makes, draws and drops tiles on the main thread.
     static SHOWN: RefCell<HashMap<ShownKey, Shown>> = RefCell::new(HashMap::new());
 }
 
@@ -179,20 +125,15 @@ pub fn register(components: &Components) {
     );
 }
 
-/// The frame on the GPU, reused until the next one arrives.
 struct Painted {
-    /// The Direct2D device the bitmap belongs to: a lost device needs a new bitmap.
+    /// The device the bitmap belongs to: a lost device needs a new bitmap.
     device: ID2D1Device,
     bitmap: ID2D1Bitmap1,
-    /// The picture in `bitmap`, so a repaint of the same frame copies nothing.
     source: Arc<DecodedFrame>,
 }
 
-/// Asks one tile's window to draw again.
 type Redraw = Box<dyn Fn() + Send>;
 
-/// The tiles showing one stream, each with the way to ask its window to draw again. The stream's
-/// [`watch`] thread shares it.
 #[derive(Clone, Default)]
 struct Viewers(Arc<Mutex<Vec<(u64, Redraw)>>>);
 
@@ -201,38 +142,33 @@ impl Viewers {
         self.list().push((tile, redraw));
     }
 
-    /// Takes `tile` out, returning whether any tile is left.
     fn remove(&self, tile: u64) -> bool {
         let mut list = self.list();
         list.retain(|(shown, _)| *shown != tile);
         !list.is_empty()
     }
 
-    /// Asks every tile to draw. They are asked together, so the window draws once for all of them.
+    /// Asks every tile at once, so the window draws once for all of them.
     fn redraw(&self) {
         for (_, redraw) in self.list().iter() {
             redraw();
         }
     }
 
-    /// The list, even if a thread panicked holding it: a stale tile is better than a stuck window.
+    /// Ignores poisoning: a stale tile is better than a stuck window.
     fn list(&self) -> MutexGuard<'_, Vec<(u64, Redraw)>> {
         self.0.locked()
     }
 }
 
-/// One stream on screen, shared by every tile showing it.
 struct Shown {
     output: Arc<Output>,
     viewers: Viewers,
-    /// Tells its [`watch`] to stop.
     stop: Arc<AtomicBool>,
-    /// Its newest frame on the GPU, which every tile draws.
     painted: Option<Painted>,
 }
 
 impl Shown {
-    /// Starts watching `output`, where a stream puts its pictures, for new frames.
     fn start(output: Arc<Output>) -> Self {
         let viewers = Viewers::default();
         let stop = Arc::new(AtomicBool::new(false));
@@ -257,8 +193,6 @@ impl Drop for Shown {
     }
 }
 
-/// Starts showing stream `key`, which puts its pictures in `output`, in `tile`, which `redraw`
-/// asks to draw again.
 fn add_tile(key: &ShownKey, output: Arc<Output>, tile: u64, redraw: Redraw) {
     SHOWN.with_borrow_mut(|shown| {
         shown
@@ -269,11 +203,8 @@ fn add_tile(key: &ShownKey, output: Arc<Output>, tile: u64, redraw: Redraw) {
     });
 }
 
-/// Stops showing stream `key` in `tile`. The last tile to go takes the stream's frame on the GPU
-/// and its watcher with it.
 fn remove_tile(key: &ShownKey, tile: u64) {
-    // `try_with`, because nsh may drop tiles as the main thread ends, after `SHOWN` has gone. What
-    // goes is dropped after the borrow ends.
+    // `try_with`: nsh may drop tiles after `SHOWN` has gone. What goes drops after the borrow ends.
     let gone = SHOWN.try_with(|shown| {
         let mut shown = shown.borrow_mut();
         let left = shown
@@ -284,13 +215,10 @@ fn remove_tile(key: &ShownKey, tile: u64) {
     drop(gone);
 }
 
-/// Stream `key`'s newest frame on the GPU, and its size in pixels. Only the first tile to draw a
-/// new frame copies it there; the others draw the same bitmap.
 fn frame_on_gpu(key: &ShownKey, dc: &ID2D1DeviceContext) -> Option<(ID2D1Bitmap1, (f32, f32))> {
     SHOWN.with_borrow_mut(|shown| {
         let on_screen = shown.get_mut(key)?;
         let Some(frame) = on_screen.output.frames().latest() else {
-            // The stream stopped, so the frame it last uploaded can go.
             on_screen.painted = None;
             return None;
         };
@@ -302,8 +230,6 @@ fn frame_on_gpu(key: &ShownKey, dc: &ID2D1DeviceContext) -> Option<(ID2D1Bitmap1
     })
 }
 
-/// Stream `key`'s last frame on the GPU, whether or not the stream still sends, and its size in
-/// pixels: what a tile switching away from it keeps drawing. Copied again only after a lost device.
 fn last_on_gpu(key: &ShownKey, dc: &ID2D1DeviceContext) -> Option<(ID2D1Bitmap1, (f32, f32))> {
     SHOWN.with_borrow_mut(|shown| {
         let on_screen = shown.get_mut(key)?;
@@ -313,36 +239,25 @@ fn last_on_gpu(key: &ShownKey, dc: &ID2D1DeviceContext) -> Option<(ID2D1Bitmap1,
     })
 }
 
-/// One video tile.
 struct VideoView {
     context: ComponentContext,
-    /// This tile's number among the tiles of the stream it shows.
     tile: u64,
-    /// The camera and the stream its props name.
     wanted: ShownKey,
-    /// The stream it shows, with its camera, while there is such a camera.
     shown: Option<(ShownKey, Arc<Camera>)>,
-    /// The stream of the same camera it showed before `shown`, and since when: drawn as it last
-    /// was until `shown` has a picture, for [`KEEP_LEAVING`] at most.
     leaving: RefCell<Option<(ShownKey, Instant)>>,
     fit: Fit,
     zoom: Zoom,
-    /// The drags' moves added up, in points, as the `panX` and `panY` props give them.
     pan: (f32, f32),
-    /// The zoom when something other than a drag last changed it, and `pan` then: a drag moves the
-    /// picture from there.
     dragged_from: (Zoom, (f32, f32)),
-    /// What it last drew, for where the wheel's pointer is in the picture. `None` until it has
-    /// drawn one.
     drawn: Cell<Option<Drawn>>,
+    told_shape: Cell<Option<Option<(f32, f32)>>>,
 }
 
-/// The size of a tile and of the picture it last drew.
 #[derive(Clone, Copy)]
 struct Drawn {
-    /// The tile's, in points.
+    /// In points.
     room: (f32, f32),
-    /// The picture's, in pixels.
+    /// In pixels.
     picture: (f32, f32),
 }
 
@@ -359,17 +274,27 @@ impl VideoView {
             pan: (0.0, 0.0),
             dragged_from: (Zoom::default(), (0.0, 0.0)),
             drawn: Cell::new(None),
+            told_shape: Cell::new(None),
         }
     }
 
-    /// Zooms to `zoom` by the wheel, a reset or another picture, from where drags then move it.
+    fn tell_shape(&self, shape: Option<(f32, f32)>) {
+        if self.told_shape.get() == Some(shape) {
+            return;
+        }
+        self.told_shape.set(Some(shape));
+        let (width, height) = shape.unwrap_or((0.0, 0.0));
+        self.context.emit(
+            "shape",
+            serde_json::json!({ "width": width, "height": height }),
+        );
+    }
+
     fn rezoom(&mut self, zoom: Zoom) {
         self.dragged_from = (zoom, self.pan);
         self.show_part(zoom);
     }
 
-    /// Shows the part of the picture `zoom` says, drawing again, and telling TSX when how far in
-    /// it is changed: a drag, which only moves it, sends nothing.
     fn show_part(&mut self, zoom: Zoom) {
         if zoom == self.zoom {
             return;
@@ -383,8 +308,6 @@ impl VideoView {
         }
     }
 
-    /// Takes the drags' moves as far as `x` and `y` (each `None` where it is unchanged), and moves
-    /// the zoomed picture with them.
     fn pan_to(&mut self, x: Option<f32>, y: Option<f32>) {
         self.pan = (x.unwrap_or(self.pan.0), y.unwrap_or(self.pan.1));
         let Some(Drawn { room, picture }) = self.drawn.get() else {
@@ -397,9 +320,6 @@ impl VideoView {
         self.show_part(from.dragged(by, across));
     }
 
-    /// Shows the stream the props name, or nothing when there is no such camera. Another stream
-    /// of the same camera takes over from the one it showed, which it keeps drawing until the new
-    /// one has a picture (`leaving`).
     fn show(&mut self) {
         if self
             .shown
@@ -414,12 +334,11 @@ impl VideoView {
             self.let_go_of_leaving();
         }
         if let Some(key) = before {
-            // The first stream it switched away from is the one with a picture to keep; one it
-            // passed on the way had none yet.
+            // Keep the first stream switched away from: one passed on the way had no picture yet.
             if same_camera && self.leaving.borrow().is_none() {
                 *self.leaving.borrow_mut() = Some((key, Instant::now()));
-                // Nothing else may draw once the old stream stops, so a draw comes when its time
-                // is up, which lets it go.
+                // Nothing else draws once the old stream stops,
+                // so a draw is due as its time runs out.
                 let context = self.context.clone();
                 thread::spawn(move || {
                     thread::sleep(KEEP_LEAVING);
@@ -429,9 +348,9 @@ impl VideoView {
                 remove_tile(&key, self.tile);
             }
         }
-        // Another picture starts whole.
         self.rezoom(Zoom::default());
         self.drawn.set(None);
+        self.told_shape.set(None);
 
         let Ok(camera) = camera::find(&self.wanted.0) else {
             self.let_go_of_leaving();
@@ -443,7 +362,7 @@ impl VideoView {
             .as_ref()
             .is_some_and(|(key, _)| *key == self.wanted);
         if back {
-            // Back on the stream it is still drawing, whose tile it still is.
+            // Back on the stream it is still drawing.
             self.leaving.borrow_mut().take();
         } else {
             let context = self.context.clone();
@@ -464,7 +383,6 @@ impl VideoView {
         self.let_go_of_leaving();
     }
 
-    /// Stops drawing the stream it switched away from.
     fn let_go_of_leaving(&self) {
         let leaving = self.leaving.borrow_mut().take();
         if let Some((key, _)) = leaving {
@@ -472,8 +390,6 @@ impl VideoView {
         }
     }
 
-    /// The picture of the stream it switched away from, as it last was, while that is to be
-    /// kept: until [`KEEP_LEAVING`] has passed.
     fn leaving_frame(&self, dc: &ID2D1DeviceContext) -> Option<(ID2D1Bitmap1, (f32, f32))> {
         let expired = self
             .leaving
@@ -493,23 +409,24 @@ impl VideoView {
 impl NativeComponent for VideoView {
     fn draw(&self, dc: &ID2D1DeviceContext, size: (f32, f32)) {
         let Some((key, _)) = &self.shown else {
+            self.tell_shape(None);
             return;
         };
         let current = frame_on_gpu(key, dc);
         if current.is_some() {
-            // The new stream has its first picture: the old one's can go.
             self.let_go_of_leaving();
         }
         let Some((bitmap, picture)) = current.or_else(|| self.leaving_frame(dc)) else {
+            self.tell_shape(None);
             return;
         };
         self.drawn.set(Some(Drawn {
             room: size,
             picture,
         }));
+        self.tell_shape(shape_of(self.fit, picture));
 
         let (rect, fitted) = place(self.fit, picture, size);
-        // The zoom shows part of what the fit draws: the whole picture, or Fill's crop of it.
         let source = if self.zoom.zoomed() {
             let whole = D2D_RECT_F {
                 left: 0.0,
@@ -550,7 +467,6 @@ impl NativeComponent for VideoView {
                 self.fit = Fit::from_key(text).unwrap_or_default();
                 self.context.redraw();
             }
-            // Numbers, set on every frame a drag moves them.
             "panX" => self.pan_to(value.and_then(JsonValue::as_f64).map(|x| x as f32), None),
             "panY" => self.pan_to(None, value.and_then(JsonValue::as_f64).map(|y| y as f32)),
             _ => {}
@@ -563,14 +479,12 @@ impl NativeComponent for VideoView {
         }
     }
 
-    /// Zooms in or out around the pointer. Taken whenever the tile has drawn a picture, so the
-    /// wheel never scrolls what is around it.
+    /// Taken whenever the tile has drawn a picture, so the wheel never scrolls what is around it.
     fn wheel(&mut self, event: &Wheel) -> bool {
         let Some(Drawn { room, picture }) = self.drawn.get() else {
             return false;
         };
         let (rect, _) = place(self.fit, picture, room);
-        // Where the pointer is in the picture as drawn; over the bars beside it, the nearest edge.
         let along = |at: f32, from: f32, to: f32| ((at - from) / (to - from)).clamp(0.0, 1.0);
         let at = (
             along(event.x, rect.left, rect.right),
@@ -583,12 +497,8 @@ impl NativeComponent for VideoView {
 }
 
 impl Drop for VideoView {
-    /// nsh drops its components as the window closes, and this is the last the app hears of it:
-    /// nsh's close event goes to JS, which a closing window never waits for. A camera in the
-    /// middle of a PTZ move must not be left moving, so
-    /// the stop goes out here, and this waits for it, but only briefly (`Camera::release_ptz`): a
-    /// camera that stopped answering never holds the window. Dropping a tile for any other reason
-    /// costs only a reconnect on the next move.
+    /// The last the app hears of a closing window, since nsh's close event goes to JS, which it
+    /// never waits for: a PTZ move is stopped here, waiting only briefly.
     fn drop(&mut self) {
         let camera = self.shown.as_ref().map(|(_, camera)| camera.clone());
         self.hide();
@@ -598,10 +508,7 @@ impl Drop for VideoView {
     }
 }
 
-/// The bitmap holding `frame`, copying it to the GPU only when it is a new picture.
-///
-/// One bitmap per stream on screen is reused for as long as it runs, so a live feed allocates no GPU
-/// memory per frame.
+/// One bitmap per stream, reused while it runs, so a live feed allocates no GPU memory per frame.
 fn uploaded<'a>(
     painted: &'a mut Option<Painted>,
     dc: &ID2D1DeviceContext,
@@ -663,8 +570,6 @@ fn uploaded<'a>(
     painted.as_ref().map(|current| &current.bitmap)
 }
 
-/// Where a `picture` goes in a tile of size `room` for `fit`: the rectangle it is drawn in, and the
-/// part of the picture drawn there (all of it when `None`).
 fn place(fit: Fit, picture: (f32, f32), room: (f32, f32)) -> (D2D_RECT_F, Option<D2D_RECT_F>) {
     let whole = D2D_RECT_F {
         left: 0.0,
@@ -672,16 +577,21 @@ fn place(fit: Fit, picture: (f32, f32), room: (f32, f32)) -> (D2D_RECT_F, Option
         right: room.0,
         bottom: room.1,
     };
-    match fit {
-        Fit::Original => (contain(picture, room), None),
-        Fit::Stretch => (whole, None),
-        Fit::Fill => (whole, Some(cover(picture, room))),
-        // The picture is reshaped to the ratio, then fitted like `Original`.
-        forced => (contain(forced.aspect().unwrap_or(picture), room), None),
+    match shape_of(fit, picture) {
+        Some(shape) => (contain(shape, room), None),
+        None if fit == Fit::Fill => (whole, Some(cover(picture, room))),
+        None => (whole, None),
     }
 }
 
-/// The middle part of `picture` that has `room`'s shape: what `Fill` shows, scaled up to the tile.
+fn shape_of(fit: Fit, picture: (f32, f32)) -> Option<(f32, f32)> {
+    match fit {
+        Fit::Original => Some(picture),
+        Fit::Fill | Fit::Stretch => None,
+        forced => Some(forced.aspect().unwrap_or(picture)),
+    }
+}
+
 fn cover(picture: (f32, f32), room: (f32, f32)) -> D2D_RECT_F {
     let scale = (room.0 / picture.0).max(room.1 / picture.1);
     let (width, height) = (room.0 / scale, room.1 / scale);
@@ -694,7 +604,6 @@ fn cover(picture: (f32, f32), room: (f32, f32)) -> D2D_RECT_F {
     }
 }
 
-/// Scales `picture` to fit `room` and centers it, leaving the view's background around it.
 fn contain(picture: (f32, f32), room: (f32, f32)) -> D2D_RECT_F {
     let scale = (room.0 / picture.0).min(room.1 / picture.1);
     let (width, height) = (picture.0 * scale, picture.1 * scale);
@@ -707,11 +616,8 @@ fn contain(picture: (f32, f32), room: (f32, f32)) -> D2D_RECT_F {
     }
 }
 
-/// Asks the tiles showing a stream to draw whenever it has a new frame, or stops having one.
-///
-/// `frames` gives the stream's slot, read again each time because a new session brings a new one.
-/// A frame count alone would miss a stream stopping, and a new session resets the count, so this
-/// compares both with what it saw last.
+/// Asks a stream's tiles to draw on each new frame, or when it stops. `frames` is read each time,
+/// since a new session brings a new slot; a count alone would miss a stop or a reset.
 fn watch(frames: impl Fn() -> FrameSlot, viewers: &Viewers, stop: &AtomicBool) {
     let mut seen = (0, false);
 
@@ -764,6 +670,23 @@ mod tests {
         let (rect, source) = place(Fit::Square, (1920.0, 1080.0), (200.0, 100.0));
         assert_eq!(edges(rect), (50.0, 0.0, 150.0, 100.0));
         assert!(source.is_none());
+    }
+
+    #[test]
+    fn the_shape_told_is_the_one_the_fit_draws_in_so_a_tile_of_that_shape_has_no_bars() {
+        let picture = (1920.0, 1080.0);
+        assert_eq!(shape_of(Fit::Original, picture), Some(picture));
+        assert_eq!(shape_of(Fit::FourByThree, picture), Some((4.0, 3.0)));
+        assert_eq!(shape_of(Fit::Fill, picture), None);
+        assert_eq!(shape_of(Fit::Stretch, picture), None);
+        for fit in Fit::ALL {
+            let Some((width, height)) = shape_of(fit, picture) else {
+                continue;
+            };
+            let room = (width * 0.25, height * 0.25);
+            let (rect, _) = place(fit, picture, room);
+            assert_eq!(edges(rect), (0.0, 0.0, room.0, room.1), "{fit:?}");
+        }
     }
 
     #[test]
@@ -841,7 +764,6 @@ mod tests {
 
     #[test]
     fn the_wheel_zooms_in_around_the_point_under_the_pointer() {
-        // The middle of the picture's right half, under the pointer.
         let at = (0.75, 0.5);
         let zoom = Zoom::default().wheeled(1.0, at);
         assert_eq!(zoom.scale, ZOOM_PER_NOTCH);
@@ -875,7 +797,6 @@ mod tests {
             left: 0.5,
             top: 0.5,
         };
-        // A tile 400 points wide shows a quarter of the picture: 100 points are a sixteenth of it.
         let moved = zoom.dragged((100.0, -100.0), (400.0, 300.0));
         assert_eq!(moved.scale, 4.0);
         assert!((moved.left - (0.5 - 1.0 / 16.0)).abs() < 1e-6, "{moved:?}");
@@ -912,7 +833,6 @@ mod tests {
             top: 0.25,
         };
         assert_eq!(edges(zoom.part_of(whole)), (100.0, 25.0, 200.0, 75.0));
-        // Fill's crop of a wide picture in a square tile, zoomed the same.
         let (_, crop) = place(Fit::Fill, (200.0, 100.0), (100.0, 100.0));
         assert_eq!(
             edges(zoom.part_of(crop.unwrap())),

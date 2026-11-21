@@ -1,12 +1,6 @@
-//! Detect: which camera is at an address, for the camera form. Reolink's API, Dahua's DVRIP and
-//! HTTP API and ONVIF are each asked, without a login, on the ports cameras keep them on, all at
-//! once; then, with a password, the camera is logged into once over each protocol that answered,
-//! for its model, features and streams. Not over an ONVIF that refused that login before
-//! (`CameraConfig::onvif_refused`): the camera counts each refusal against the account, so nothing
-//! here retries a login.
-//!
-//! [`detect`] blocks for a few seconds, so the app and the server call it off the window's thread
-//! and off the runtime's.
+//! Detect: which camera is at an address. Each protocol is asked without a login, then logged into
+//! once with a password; nothing retries a login, since the camera counts each refusal against
+//! the account.
 
 use std::{
     net::{TcpStream, ToSocketAddrs},
@@ -25,24 +19,15 @@ use crate::{
     reolink::ReolinkClient,
 };
 
-/// How long [`detect`] waits for a port to accept a connection.
 const PORT_PROBE: Duration = Duration::from_secs(3);
 
-/// The ports [`detect`] asks ONVIF on after the camera's own: those cameras ship it on, a light
-/// bulb camera's among them.
 const ONVIF_PORTS: [u16; 6] = [80, 8000, 8899, 2020, 5000, 8080];
 
-/// Other ports a camera's web API can be on, which [`detect`] asks Dahua's HTTP API and ONVIF on
-/// when they are open.
 const OTHER_PORTS: [u16; 10] = [81, 88, 8001, 8008, 8081, 8088, 8443, 8888, 9000, 10080];
 
-/// What Detect says of an ONVIF it didn't ask, because it refused this login before.
 const REFUSED_BEFORE: &str = "It refused this login before, so Detect didn't ask it again. Type \
                               the password again to have it asked.";
 
-/// The streams the ONVIF camera `camera`'s settings reach lists, with one login; none when it
-/// has no media service or won't list them. For a camera whose login has just worked another
-/// way; the error is its ONVIF's refusing that login, or not answering.
 fn onvif_streams(camera: &CameraConfig) -> Result<Vec<CameraStream>, OnvifError> {
     let (mut client, _) = OnvifClient::connect(
         &camera.host,
@@ -65,51 +50,28 @@ fn onvif_streams(camera: &CameraConfig) -> Result<Vec<CameraStream>, OnvifError>
 pub struct Detected {
     /// Who made the camera.
     pub brand: Brand,
-    /// Where its HTTP API answered, a Reolink's or a Dahua's: the port, and whether it is HTTPS.
+    /// Where its HTTP API answered: the port, and whether it is HTTPS.
     pub api: Option<(u16, bool)>,
-    /// For a Dahua: whether its PTZ and light go over that API (the form's `http_api`), because
-    /// its DVRIP port is closed or it has a light there.
+    /// For a Dahua: whether its PTZ and light go over that API.
     pub http_api: bool,
-    /// What the camera says it is, when it was asked with a login.
+    /// What the camera says it is, when asked with a login.
     pub device: Option<DeviceInfo>,
-    /// What it can do, when it was asked with a login.
+    /// What it can do, when asked with a login.
     pub features: Option<CameraFeatures>,
-    /// Whether its ONVIF event service reports motion, or its PTZ service has a light, for a
-    /// camera that isn't a Reolink: the form turns `onvif_events` on for it.
+    /// Whether ONVIF reports motion or has a light, for a camera that isn't a Reolink.
     pub onvif_events: bool,
-    /// The port ONVIF answered on, when it did.
+    /// The port ONVIF answered on.
     pub onvif_port: Option<u16>,
-    /// Why ONVIF told nothing, when the camera was found another way, as a sentence.
+    /// Why ONVIF told nothing of a camera found another way.
     pub onvif_problem: Option<String>,
-    /// The streams the camera listed, when it was asked with a login: over ONVIF's media
-    /// service, and a Reolink's own API. Empty for a camera that lists none.
+    /// The streams the camera listed, when asked with a login.
     pub streams: Vec<CameraStream>,
-    /// Whether its ONVIF refused the login, now or before (`camera.onvif_refused`), where the
-    /// login works another way: the form keeps it, and the next Detect leaves ONVIF alone.
+    /// Whether ONVIF refused a login that works another way, now or before.
     pub onvif_refused: bool,
 }
 
-/// Tells which camera is at `camera.host`, for the camera form. Blocks for a few seconds, so call
-/// it off the window's thread.
-///
-/// First, all at once and none with a login: which ports are open; then Reolink's API is asked on
-/// `camera`'s API port and on Reolink's usual 443 (HTTPS) and 80 (HTTP); Dahua's DVRIP port is
-/// tried (a connection); Dahua's HTTP API is asked how to log in (on `camera`'s API port, then 80
-/// and 443); and ONVIF's time is asked on `camera`'s ONVIF port and then on the ports cameras ship
-/// it on ([`ONVIF_PORTS`]). Dahua's HTTP API and ONVIF are also asked on any of [`OTHER_PORTS`]
-/// that is open. Where several ports answer, the first listed wins. When nothing does, the error
-/// says which ports were open: only the video's means the camera has no local API to reach. A Reolink is then logged into once, when `camera`
-/// has a password, for its model, features and streams: its ONVIF's and its API's RTSP streams,
-/// then those its web server sends as FLV that none of them is, each opened for its first bytes
-/// with that login's token. DVRIP or Dahua's API makes a camera Dahua's.
-///
-/// With a password, a Dahua is logged into once over DVRIP for its model, firmware and PTZ, once
-/// over its HTTP API for those and its light, and ONVIF once for its model, events, PTZ and light.
-/// PTZ stays on DVRIP where that answers, as it always has; the API takes PTZ and the light where
-/// DVRIP is closed or the camera has a light. A refused login ends it there, before anything else
-/// is tried; an ONVIF that tells nothing of a Dahua is a note, not a failure. Nothing here retries
-/// a login, and an ONVIF that refused this login before (`camera.onvif_refused`) isn't logged
-/// into at all: the camera counts each refusal against the account.
+/// Tells which camera is at `camera.host`, blocking for a few seconds. Logs in at most once per
+/// protocol, and never to an ONVIF that refused this login before (`camera.onvif_refused`).
 pub fn detect(camera: &CameraConfig) -> Result<Detected, String> {
     let host = camera.host.trim();
     if host.is_empty() {
@@ -152,10 +114,7 @@ pub fn detect(camera: &CameraConfig) -> Result<Detected, String> {
                     .features(camera.channel)
                     .map_err(|error| error.to_string())?,
             );
-            // Its streams, as its ONVIF lists them where that answers, and as its own API does:
-            // the login has just been shown to work. Neither listing is needed for the rest.
-            // ONVIF's come first, since it gives each stream a name; the API only has the
-            // field each address came in, which names a stream ONVIF didn't list.
+            // ONVIF's streams first, since it names them; the API's add what ONVIF didn't list.
             let own = client.streams(camera.channel).unwrap_or_default();
             if let Some(onvif_port) = heard.onvif {
                 let at_port = CameraConfig {
@@ -172,13 +131,11 @@ pub fn detect(camera: &CameraConfig) -> Result<Detected, String> {
                             found.onvif_refused = true;
                             found.onvif_problem = Some(error.to_string());
                         }
-                        // Its own listing stands.
                         Err(_) => {}
                     }
                 }
             }
             CameraStream::merge(&mut found.streams, own);
-            // Then the streams its web server sends as FLV that none of those is.
             let over_flv = client
                 .flv_streams(camera.channel, &found.streams)
                 .unwrap_or_default();
@@ -238,7 +195,7 @@ pub fn detect(camera: &CameraConfig) -> Result<Detected, String> {
                 });
             }
             Err(error @ DahuaHttpError::LoginRejected(_)) => return Err(error.to_string()),
-            // An API that isn't Dahua's after all, or says nothing: DVRIP or ONVIF says the rest.
+            // Not Dahua's API after all: DVRIP or ONVIF says the rest.
             Err(error) => {
                 found.api = None;
                 found.http_api = false;
@@ -272,7 +229,7 @@ pub fn detect(camera: &CameraConfig) -> Result<Detected, String> {
                 if let Some(media) = &media {
                     found.streams = client.streams(media).unwrap_or_default();
                 }
-                // A light Dahua's API switches is switched there; motion still comes over ONVIF.
+                // A light Dahua's API switches stays there; motion still comes over ONVIF.
                 let light_over_onvif = features.spotlight && !found.http_api;
                 found.onvif_events = features.motion || light_over_onvif;
                 found.device.get_or_insert(device);
@@ -287,13 +244,13 @@ pub fn detect(camera: &CameraConfig) -> Result<Detected, String> {
                     None => features,
                 });
             }
-            // Not asked, having refused this login before.
+            // Not asked: it refused this login before.
             Err(None) if found.brand == Brand::Dahua => {
                 found.onvif_refused = true;
                 found.onvif_problem = Some(REFUSED_BEFORE.to_string());
             }
             Err(None) => return Err(format!("ONVIF: {REFUSED_BEFORE}")),
-            // DVRIP or Dahua's API already said what the camera is: ONVIF's silence is a note.
+            // DVRIP or Dahua's API already found the camera: ONVIF's failure is only a note.
             Err(Some(error)) if found.brand == Brand::Dahua => {
                 found.onvif_refused = matches!(error, OnvifError::LoginRejected(_));
                 found.onvif_problem = Some(error.to_string());
@@ -304,8 +261,7 @@ pub fn detect(camera: &CameraConfig) -> Result<Detected, String> {
     Ok(found)
 }
 
-/// What [`detect`] heard without a login: where each protocol answered first, in the order its
-/// ports were listed, and which ports were open at all.
+/// Where each protocol answered first, in the order its ports were listed, and the open ports.
 struct Heard {
     reolink: Option<(u16, bool)>,
     dvrip: bool,
@@ -314,11 +270,8 @@ struct Heard {
     open: Vec<u16>,
 }
 
-/// Asks every port at once, none with a login. First which ports are open, among those listed,
-/// the camera's RTSP and DVRIP ports and [`OTHER_PORTS`]; then each protocol on its open ports,
-/// Dahua's HTTP API and ONVIF on the other open ones too. A camera that drops what it won't answer
-/// costs the wait of one port rather than of each, and so does a closed port on this machine,
-/// which Windows takes about two seconds to refuse.
+/// Asks every port at once, so a port that drops what it won't answer, or a closed local port the
+/// system takes seconds to refuse, costs one wait rather than one each.
 fn listen(
     camera: &CameraConfig,
     host: &str,
@@ -327,7 +280,6 @@ fn listen(
     onvif: &[u16],
 ) -> Heard {
     fn first<T: Copy>(asked: Vec<(T, thread::ScopedJoinHandle<'_, bool>)>) -> Option<T> {
-        // Every answer is waited for, so none is left running.
         let answered: Vec<(T, bool)> = asked
             .into_iter()
             .map(|(port, answer)| (port, answer.join().unwrap_or(false)))
@@ -423,8 +375,6 @@ fn listen(
     })
 }
 
-/// Why [`detect`] found nothing at `host`, with what was `open` there, as a sentence that says what
-/// to do.
 fn nothing_answered(camera: &CameraConfig, host: &str, open: &[u16]) -> String {
     let asked = "Reolink's or Dahua's HTTP API, Dahua's DVRIP or ONVIF";
     let others: Vec<u16> = open
@@ -455,7 +405,6 @@ fn nothing_answered(camera: &CameraConfig, host: &str, open: &[u16]) -> String {
     }
 }
 
-/// Whether something accepts a connection at `host` on `port`, within [`PORT_PROBE`].
 fn port_open(host: &str, port: u16) -> bool {
     (host, port)
         .to_socket_addrs()
@@ -464,7 +413,6 @@ fn port_open(host: &str, port: u16) -> bool {
         .is_some_and(|address| TcpStream::connect_timeout(&address, PORT_PROBE).is_ok())
 }
 
-/// `items` without repeats, in order.
 fn unique<T: PartialEq>(items: impl IntoIterator<Item = T>) -> Vec<T> {
     let mut kept = Vec::new();
     for item in items {
@@ -475,7 +423,6 @@ fn unique<T: PartialEq>(items: impl IntoIterator<Item = T>) -> Vec<T> {
     kept
 }
 
-/// `ports` as `80, 8000`.
 fn join(ports: &[u16]) -> String {
     ports
         .iter()
@@ -484,8 +431,6 @@ fn join(ports: &[u16]) -> String {
         .join(", ")
 }
 
-/// A Dahua camera's model, firmware, PTZ and light, over its HTTP API with one login. What the
-/// camera won't say of its PTZ is left out.
 fn http_details(
     camera: &CameraConfig,
     port: u16,
@@ -511,8 +456,6 @@ fn http_details(
     ))
 }
 
-/// A Dahua camera's model, firmware and PTZ, over DVRIP with one login. A refused login is the
-/// error; what the camera won't say is left out.
 fn dahua_details(camera: &CameraConfig) -> Result<(DeviceInfo, CameraFeatures), String> {
     let mut client = DvripClient::connect(
         camera.host.trim(),

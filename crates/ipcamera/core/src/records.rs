@@ -1,10 +1,5 @@
-//! What the cameras, the groups and the views have in common as lists in a file.
-//!
-//! Each item carries an id of its own, which is how everything else refers to it. A hand edit can
-//! leave one blank or copy another's, so loading gives those a fresh id; a change finds its item
-//! by id or says there is none, in the same words for all three. [`Keyed`] is what makes an item
-//! one of these, and [`RecordId`] what makes an id one: the stores' rules are written once, here,
-//! against those two traits.
+//! The rules the camera, group and view lists share: ids, lookups and names. A hand edit can leave
+//! an id blank or repeated, so loading gives those a fresh one.
 
 use std::{collections::HashSet, fmt, hash::Hash};
 
@@ -16,27 +11,19 @@ use crate::{
     ids::{CameraId, GroupId, ViewId},
 };
 
-/// An id one of the lists gives its items. `ids.rs` implements it for each id type.
 pub(crate) trait RecordId: Clone + Eq + Hash + fmt::Display {
-    /// What one of the items is called in a message: "camera", "group", "view".
     const NOUN: &'static str;
 
-    /// A new id, unlike any other.
     fn generate() -> Self;
 
-    /// Whether this is the empty id of something not saved yet.
     fn is_empty(&self) -> bool;
 }
 
-/// An item of one of the lists: something saved under an id of its own.
 pub(crate) trait Keyed {
-    /// The kind of id it has.
     type Id: RecordId;
 
-    /// Its id.
     fn id(&self) -> &Self::Id;
 
-    /// Its id, to change.
     fn id_mut(&mut self) -> &mut Self::Id;
 }
 
@@ -76,9 +63,8 @@ impl Keyed for CameraView {
     }
 }
 
-/// Gives a fresh id to every item whose id is blank or repeats an earlier one's, returning
-/// whether any changed. The first item with a repeated id keeps it, so whatever lists that id
-/// still means the item it meant.
+/// Gives a fresh id to every blank or repeated one; the first with a repeated id keeps it, so
+/// whatever lists that id still means the item it meant.
 pub(crate) fn give_unique_ids<T: Keyed>(items: &mut [T]) -> bool {
     let mut seen = HashSet::new();
     let mut changed = false;
@@ -92,12 +78,10 @@ pub(crate) fn give_unique_ids<T: Keyed>(items: &mut [T]) -> bool {
     changed
 }
 
-/// The item with `id`, if there is one.
 pub(crate) fn find<'a, T: Keyed>(items: &'a [T], id: &T::Id) -> Option<&'a T> {
     items.iter().find(|item| item.id() == id)
 }
 
-/// The item with `id`, to change, or the error that says there is none.
 pub(crate) fn find_mut<'a, T: Keyed>(
     items: &'a mut [T],
     id: &T::Id,
@@ -108,7 +92,6 @@ pub(crate) fn find_mut<'a, T: Keyed>(
         .ok_or_else(|| not_found(id))
 }
 
-/// Where the item with `id` is in the list, or the error that says there is none.
 pub(crate) fn position<T: Keyed>(items: &[T], id: &T::Id) -> Result<usize, StoreError> {
     items
         .iter()
@@ -116,12 +99,10 @@ pub(crate) fn position<T: Keyed>(items: &[T], id: &T::Id) -> Result<usize, Store
         .ok_or_else(|| not_found(id))
 }
 
-/// The error for an id no item has: "no group `…`".
 pub(crate) fn not_found<I: RecordId>(id: &I) -> StoreError {
     StoreError::NotFound(format!("no {} `{id}`", I::NOUN))
 }
 
-/// `name` trimmed, or why it can't name one of `I`'s items: "A group needs a name."
 pub(crate) fn required_name<I: RecordId>(name: &str) -> Result<String, StoreError> {
     let name = name.trim();
     if name.is_empty() {

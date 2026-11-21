@@ -1,10 +1,4 @@
-// The styled controls every product of the suite draws with. `nsh/base` brings
-// the behavior, focus and accessibility; these bring the look, from the theme
-// the app shows (`brand.tsx`), the elevation's depth over it (`elevation.ts`)
-// and the texture over the page headers (`texture.ts`). Pages compose these
-// rather than styling base components themselves, so a theme reaches every page
-// of every product through them. An app imports them by path (`../../dp/ui`),
-// and hands them its `Themes` module first (`connectThemes`).
+// The styled controls every product draws with: `nsh/base` brings the behavior, these the look.
 export {
   applyThemeColors,
   BrandBadge,

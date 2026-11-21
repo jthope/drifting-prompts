@@ -6,23 +6,16 @@ import { Icon, type IconName } from "./icon";
 
 type Point = { x: number; y: number };
 
-/** A menu's items, as the system's menus take them: `false`, `null` and `undefined` leave an item out (`cond && { … }`). */
+/** A menu's items as the system's menus take them; `false`, `null` and `undefined` leave one out. */
 export type MenuEntries = readonly (SystemMenuItem | false | null | undefined)[];
 
-/**
- * The surface of what floats over the window, as the theme draws it: a menu's
- * or a list's popup, a toast, a dialog's panel. `extra` adds classes (padding, width).
- */
+/** The theme's surface for what floats over the window; `extra` adds classes. */
 export function popupSurface(extra = ""): { class: string; style: ViewStyle } {
   const popup = look().popup;
   return { class: `${popup.class} ${extra}`, style: popup.style };
 }
 
-/**
- * A popup menu that opens from `trigger`, which must be a plain view with
- * `role="button"` (a `ChipTrigger` with `menu`): a menu gives its trigger its
- * presses, focus and open state, so a `Button` there would take the press for itself.
- */
+/** A popup menu from `trigger`, a plain view with `role="button"`: a `Button` there would take its press. */
 export function PopupMenu(props: { trigger: JSX.Element; placement?: "top" | "bottom"; children: JSX.Element }) {
   const surface = () => popupSurface("min-w-48 p-1");
   return (
@@ -32,12 +25,7 @@ export function PopupMenu(props: { trigger: JSX.Element; placement?: "top" | "bo
   );
 }
 
-/**
- * The button of a menu or a list of choices, showing the current choice
- * (`children`) with a chevron to say it opens. `menu` makes it a `PopupMenu`'s
- * trigger, which takes a plain view with the button role; a `Select` gives its
- * own. Its outline turns the theme's color while it is open.
- */
+/** A menu's or a list's button showing the current choice; `menu` makes it a `PopupMenu` trigger. */
 export function ChipTrigger(props: { menu?: boolean; accessibilityLabel?: string; class?: string; children: JSX.Element }) {
   return (
     <View
@@ -52,10 +40,7 @@ export function ChipTrigger(props: { menu?: boolean; accessibilityLabel?: string
   );
 }
 
-/**
- * A `PopupMenu` trigger that shows the current choice beside an icon. `label`
- * is what it is set to; `accessibilityLabel` says what it chooses, for a screen reader.
- */
+/** A `PopupMenu` trigger showing the current choice beside an icon. */
 export function MenuChip(props: { icon: IconName; label: string; accessibilityLabel: string }) {
   return (
     <ChipTrigger menu accessibilityLabel={props.accessibilityLabel}>
@@ -67,12 +52,7 @@ export function MenuChip(props: { icon: IconName; label: string; accessibilityLa
   );
 }
 
-/**
- * A menu item's icon. Where the theme recolors an item's text while it is
- * hovered or focused (`Look.menuItem.activeInk`, a theme file's `menu-selection`),
- * a second icon in that color shows over the first then, as an icon is drawn
- * in one color and can't follow a class. The item must have the `group` class.
- */
+/** An icon can't follow a class, so a second one in `activeInk` shows on hover; the item needs `group`. */
 function MenuIcon(props: { name: IconName }) {
   return (
     <If when={look().menuItem.activeInk} else={<Icon name={props.name} size={14} tint="popover-foreground" />}>
@@ -90,13 +70,7 @@ function MenuIcon(props: { name: IconName }) {
   );
 }
 
-/**
- * An item of a `PopupMenu`. `checked` makes it a setting the menu shows the
- * state of, its check in the theme's ink. `leading` takes the icon's place (a
- * small picture of a layout, say), and `tall` makes room for a larger one (a
- * theme's window). Hovered or focused, it takes the theme's fill, and its text
- * and icons the color the theme gives them on it.
- */
+/** An item of a `PopupMenu`; `checked` shows a setting's state, `leading` takes the icon's place. */
 export function MenuRow(props: { label: string; icon?: IconName; leading?: JSX.Element; tall?: boolean; checked?: boolean; disabled?: boolean; onSelect: () => void }) {
   return (
     <MenuItem
@@ -120,12 +94,9 @@ export function MenuLine() {
   return <MenuSeparator class={`my-1 h-px ${look().menuItem.line}`} />;
 }
 
-// The menus of buttons and right clicks. On the desktop they are the system's own (`nsh/desktop`'s
-// `Menu.popup`). nsh 0.5.1 has none in a browser, where `Menu.popup` does nothing, so there the
-// same items are drawn with `nsh/base`'s `Menu`, as `PopupMenu`'s are. A release with browser menus
-// in `Menu.popup` replaces `MenuOpener`'s and `popupMenu`'s drawn half and `MenuLayer`.
+// nsh has no browser menus (`Menu.popup` does nothing there), so these draw them with `Menu`.
 
-/** The row of a drawn menu that opens a submenu, or, with `back`, returns from one on a touch screen: a plain view, which `Submenu` makes the item. */
+/** A plain view: `Submenu` makes it the item. */
 function SubmenuRow(props: { label: string; back?: boolean }) {
   return (
     <View class={`h-8 flex-row items-center gap-2 rounded-md px-2 ${look().menuItem.row}`}>
@@ -142,7 +113,6 @@ function SubmenuRow(props: { label: string; back?: boolean }) {
   );
 }
 
-/** One of a drawn menu's items: a line, a submenu cascading beside it, or a row. */
 function DrawnItem(props: { item: SystemMenuItem }) {
   const item = props.item;
   if ("type" in item) return <MenuLine />;
@@ -158,12 +128,11 @@ function DrawnItem(props: { item: SystemMenuItem }) {
   return <MenuRow label={label} checked={item.checked} disabled={item.disabled} onSelect={() => item.onSelect?.()} />;
 }
 
-/** `items` as a drawn menu's items. */
 function DrawnItems(props: { items: MenuEntries }) {
   return <Each of={props.items.filter((item): item is SystemMenuItem => Boolean(item))}>{(item) => <DrawnItem item={item()} />}</Each>;
 }
 
-/** A drawn menu's items at the top of it, where a test finds them as `id:menu`. */
+/** A test finds a drawn menu's items as `id:menu`. */
 function DrawnMenu(props: { items: MenuEntries }) {
   return (
     <View testID="menu">
@@ -172,12 +141,7 @@ function DrawnMenu(props: { items: MenuEntries }) {
   );
 }
 
-/**
- * A button that opens a menu. `children` is the button, given `open`, which
- * its press calls with the menu's items. On the desktop that is the system's
- * own menu, at the pointer; in a browser, a drawn one under the button. `class`
- * places the button and its menu together, as the button's own would place it.
- */
+/** A button that opens a menu: the system's on the desktop, a drawn one in a browser. */
 export function MenuOpener(props: { class?: string; children: (open: (items: MenuEntries) => void) => JSX.Element }) {
   if (hasSystemMenus) return <View class={props.class}>{props.children((items) => void SystemMenu.popup(items))}</View>;
   const shown = signal<MenuEntries | null>(null);
@@ -192,7 +156,7 @@ export function MenuOpener(props: { class?: string; children: (open: (items: Men
       onOpenChange={(event) => {
         if (!event.open) shown.set(null);
       }}
-      // Only where the menu stands: the button inside keeps its press for itself, and opens it.
+      // Only a place to stand: the button inside keeps its press, and opens the menu.
       trigger={<View>{props.children((items) => shown.set(items))}</View>}
     >
       <DrawnMenu items={shown() ?? []} />
@@ -200,20 +164,13 @@ export function MenuOpener(props: { class?: string; children: (open: (items: Men
   );
 }
 
-/** The menu `popupMenu` drew, and where. */
 type Pointed = { items: MenuEntries; at: Point };
 
 const pointed = signal<Pointed | null>(null);
 
-/** The `MenuLayer`s shown, the newest last, which `popupMenu`'s menus open in. */
 const layers = signal<symbol[]>([]);
 
-/**
- * Opens a menu of `items` with its corner at `at`: an event's `pagePosition`,
- * in the window's coordinates or those of the dialog it happened in. Without
- * `at` the system's opens at the pointer; a drawn one, in a browser, at the
- * top of the middle, as every caller there says where.
- */
+/** Opens a menu of `items` with its corner at `at`, an event's `pagePosition`. */
 export function popupMenu(items: MenuEntries, at?: Point) {
   if (hasSystemMenus) {
     void SystemMenu.popup(items, at);
@@ -223,7 +180,7 @@ export function popupMenu(items: MenuEntries, at?: Point) {
   pointed.set({ items, at: at ?? { x: size.width / 2, y: size.height / 4 } });
 }
 
-/** A drawn menu with its corner at a point. A menu opens from a trigger, so a point-sized one stands there. */
+/** A menu opens from a trigger, so a point-sized one stands at the point. */
 function PointedMenu(props: { menu: Pointed }) {
   const menu = props.menu;
   const surface = () => popupSurface("min-w-48 p-1");
@@ -244,11 +201,7 @@ function PointedMenu(props: { menu: Pointed }) {
   );
 }
 
-/**
- * Where a browser draws `popupMenu`'s menus: one over the window, in
- * `App.tsx`, and one in each dialog that covers it, the menus opening in the
- * newest shown. Place it last in what it covers. Nothing on the desktop.
- */
+/** Where a browser draws `popupMenu`'s menus; place it last in the window or dialog it covers. */
 export function MenuLayer() {
   if (hasSystemMenus) return null;
   const me = Symbol("menu layer");

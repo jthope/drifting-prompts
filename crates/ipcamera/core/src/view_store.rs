@@ -1,8 +1,5 @@
-//! The saved views: `data\settings\views.json`.
-//!
-//! Like [`GroupStore`](crate::group_store::GroupStore), this store holds camera ids and never looks
-//! at the cameras. [`Library`](crate::library::Library) checks a camera exists before it goes in a
-//! tile, and empties the tiles of a camera that is deleted.
+//! The saved views: `data\settings\views.json`. This store never checks that a camera exists;
+//! [`Library`](crate::library::Library) does.
 
 use std::{collections::HashSet, path::PathBuf};
 
@@ -32,9 +29,6 @@ impl Document for ViewFile {
         Some(&mut self.version)
     }
 
-    /// A view added by hand may have no id, or a copy of another's, a blank camera id in a tile,
-    /// and no cells or cells that can't be a view's. Each view gets an id of its own, a blank tile
-    /// becomes an empty one, and cells that can't be a view's become the default 2 × 2.
     fn repair(&mut self) -> bool {
         let mut changed = give_unique_ids(&mut self.views);
         for view in &mut self.views {
@@ -70,22 +64,19 @@ impl ViewStore {
     /// The file's name inside `data\settings`.
     pub const FILE: &'static str = "views.json";
 
-    /// Opens the views saved at `path`. A missing file means no views, and nothing is written until
-    /// the first change.
+    /// Opens the views saved at `path`; a missing file means no views.
     pub fn open(path: impl Into<PathBuf>) -> Self {
         Self {
             file: FileStore::open(path.into()),
         }
     }
 
-    /// No views, and no file: changes are kept in memory only.
     pub(crate) fn in_memory() -> Self {
         Self {
             file: FileStore::in_memory(),
         }
     }
 
-    /// `views`, ids and all, and no file: a copy whose changes are kept in memory only.
     pub(crate) fn holding(views: Vec<CameraView>) -> Self {
         Self {
             file: FileStore::holding(ViewFile {
@@ -95,7 +86,7 @@ impl ViewStore {
         }
     }
 
-    /// Every view, in the order they are shown.
+    /// Every view, in order.
     pub fn list(&self) -> Vec<CameraView> {
         self.file.read(|file| file.views.clone())
     }
@@ -110,7 +101,6 @@ impl ViewStore {
         self.add_with(name, layout, Vec::new())
     }
 
-    /// Adds a view with `tiles` already filled in, for the first launch.
     pub(crate) fn add_with(
         &self,
         name: &str,
@@ -141,7 +131,7 @@ impl ViewStore {
         })
     }
 
-    /// Removes view `id`. The cameras in it are not touched.
+    /// Removes view `id`.
     pub fn remove(&self, id: &ViewId) -> Result<(), StoreError> {
         self.file.update(|file| {
             let index = position(&file.views, id)?;
@@ -150,9 +140,7 @@ impl ViewStore {
         })
     }
 
-    /// Divides view `id` as `layout`, in place of however its tiles were arranged: tile by tile,
-    /// in order, each keeping its camera. Tiles the layout has no room for keep their cameras,
-    /// for when the view has room for them again.
+    /// Divides view `id` as `layout`, tile by tile, each keeping its camera.
     pub fn set_layout(&self, id: &ViewId, layout: Layout) -> Result<(), StoreError> {
         self.change_view(id, |view| {
             view.cells = layout.on_grid();
@@ -160,10 +148,8 @@ impl ViewStore {
         })
     }
 
-    /// Moves, resizes, adds and removes view `id`'s tiles at once, as `tiles` says, which
-    /// [`check_arrangement`] must allow. Each keeps the camera of the tile it was, and a new one is
-    /// empty; a tile left out takes its camera with it. Tiles past the old cells, kept for when the
-    /// view had room for them again, stay past the new ones.
+    /// Rearranges view `id`'s tiles at once, each keeping the camera of the tile it was; a tile
+    /// left out takes its camera with it, and tiles kept past the old cells stay past the new.
     pub fn arrange(&self, id: &ViewId, tiles: &[ArrangedTile]) -> Result<(), StoreError> {
         let cells: Vec<Cell> = tiles.iter().map(|tile| tile.cell).collect();
         check_arrangement(&cells).map_err(StoreError::Invalid)?;
@@ -198,12 +184,8 @@ impl ViewStore {
         })
     }
 
-    /// Shows `tile`, a camera and which of its streams, in tile `index` of view `id`, or empties
-    /// the tile with `None`. A tile that picks no fit keeps the one the tile had, so another
-    /// camera or stream there fills it as before; an empty tile keeps none.
-    ///
-    /// This store cannot tell whether the camera exists, so the app goes through
-    /// [`Library::show_in_tile`](crate::library::Library::show_in_tile), which checks.
+    /// Shows `tile` in tile `index` of view `id`, or empties it; a tile that picks no fit keeps the
+    /// one the tile had.
     pub fn set_tile(
         &self,
         id: &ViewId,
@@ -226,8 +208,7 @@ impl ViewStore {
         })
     }
 
-    /// Sets how the picture fills tile `index` of view `id`, which must show a camera: an empty
-    /// tile has no picture to fit.
+    /// Sets how the picture fills tile `index` of view `id`, which must show a camera.
     pub fn set_tile_fit(&self, id: &ViewId, index: usize, fit: Fit) -> Result<(), StoreError> {
         self.change_view(id, |view| {
             shown_tile(view, index)?;
@@ -244,19 +225,16 @@ impl ViewStore {
         })
     }
 
-    /// Empties every tile showing `camera`, for when it is deleted. Writes nothing when no tile
-    /// shows it.
+    /// Empties every tile showing `camera`.
     pub fn forget_camera(&self, camera: &CameraId) -> Result<(), StoreError> {
         self.keep_cameras(|shown| shown != camera)
     }
 
-    /// Empties every tile showing a camera `known` doesn't contain. Writes nothing when every
-    /// camera is known.
+    /// Empties every tile showing a camera `known` doesn't contain.
     pub fn prune(&self, known: &HashSet<CameraId>) -> Result<(), StoreError> {
         self.keep_cameras(|camera| known.contains(camera))
     }
 
-    /// Empties every tile showing a camera `keep` refuses, in one save; none when it keeps all.
     fn keep_cameras(&self, keep: impl Fn(&CameraId) -> bool) -> Result<(), StoreError> {
         self.file.update(|file| {
             for tile in file.views.iter_mut().flat_map(|view| &mut view.tiles) {
@@ -268,7 +246,6 @@ impl ViewStore {
         })
     }
 
-    /// Makes `change` to view `id`, or says there is no such view.
     fn change_view(
         &self,
         id: &ViewId,
@@ -279,8 +256,7 @@ impl ViewStore {
     }
 }
 
-/// Says there is no tile `index` when `view` doesn't show that many: the tiles it keeps past its
-/// cells aren't on screen to change.
+/// The tiles kept past a view's cells aren't on screen to change.
 fn shown_tile(view: &CameraView, index: usize) -> Result<(), StoreError> {
     if index < view.cells.len() {
         return Ok(());
@@ -359,7 +335,6 @@ mod tests {
         views.set_tile(&id, 8, Some(hidden.clone())).unwrap();
         views.set_layout(&id, Layout::Four).unwrap();
 
-        // B's tile goes wide along the top, a new one goes under it, A moves down, and C's goes.
         let tiles = [
             ArrangedTile {
                 cell: Cell::new(0, 0, 12, 6),
@@ -390,7 +365,6 @@ mod tests {
             "a tile left out takes its camera"
         );
 
-        // A layout puts the tiles back in its order, each keeping its camera.
         views.set_layout(&id, Layout::Nine).unwrap();
         assert_eq!(views.get(&id).unwrap().layout(), Some(Layout::Nine));
     }
@@ -479,7 +453,6 @@ mod tests {
             view.tiles[index].as_ref().and_then(|tile| tile.fit)
         };
 
-        // An empty tile has no picture to fit, and a tile the view doesn't show isn't on screen.
         assert!(matches!(
             views.set_tile_fit(&id, 0, Fit::Fill),
             Err(StoreError::Invalid(_))

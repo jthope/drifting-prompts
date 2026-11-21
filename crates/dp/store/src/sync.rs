@@ -1,13 +1,5 @@
-//! Taking a lock that a panicking thread left poisoned.
-//!
-//! Rust marks a `Mutex` as poisoned when a thread panics while holding it, and `lock` returns an
-//! error from then on. What the apps guard is a value that is replaced whole, a list, or a
-//! recorder that checks its own state, so what a poisoned lock holds is still usable. Refusing it
-//! would be worse: a frozen picture, a status that never changes again, a save that never happens.
-//! Every lock in the suite goes through [`LockExt`], so they all recover the same way.
-//!
-//! In C# terms, [`LockExt`] is an extension method on `Mutex<T>`: bring the trait into scope with
-//! `use dp_store::sync::LockExt;` and every `Mutex` has `locked()`.
+//! Taking a lock that a panicking thread left poisoned: what the suite's locks guard stays
+//! usable, and refusing it would freeze the app.
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -16,8 +8,7 @@ pub trait LockExt<T> {
     /// Takes the lock, even if a thread panicked holding it.
     fn locked(&self) -> MutexGuard<'_, T>;
 
-    /// The value, for whoever has the `Mutex` to itself, so no lock is needed; even if a thread
-    /// panicked holding it.
+    /// The value, without locking, for whoever has the `Mutex` to itself; even if poisoned.
     fn locked_mut(&mut self) -> &mut T;
 }
 

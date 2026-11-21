@@ -1,16 +1,5 @@
-# This file is an ancestor of every crate in the repo, so every cargo run inside the repository
-# reads it, nsh's builds included.
-
-# A 1080p H.265 camera at 30 fps needs optimized decoding even in a debug build. Unoptimized,
-# rust_h265 and glass2glass's color conversion manage about 20 fps, and the picture falls further
-# and further behind the camera; rust_h264 does the same work for H.264. Only these three are
-# optimized.
-#
-# They are here rather than in a Cargo.toml because cargo reads profiles only from the root of the
-# workspace it builds. `nsh run` and `nsh test` build through a workspace nsh generates
-# (`crates/ipcamera/app/.nsh/rust`), which takes our crate in as a dependency and so never sees
-# `crates/ipcamera/app/Cargo.toml`'s profiles. A profile here applies to both workspaces, and wins over
-# one in a Cargo.toml.
+# Decoding falls behind a 1080p camera unoptimized, even in a debug build.
+# Here, not in a Cargo.toml: nsh builds through a workspace of its own, which reads only this.
 [profile.dev.package.rust_h264]
 opt-level = 3
 [profile.dev.package.rust_h265]
@@ -18,11 +7,8 @@ opt-level = 3
 [profile.dev.package.g2g-plugins]
 opt-level = 3
 
-# Full debug info only for the suite's own crates. Every other crate keeps line tables, so a
-# panic's backtrace still says where it happened, but loses its variables and types: those made
-# each debug build's PDB more than a gigabyte and the apps' `target` folders tens of gigabytes. Our
-# crates are named one by one because nsh's generated workspace takes in even the app's own crate
-# as a dependency, which `"*"` would catch; cargo says nothing of a name a build doesn't have.
+# Full debug info only for the suite's own crates: everyone's made each PDB pass a gigabyte.
+# Named one by one, since nsh's workspace takes the app in as a dependency, which `"*"` would catch.
 [profile.dev.package."*"]
 debug = "line-tables-only"
 [profile.dev.package.nsh-app-ipcamera]
@@ -46,19 +32,12 @@ debug = true
 [profile.dev.package.mdviewer-core]
 debug = true
 
-# Links with Rust's own linker, lld, which every Rust toolchain ships (`rust-lld.exe`), rather than
-# the MSVC build tools' `link.exe`: it links the desktop app's large debug build in a fraction of
-# the time. It still uses the Windows SDK's and MSVC's libraries, which rustc finds as before.
+# rust-lld links the app's debug build far faster than MSVC's `link.exe`.
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
 
-# Each product's commands by its name: `cargo ipcamera` and `cargo mdviewer` run its desktop app
-# (`nsh run`), `cargo package-ipcamera` and `cargo package-mdviewer` package it, `cargo
-# ipcamera-web` runs IP Camera's server and web build together, `cargo package-ipcamera-web`
-# packages the web build, and `cargo screenshots` takes the READMEs' screenshots of both apps
-# (`crates/xtask`). Run them at the repository's root, since an alias names a
-# package of the workspace it's run in, and the apps' have no `xtask`. `cargo package` is cargo's
-# own, which an alias can't replace.
+# Run these at the repository's root: an alias names a package of the workspace it runs in.
+# `cargo package` is cargo's own, which an alias can't replace.
 [alias]
 ipcamera = "run -p xtask -- ipcamera"
 ipcamera-web = "run -p xtask -- ipcamera-web"

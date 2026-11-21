@@ -9,10 +9,9 @@ description = "Markdown Viewer's projects and settings, the Markdown files in a 
 [lints]
 workspace = true
 
-# Plain data and files: no UI and no nsh, so `cargo test -p mdviewer-core` runs anywhere, in
-# milliseconds.
+# Plain data and files: no UI and no nsh.
 [dependencies]
-# `settings.json` and `projects.json` are saved through the suite's store.
+# Saves `settings.json` and `projects.json`.
 dp-store.workspace = true
 pulldown-cmark.workspace = true
 regex.workspace = true

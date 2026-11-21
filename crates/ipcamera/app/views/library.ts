@@ -1,9 +1,3 @@
-// What the snapshots, videos and events pages share: which of their files
-// show, in what order, under which headings (and which are folded) and at what
-// size, and which are selected. Each page makes its own with `libraryOf`, so narrowing one leaves
-// the others as they were. Like `model.ts`, what it makes are module-level
-// signals, so the header's menus, the page, its selection bar and its viewer
-// share them, and coming back to the page finds them as they were left.
 import { type Accessor, computed, type Signal, signal, untracked } from "nsh";
 import type { IconName, TileSize } from "../../../dp/ui";
 import type { MenuEntries } from "./actions";
@@ -42,27 +36,21 @@ export const PERIODS: { key: Period; title: string }[] = [
   { key: "year", title: "This year" },
 ];
 
-/**
- * What a page lists: a file, known by its name, that a camera made; what it
- * is tagged with, what the camera saw as an event saved it (none for one taken
- * by hand; on the events page, what each event saw); and the event that saved
- * it, by id, where the page knows (`""` where it doesn't, or none saved it).
- */
+/** A file a page lists: its name, its camera, what an event tagged it with, and that event's id (`""` for none). */
 export type Item = { name: string; camera: string; tags: string[]; event: string };
 
 /** Which files the Tag filter keeps: every file, those taken by hand, those an event saved, or those with one tag (`vehicle`). */
 export type TagFilter = "all" | "hand" | "event" | (string & {});
 
-/** A tag the page's files have, in words, and how many have it: for the Tag menu. */
+/** A tag in words, and how many files have it. */
 export type TagCount = { key: string; title: string; count: number };
 
 /** What the Tag menu offers: how many files were taken by hand and saved by events, and each tag with its count. */
 export type TagCounts = { hand: number; event: number; each: TagCount[] };
 
-/** A tag in words: what a camera's AI told apart (`Vehicle`), or `Motion` for a camera that knows only motion. */
+/** A tag in words: `Vehicle`, or `Motion`. */
 export const tagTitle = (key: string) => (key === "motion" ? "Motion" : detectionsLabel([key]));
 
-/** Whether `item` passes the Tag filter `filter`. */
 function tagged(item: Item, filter: TagFilter): boolean {
   if (filter === "all") return true;
   if (filter === "hand") return item.tags.length === 0;
@@ -73,7 +61,7 @@ function tagged(item: Item, filter: TagFilter): boolean {
 /** A run of a page's files under one heading. `title` is `""` when the page isn't grouped. */
 export type Section<T> = { key: string; title: string; items: T[] };
 
-/** A row of a page's list: a section's heading (`section` its key; `open` while its files show under it), or one row of its pictures. */
+/** A row of a page's list: a section's heading, or one row of its pictures. */
 export type Row<T> = { kind: "heading"; key: string; section: string; title: string; count: number; open: boolean } | { kind: "tiles"; key: string; items: T[] };
 
 /** The keys held at a press, as a press's event has them. */
@@ -89,11 +77,10 @@ export type CameraCount = { id: string; name: string; count: number };
 export type Library<T extends Item> = {
   order: Signal<Order>;
   grouping: Signal<Grouping>;
-  /** The camera whose files show: `null` for every camera, `""` for those whose file doesn't say. */
+  /** `null` for every camera, `""` for files that name none. */
   cameraFilter: Signal<string | null>;
-  /** Which files show by their tags (`TagFilter`). */
   tagFilter: Signal<TagFilter>;
-  /** The event whose files show, by id: `null` for every file. An event's Show in Snapshots sets it, and a file's Show event on the events page. */
+  /** The event whose files show, by id; `null` for every file. */
   eventFilter: Signal<string | null>;
   period: Signal<Period>;
   /** Whether a filter leaves anything out. */
@@ -101,57 +88,48 @@ export type Library<T extends Item> = {
   clearFilters: () => void;
   /** The files the filters keep, in the chosen order. */
   visible: Accessor<T[]>;
-  /** The visible files under their headings. Sections keep the chosen order, by date or by camera name. */
+  /** The visible files under their headings. */
   sections: Accessor<Section<T>[]>;
-  /** The order the viewer steps through: the page's, sections and all. */
+  /** The page's order, sections and all. */
   ordered: Accessor<T[]>;
-  /** The cameras that have files, by name, each with how many: for the camera filter. */
+  /** The cameras that have files, by name, with how many. */
   cameras: Accessor<CameraCount[]>;
-  /** How many files were taken by hand and saved by events, and the tags the files have, in the order the app lists what cameras see: for the Tag filter. */
+  /** How many files were taken by hand and by events, and each tag's count. */
   tags: Accessor<TagCounts>;
-  /** When a file was made, as its tile says it: as much as its section's title doesn't. */
+  /** When a file was made, as much as its section's title doesn't say. */
   timeLabel: (item: T) => string;
   /** The dates the visible files span, then what the filters keep: "Oct 2 – Nov 7  ·  Driveway, Today". */
   summary: Accessor<string>;
-  /** How big the pictures show, or a list: the page's own until the user picks. */
+  /** How big the pictures show, or a list. */
   size: Signal<TileSize>;
-  /** The keys of the sections folded under their headings, whose files are hidden until opened again. */
+  /** The keys of the folded sections. */
   collapsed: Signal<string[]>;
-  /** Whether the section `key` is folded under its heading. */
   isCollapsed: (key: string) => boolean;
-  /** Folds the section `key` under its heading, or opens it again: its heading's chevron. */
   toggleCollapsed: (key: string) => void;
-  /** The names of the selected files. Only files the page shows stay selected (`keepShown`). */
+  /** The names of the selected files; only files the page shows stay selected. */
   selected: Signal<string[]>;
-  /** The selected files, in the page's order: what the selection's actions act on. */
+  /** The selected files, in the page's order. */
   chosen: Accessor<T[]>;
-  /** Whether the file called `name` is selected. */
   isSelected: (name: string) => boolean;
-  /** Whether any file is selected: a press of a file then selects it rather than opening it. */
+  /** Whether any file is selected: a press then selects rather than opens. */
   selecting: Accessor<boolean>;
-  /** A pick of the file called `name`, as `how` says: a range runs from the file last picked, in the page's order. */
+  /** Picks the file `name` as `how` says; a range runs from the file last picked. */
   pick: (name: string, how: Pick) => void;
-  /**
-   * A press of `item` with `keys` held: opens it (`open`) while nothing is
-   * selected and no key is held; otherwise picks it as Explorer does, a plain
-   * press adding it or taking it out.
-   */
+  /** A press of `item`: opens it while nothing is selected and no key is held, else picks it. */
   press: (item: T, keys: Keys, open: () => void) => void;
-  /** How much of the section `key` is selected. */
   sectionPicked: (key: string) => Picked;
-  /** Selects every file of the section `key`, or, when every one already is, takes them out: its heading's checkbox. */
+  /** Selects every file of section `key`, or takes them out when all are. */
   toggleSection: (key: string) => void;
-  /** Selects every file the filters keep: Control+A. */
+  /** Selects every file the filters keep. */
   selectAll: () => void;
   clearSelection: () => void;
-  /** Drops from the selection what the page no longer shows: filtered out, or deleted. The page calls it as its files change. */
+  /** Drops from the selection what the page no longer shows. */
   keepShown: () => void;
 };
 
-/** The order the app lists what a camera's AI tells apart in, by key. */
 const DETECTION_ORDER = ["person", "vehicle", "animal", "face", "package"];
 
-/** The Tag filter `filter` in words, as its chip says it; `all` as `every` says it. */
+/** The Tag filter `filter` in words; `all` as `every`. */
 export function tagFilterLabel(filter: TagFilter, every: string): string {
   if (filter === "all") return every;
   if (filter === "hand") return "Taken by hand";
@@ -165,7 +143,7 @@ export function cameraName(id: string): string {
   return cameraOf(id)?.name ?? "Deleted camera";
 }
 
-/** `1536` → `"1.5 KB"`, in the binary units Explorer uses. */
+/** `1536` → `"1.5 KB"`, in binary units. */
 export function sizeLabel(bytes: number): string {
   const units = ["bytes", "KB", "MB", "GB", "TB"];
   let size = bytes;
@@ -183,7 +161,6 @@ export const countLabel = (count: number) => count.toLocaleString();
 
 const DAY = 86_400_000;
 
-/** The earliest moment `period` keeps, in milliseconds since 1970. */
 function since(chosen: Period, now: Date): number {
   switch (chosen) {
     case "all":
@@ -199,7 +176,6 @@ function since(chosen: Period, now: Date): number {
   }
 }
 
-// In the user's locale and time zone. One of each, made once.
 const monthTitle = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
 const weekdayTitle = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
 const weekdayYearTitle = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
@@ -217,7 +193,6 @@ function dayTitle(at: Date, now: Date): string {
   return (at.getFullYear() === now.getFullYear() ? weekdayTitle : weekdayYearTitle).format(at);
 }
 
-/** "Nov 7", or "Oct 2 – Nov 7", with the years when they aren't all this one. */
 function spanLabel(times: number[]): string {
   if (times.length === 0) return "";
   const first = new Date(Math.min(...times));
@@ -226,12 +201,7 @@ function spanLabel(times: number[]): string {
   return sameDay(first, last) ? format.format(last) : `${format.format(first)} – ${format.format(last)}`;
 }
 
-/**
- * Narrowing, sorting and grouping for one page's files. `items` is every file
- * as Rust last read it, `timeOf` when a file was made, in milliseconds since
- * 1970, and `firstGrouping` and `firstSize` how the page groups and shows them
- * until the user picks.
- */
+/** Narrowing, sorting and grouping for one page's files; `timeOf` gives a file's time in milliseconds since 1970. */
 export function libraryOf<T extends Item>(items: Accessor<T[]>, timeOf: (item: T) => number, firstGrouping: Grouping, firstSize: TileSize = "medium"): Library<T> {
   const order = signal<Order>("newest");
   const grouping = signal<Grouping>(firstGrouping);
@@ -289,19 +259,16 @@ export function libraryOf<T extends Item>(items: Accessor<T[]>, timeOf: (item: T
     }
 
     const result = [...found.values()];
-    // Dates come out in order already. Cameras go by name, with the files no camera claims last.
+    // Date sections come out in order already; cameras go by name, unknown last.
     if (chosen === "camera") result.sort((a, b) => (a.key === "camera:") !== (b.key === "camera:") ? (a.key === "camera:" ? 1 : -1) : a.title.localeCompare(b.title));
     return result;
   });
 
   const ordered = computed(() => sections().flatMap((section) => section.items));
 
-  // The selection, by file name, as the Cameras page's table keeps its own (`listing.ts`).
-
   const size = signal<TileSize>(firstSize);
 
-  // Folded sections, by key: a key that no longer shows (another grouping, a filter) stays, harmless,
-  // so its section comes back folded as it was left.
+  // Keys that no longer show stay, so their sections come back folded.
   const collapsed = signal<string[]>([]);
   const collapsedKeys = computed(() => new Set(collapsed()));
   const isCollapsed = (key: string) => collapsedKeys().has(key);
@@ -309,7 +276,6 @@ export function libraryOf<T extends Item>(items: Accessor<T[]>, timeOf: (item: T
 
   const selected = signal<string[]>([]);
   const selectedNames = computed(() => new Set(selected()));
-  /** Where a Shift press runs from: the file last picked on its own or with Control. */
   let anchor: string | null = null;
 
   const chosen = computed(() => ordered().filter((item) => selectedNames().has(item.name)));
@@ -379,7 +345,6 @@ export function libraryOf<T extends Item>(items: Accessor<T[]>, timeOf: (item: T
       if (item.tags.length === 0) hand += 1;
       for (const tag of item.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
     }
-    // In the order the app lists what cameras see, motion last.
     const order = [...DETECTION_ORDER, "motion"];
     const rank = (key: string) => (order.indexOf(key) < 0 ? order.length : order.indexOf(key));
     const each = [...counts.entries()]
@@ -445,11 +410,7 @@ export function libraryOf<T extends Item>(items: Accessor<T[]>, timeOf: (item: T
   };
 }
 
-/**
- * The sections as the list's rows, `columns` pictures to a row. A section that
- * is `folded` keeps its heading and leaves its files out; one with no heading
- * (the page ungrouped) never folds, having nothing to open it again by.
- */
+/** The sections as the list's rows; an ungrouped section never folds, having no heading to open it by. */
 export function rowsOf<T extends Item>(list: Section<T>[], columns: number, folded: (key: string) => boolean = () => false): Row<T>[] {
   const rows: Row<T>[] = [];
   for (const section of list) {
@@ -476,21 +437,14 @@ export function cameraMenuEntry<T extends Item>(library: Library<T>, item: T) {
 /** What deletes a selection of `count` says: `Delete (3)`. */
 export const deleteLabel = (count: number) => `Delete (${countLabel(count)})`;
 
-/**
- * A file's menu from its right press: when it is one of several selected, what
- * can be done to them all (deleting them, with `remove`, which asks first),
- * else its own (`own`).
- */
+/** A file's menu: for one of several selected, what can be done to them all, else its own. */
 export function menuOf<T extends Item>(library: Library<T>, item: T, own: () => MenuEntries, remove: (items: T[]) => void): MenuEntries {
   const chosen = library.chosen();
   if (!library.isSelected(item.name) || chosen.length < 2) return own();
   return [{ label: `${deleteLabel(chosen.length)}…`, onSelect: () => remove(chosen) }, { type: "separator" as const }, { label: "Clear selection", onSelect: library.clearSelection }];
 }
 
-/**
- * Deletes each of `names` with `remove`, one after another, so a failure stops
- * none of the rest. Resolves with those that went, and the first failure.
- */
+/** Deletes each of `names` in turn, so a failure stops none of the rest; resolves with those gone and the first failure. */
 export async function deleteEach(names: string[], remove: (name: string) => Promise<unknown>): Promise<{ gone: string[]; failure?: unknown }> {
   const gone: string[] = [];
   let failure: unknown;

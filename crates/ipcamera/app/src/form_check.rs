@@ -1,17 +1,12 @@
-//! What stops the camera settings form being saved, and what stops changes being given to several
-//! cameras at once. Plain checks of the form's text, shared by the desktop's cameras and the web
-//! build, so both refuse the same forms and the same changes. The sentences are `ipcamera_core`'s,
-//! which the library checks the saved settings with too, so the server says the same.
+//! The camera form's checks, shared by the desktop and the web build so both refuse the same
+//! forms and changes.
 
 use ipcamera_core::{Brand, InvalidCamera, StreamPath};
 
 use crate::bridge::{CameraChanges, CameraForm, FormProblem};
 
-/// What stops the form being saved, field by field.
-///
-/// A blank number is fine, because saving gives it the default. Anything else that is not a usable
-/// number is reported here rather than quietly replaced by that default, which would save something
-/// other than what was typed.
+/// What stops the form being saved, field by field. A blank number takes the default; anything else
+/// unusable is reported rather than replaced, which would save something other than what was typed.
 pub fn problems(form: &CameraForm) -> Vec<FormProblem> {
     let mut found = Vec::new();
     let mut report = |field: &str, problem: InvalidCamera| {
@@ -56,12 +51,9 @@ pub fn problems(form: &CameraForm) -> Vec<FormProblem> {
     found
 }
 
-/// What stops `changes` being given to several cameras, field by field, with the same messages as
-/// [`problems`]. Only what the changes set is checked: what they leave out stays as each camera
-/// has it, which was checked when it was saved.
+/// What stops `changes` being given to several cameras; only what they set is checked.
 pub fn change_problems(changes: &CameraChanges) -> Vec<FormProblem> {
-    // A form with nothing wrong (blank numbers take the defaults), so every problem is a change's.
-    // A Reolink's, which an flv: path suits: each camera's own brand is checked as it is saved.
+    // A valid form, a Reolink's so an flv: path passes; each camera's brand is checked as it saves.
     let mut form = CameraForm {
         name: "Camera".into(),
         brand: "reolink".into(),
@@ -114,7 +106,6 @@ impl CameraChanges {
     }
 }
 
-/// Whether `text` is blank, or a number that `valid` accepts.
 fn blank_or<T: std::str::FromStr>(text: &str, valid: impl Fn(T) -> bool) -> bool {
     let text = text.trim();
     text.is_empty() || text.parse().is_ok_and(valid)
@@ -196,7 +187,6 @@ mod tests {
         let changes = CameraChanges {
             host: Some("  ".into()),
             dvrip_port: Some("70000".into()),
-            // A blank port takes the default, as on the form.
             rtsp_port: Some(String::new()),
             ..CameraChanges::default()
         };

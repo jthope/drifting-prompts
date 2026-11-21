@@ -1,22 +1,5 @@
-//! The events the cameras saw: `data\events\events.json`.
-//!
-//! What an event saved is a snapshot in the snapshots folder and recordings in the videos folder,
-//! where the pages list them with the rest, and the event names them ([`EventFile`],
-//! [`EventLog::link`]). The log keeps no files of its own. The camera's watch knows what it saw
-//! but not what was saved, so [`EventLog::record`] keeps an event's files as what it saw changes.
-//!
-//! The log keeps the newest [`MOST_EVENTS`]: older ones go as new ones come, and leave their
-//! files, which are the snapshots' and videos' like any others (and under their limits). Deleting
-//! an event on purpose ([`EventLog::delete`], [`EventLog::clear`]) returns it, so the program can
-//! delete its files with it.
-//!
-//! It is saved as the settings are, on [`FileStore`]: the whole file at each change, written then
-//! renamed, never over a file it could not read, and read again first when another program wrote
-//! it since. A change is an event starting, a sighting starting or ending, what it saw growing or a
-//! file linked, a few a minute at most, so writing the whole file each time costs little.
-//!
-//! The file lists events oldest first, as they came; [`EventLog::events`] gives them newest first,
-//! as the app lists them.
+//! The events the cameras saw, `data\events\events.json`, oldest first, the newest
+//! [`MOST_EVENTS`] kept. An event names the snapshots and videos it saved; the log keeps no files.
 
 use std::{collections::HashMap, path::Path};
 
@@ -28,7 +11,6 @@ use crate::{CameraEvent, CameraId, StoreError};
 /// How many events the log keeps.
 pub const MOST_EVENTS: usize = 1000;
 
-/// `events.json` as it is on disk.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 struct LogFile {
@@ -65,8 +47,7 @@ impl EventLog {
     /// The log's file inside its folder.
     pub const FILE: &'static str = "events.json";
 
-    /// Opens the log in `folder` (`data\events`). A missing file is an empty log, and nothing is
-    /// written until the first event.
+    /// Opens the log in `folder`; a missing file is an empty log.
     pub fn open(folder: &Path) -> Self {
         Self {
             file: FileStore::open(folder.join(Self::FILE)),
@@ -80,7 +61,7 @@ impl EventLog {
         }
     }
 
-    /// What went wrong opening the file, for the app to tell the user.
+    /// What went wrong opening the file.
     pub fn problem(&self) -> Option<&str> {
         self.file.problem()
     }
@@ -96,9 +77,8 @@ impl EventLog {
             .read(|file| file.events.iter().rev().cloned().collect())
     }
 
-    /// Adds `event`, or puts what it saw in the place of the one with its id, keeping the files
-    /// linked to that one: the watch that saw it never knows them. The oldest events go to make
-    /// room, and leave their files.
+    /// Adds `event`, or replaces the one with its id, keeping that one's files: the watch never
+    /// knows them. The oldest events go to make room, leaving their files.
     pub fn record(&self, event: CameraEvent) -> Result<(), StoreError> {
         self.file.update(|file| {
             match file.events.iter_mut().find(|held| held.id == event.id) {
@@ -119,8 +99,7 @@ impl EventLog {
         })
     }
 
-    /// Links `saved` to event `id`: its snapshot, or one more of its recordings. Linking one it
-    /// already has, or to an event the log no longer has, changes nothing and writes nothing.
+    /// Links `saved` to event `id`; one it has, or an event the log hasn't, writes nothing.
     pub fn link(&self, id: &str, saved: EventFile) -> Result<(), StoreError> {
         self.file.update(|file| {
             let Some(event) = file.events.iter_mut().find(|event| event.id == id) else {
@@ -138,9 +117,7 @@ impl EventLog {
         })
     }
 
-    /// Puts recording `new` in the place of `old` among event `id`'s files: the same video,
-    /// renamed as it closed to carry the tags of everything its camera saw while it recorded.
-    /// Changes nothing when the log no longer has the event or the event that file.
+    /// Puts recording `new` in the place of `old` among event `id`'s files.
     pub fn rename_video(&self, id: &str, old: &str, new: &str) -> Result<(), StoreError> {
         self.file.update(|file| {
             let held = file
@@ -155,8 +132,7 @@ impl EventLog {
         })
     }
 
-    /// Every file the events saved, by name, with the id of the event that saved it: for the
-    /// snapshots and videos pages' Show event.
+    /// Every file the events saved, by name, with the id of the event that saved it.
     pub fn saved_files(&self) -> HashMap<String, String> {
         self.file.read(|file| {
             file.events
@@ -170,9 +146,7 @@ impl EventLog {
         })
     }
 
-    /// Ends each event going on that `still_seen` says no camera watch is still seeing, at `at`
-    /// (milliseconds since 1970), or at its start for one left over from before the program
-    /// started, whose end it can't know.
+    /// Ends each ongoing event no watch still sees, at `at` (ms since 1970), or else at its start.
     pub fn end_unseen(
         &self,
         still_seen: impl Fn(&CameraId) -> bool,
@@ -194,8 +168,7 @@ impl EventLog {
             .read(|file| file.events.iter().any(|event| event.id == id))
     }
 
-    /// Deletes each event of `ids` that has ended, in one save, returning those deleted. One
-    /// going on stays, as [`EventLog::clear`] keeps it; an id the log doesn't have is passed over.
+    /// Deletes each event of `ids` that has ended, in one save, returning those deleted.
     pub fn delete(&self, ids: &[String]) -> Result<Vec<CameraEvent>, StoreError> {
         self.file.update(|file| {
             let (gone, kept) = std::mem::take(&mut file.events)
@@ -206,8 +179,7 @@ impl EventLog {
         })
     }
 
-    /// Deletes every event that has ended, returning them. One going on stays: its camera's watch
-    /// would only log it again at its next change.
+    /// Deletes every ended event, returning them; a watch would only log an ongoing one again.
     pub fn clear(&self) -> Result<Vec<CameraEvent>, StoreError> {
         self.file.update(|file| {
             let (ongoing, ended) = std::mem::take(&mut file.events)
@@ -285,7 +257,6 @@ mod tests {
             log.event("1-a").unwrap().videos,
             ["video-1-a.vehicle.animal.mp4", "video-9-a.animal.mp4"]
         );
-        // Another event's file, or one the event never had, changes nothing.
         log.rename_video("2-b", "video-9-a.animal.mp4", "x.mp4")
             .unwrap();
         log.rename_video("1-a", "gone.mp4", "x.mp4").unwrap();
@@ -324,7 +295,6 @@ mod tests {
             "a file it has, or an event it hasn't, writes nothing"
         );
 
-        // The watch sends what it saw, which knows nothing of the files.
         let mut again = event(1, "a");
         again.sightings = 2;
         again.detected.push(Detection::Vehicle);
@@ -357,7 +327,6 @@ mod tests {
         assert!(log.events()[0].ongoing(), "b is still seen");
         assert_eq!(log.events()[1].ended, Some(30), "a is not");
 
-        // One left from before the program started ends where it started.
         log.end_unseen(|_| false, None).unwrap();
         assert_eq!(log.events()[0].ended, Some(20));
     }

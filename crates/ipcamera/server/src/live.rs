@@ -1,25 +1,7 @@
-//! One viewer's WebSocket: a camera's video, as `GET /live/<id>` sends it, or, with
-//! `?stream=<key>`, the stream a tile plays in place of the camera's own (a
-//! `ipcamera_core::TileStream` key: `main`, `sub` or a path, escaped; `own` is the camera's own).
+//! One viewer's WebSocket: JSON `config` and `status` messages, and each picture as binary.
 //!
-//! The player page (`player/player.js`) reads it. The server sends, and expects nothing back but
-//! the close:
-//!
-//! - **Text, JSON**, with a `type`:
-//!   - `{"type":"config","codec":"avc1.4D401F","width":1280,"height":720}` comes before the first
-//!     picture, and again whenever the stream's codec or size changes. `codec` is the WebCodecs
-//!     codec string, and the size is left out when the stream doesn't declare it.
-//!   - `{"type":"status","state":"connecting"}` comes at once, and again whenever the camera's
-//!     session changes: `connecting`, `live`, `reconnecting` (with `attempt`, from 1), `stopped`,
-//!     or `failed` (with `reason`, a sentence for the viewer).
-//! - **Binary**: one picture each, as the camera compressed it. Byte 0 holds flags, of which bit 0
-//!   says it is a keyframe; bytes 1 to 8 are its timestamp in microseconds, big-endian; the rest is
-//!   the access unit in Annex-B form. A keyframe carries the parameter sets ahead of it.
-//!
-//! A viewer gets the pictures from the last keyframe on, so the picture appears at once, and one
-//! that falls behind skips to the next keyframe rather than queuing (`ipcamera_media::Viewer`).
-//! When the camera's settings change, or it is deleted, the server closes the socket, and the
-//! player connects again to the camera as it is now.
+//! A picture is a flags byte (bit 0: keyframe), its timestamp in microseconds as 8 big-endian
+//! bytes, then the access unit in Annex-B form.
 
 use std::{sync::Arc, time::Duration};
 
@@ -37,13 +19,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Server, streams::Streams};
 
-/// How often a viewer is told about a change in the camera's session.
 const STATUS_EVERY: Duration = Duration::from_millis(250);
 
-/// Bit 0 of a picture's first byte: it decodes on its own.
 const KEYFRAME: u8 = 1;
 
-/// The JSON a viewer is sent.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Text<'a> {
@@ -70,15 +49,12 @@ impl Text<'_> {
     }
 }
 
-/// What `GET /live/<id>` may ask besides the camera.
 #[derive(Deserialize)]
 pub(crate) struct LiveQuery {
-    /// The stream a tile picks in place of the camera's own; none, or blank, for its own.
     #[serde(default)]
     stream: String,
 }
 
-/// `GET /live/<id>`: the camera's video, once the request has become a WebSocket.
 pub(crate) async fn live(
     State(server): State<Server>,
     Path(id): Path<String>,
@@ -93,8 +69,6 @@ pub(crate) async fn live(
     upgrade.on_upgrade(move |socket| watch(socket, streams, camera, picked))
 }
 
-/// Sends the video of `camera` on `picked` (its own for `None`) and its session's changes down
-/// `socket` until the viewer goes.
 async fn watch(
     mut socket: WebSocket,
     streams: Arc<Streams>,
@@ -123,8 +97,7 @@ async fn watch(
                 None => break,
             },
             _ = tick.tick() => {
-                // The camera's settings changed, or it was deleted: closing makes the player
-                // reconnect, and so watch it as it is now.
+                // The camera changed or went: the player reconnects to it as it is now.
                 if !streams.current(&key, &stream) {
                     break;
                 }

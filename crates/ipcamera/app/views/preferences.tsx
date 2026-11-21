@@ -1,13 +1,3 @@
-// Settings, in a dialog over the window (`SettingsDialog`, which every product
-// shares), whatever page shows behind it: its sections down the left, General,
-// where the app saves snapshots and videos, Automation, what it does by itself
-// (the desktop's alone), and Appearance, light, dark or as the system is, the
-// texture and elevation over every theme, and a dark theme and a light one
-// (`appearanceSection`, every product's), the chosen one's settings beside
-// them. Settings are rows in cards, as the system's own Settings and nsh's gallery
-// lay them out, and each is saved as it changes. The sidebar's Settings row,
-// the dashboard's disk and the status bar's drive and media limit open it; the
-// cameras keep their own settings dialog.
 import { signal, Text, View } from "nsh";
 import { Automation, Server, Storage, type StorageFolder } from "ipcamera/native";
 import {
@@ -26,16 +16,13 @@ import { failed } from "./actions";
 import { AutomationSection } from "./automation";
 import { recording, storage } from "./model";
 
-/** A section of Settings. */
 type SettingsPart = "general" | "automation" | "appearance";
 
-/** Whether Settings shows. */
 const settingsOpen = signal(false);
 
-/** The section shown. It outlives the dialog, so opening Settings again finds the section it was left on. */
 const section = signal<SettingsPart>("general");
 
-/** Opens Settings over the page, on the section `which` (as the status bar's drive and media limit do), else on the one it was left on. */
+/** Opens Settings on section `which`, else on the one it was left on. */
 export function showSettings(which?: SettingsPart) {
   if (which) section.set(which);
   settingsOpen.set(true);
@@ -52,19 +39,11 @@ function readFolder(kind: FolderKind): StorageFolder | undefined {
   }
 }
 
-/** Cascadia Mono, then Consolas where it is missing. */
 const MONO = "Cascadia Mono, Consolas, monospace";
 
-/**
- * Where one kind of file is saved, and the buttons that change it: the
- * system's folder dialog, the folder in Explorer, and back to the default.
- * The videos' folder stays put while a camera records, as Rust insists too.
- * On the web the folder is the server's, which a browser can neither open nor
- * choose, so it shows without the buttons.
- */
+/** Where one kind of file is saved; the videos' folder can't change while a camera records, as Rust insists too. */
 function FolderRow(props: { kind: FolderKind; title: string; icon: IconName; help: string; first?: boolean }) {
   const folder = signal(readFolder(props.kind));
-  /** While the dialog is open, so a second press doesn't open another. */
   const choosing = signal(false);
   const locked = () => props.kind === "videos" && recording();
   const custom = () => folder()?.isDefault === false;
@@ -89,11 +68,7 @@ function FolderRow(props: { kind: FolderKind; title: string; icon: IconName; hel
     }
   };
   const open = () => {
-    try {
-      Storage.open(props.kind);
-    } catch (error) {
-      failed(error);
-    }
+    Storage.open(props.kind).catch(failed);
   };
 
   return (
@@ -124,7 +99,6 @@ function FolderRow(props: { kind: FolderKind; title: string; icon: IconName; hel
   );
 }
 
-/** General: where new snapshots and videos are saved, and on a server with a password, signing out. */
 function GeneralSection() {
   return (
     <Appear>
@@ -133,7 +107,6 @@ function GeneralSection() {
           <FolderRow first kind="snapshots" title="Snapshots" icon="images" help="The camera button above a live picture saves one here." />
           <FolderRow kind="videos" title="Videos" icon="film" help="The record button saves each camera's recording here, with its thumbnail in a folder inside." />
         </SettingsGroup>
-        {/* Only where someone signed in: a server with a password, on the web. */}
         <If when={Server.signedIn()}>
           <SettingsGroup title="Server" description="This server asks for its password, which ipcamera-server --set-password sets.">
             <SettingRow
@@ -141,7 +114,6 @@ function GeneralSection() {
               icon="monitor"
               label="Signed in"
               detail="Signing out ends this page's session. The server asks for its password again."
-              // Signed out, the sign-in page takes the window, and Settings closes over it.
               control={
                 <Button
                   label="Sign out"
@@ -160,7 +132,6 @@ function GeneralSection() {
   );
 }
 
-/** The sections, with Automation only where the app does anything by itself: the desktop. */
 function sections(appearance: KeptAppearance): SettingsSection<SettingsPart>[] {
   const automation: SettingsSection<SettingsPart>[] = Automation.available()
     ? [{ value: "automation", title: "Automation", icon: "bell", content: () => <AutomationSection /> }]
@@ -168,11 +139,7 @@ function sections(appearance: KeptAppearance): SettingsSection<SettingsPart>[] {
   return [{ value: "general", title: "General", icon: "settings", content: () => <GeneralSection /> }, ...automation, appearanceSection(appearance)];
 }
 
-/**
- * Settings, in its dialog over the window, which `App.tsx` places once.
- * `appearance` is the app's (`keepAppearance`'s), which the Appearance section
- * shows and changes, saving it with the other preferences.
- */
+/** Settings, in its dialog over the window; `appearance` is the app's, which its Appearance section changes. */
 export function AppSettings(props: { appearance: KeptAppearance }) {
   const all = sections(props.appearance);
   return <SettingsDialog open={settingsOpen()} onClose={() => settingsOpen.set(false)} sections={all} value={section()} onChange={(next) => section.set(next)} />;

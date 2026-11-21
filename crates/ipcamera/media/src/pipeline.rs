@@ -1,44 +1,7 @@
-//! What a camera sends, and the glass2glass graph that plays it.
+//! What a camera sends, from its answer to DESCRIBE, and the glass2glass graph that plays it.
 //!
-//! A session first asks the camera what it offers (an RTSP DESCRIBE, through retina), then builds
-//! a graph for exactly that. As a glass2glass launch line, the graph is
-//!
-//! ```text
-//! rtspsrcn ! h264parse ! record tap ! size tap ! decode gate ! <decoder> ! videoconvert ! (BGRA) slot sink
-//!          ! aacparse ! record tap ! aacdec ! audioconvert ! audioresample ! volume ! <audio sink>
-//! ```
-//!
-//! where the taps, the gate and the slot sink are this crate's own. The size tap ([`crate::sink`])
-//! notes the picture size the stream declares, which the sink crops the decoded picture to. The
-//! record taps ([`crate::record`]) pass everything on, copying the compressed stream into a file
-//! while the camera records. The decode gate ([`crate::gate`]) hands the decoder nothing while no
-//! tile shows the camera, and catches it up from the last keyframe when one does again.
-//!
-//! A relaying session ([`crate::relay`]) builds the short graph instead, with no decoder and no
-//! sound device. It records as a live view does, so it keeps an AAC camera's sound for its
-//! recordings and drops it after the record tap:
-//!
-//! ```text
-//! rtspsrcn ! h264parse ! record tap ! feed sink
-//!          ! aacparse  ! record tap ! discard
-//! ```
-//!
-//! The decoders are this crate's own, in Rust, on every platform: [`crate::avc`] for H.264 and
-//! [`crate::hevc`] for H.265, which gets `h265parse`. G.711 audio gets `alawdec` or `mulawdec`, and
-//! there is no audio branch at all when the camera sends no sound. The audio sink is each
-//! platform's own: WASAPI on Windows, ALSA on Linux.
-//!
-//! A Reolink's FLV stream ([`crate::flv`]) starts the same graphs another way: its source hands
-//! the stream's bytes to an `flvdemux` for the video and another for the sound, which leave as
-//! `rtspsrcn`'s two outputs do, so everything after them is the same.
-//!
-//! ```text
-//! flvsrc ! flvdemux stream=h264 ! h264parse ! ...
-//!        ! flvdemux stream=aac  ! aacparse  ! ...
-//! ```
-//!
-//! The graph is built in code rather than parsed from a launch line, so the password goes straight
-//! into the RTSP source and never sits in a string that could end up in a log.
+//! The graph is built in code, not parsed from a launch line, so the password never sits in a
+//! string that could end up in a log.
 
 use std::sync::{Arc, Mutex, atomic::AtomicBool};
 
@@ -76,47 +39,36 @@ use crate::{
     sink::{DisplaySize, SizeTap, SlotSink},
 };
 
-/// What the camera says it is, in its RTSP requests.
 pub(crate) const USER_AGENT: &str = "IPCamera";
 
-/// The name of the `volume` element, so a running graph's gain can be changed.
 pub(crate) const VOLUME: &str = "volume";
 
-/// A stream that delivers nothing for this long counts as lost, so it reconnects instead of
-/// showing the last picture forever.
+/// Without it a stalled stream would show its last picture forever.
 const STALL_TIMEOUT_MS: u64 = 10_000;
 
-/// The rate and layout every camera's sound is converted to before the sink.
 const OUTPUT_RATE: u32 = 48_000;
 const OUTPUT_CHANNELS: u8 = 2;
 
-/// Where a session's stream comes from.
 pub(crate) enum Source {
-    /// An RTSP address, with no login in it: the RTSP source logs in itself.
+    /// With no login in it: the RTSP source logs in itself.
     Rtsp(String),
-    /// A Reolink's FLV stream, already answering.
     Flv(FlvAnswer),
 }
 
-/// The tracks a camera offers that this app plays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Offer {
     pub(crate) video: VideoCodec,
     pub(crate) audio: Option<AudioCodec>,
 }
 
-/// The camera sound formats this app plays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AudioCodec {
     Aac,
-    /// G.711 A-law, RTP `PCMA`.
     Alaw,
-    /// G.711 µ-law, RTP `PCMU`.
     Mulaw,
 }
 
 impl AudioCodec {
-    /// The `audio-format` nick `rtspsrcn` takes.
     fn nick(self) -> &'static str {
         match self {
             Self::Aac => "aac",
@@ -126,7 +78,6 @@ impl AudioCodec {
     }
 }
 
-/// The login `rtspsrcn` and retina send, if the camera has a user name.
 pub(crate) fn credentials(camera: &CameraConfig) -> Option<Credentials> {
     let user = camera.user.trim();
     (!user.is_empty()).then(|| Credentials {
@@ -135,11 +86,7 @@ pub(crate) fn credentials(camera: &CameraConfig) -> Option<Credentials> {
     })
 }
 
-/// Asks the camera at `url` what it sends.
-///
-/// This is the one request whose answer tells a rejected password apart from every other failure,
-/// which glass2glass reports as the same connect error. A 401 becomes
-/// [`MediaError::LoginRejected`].
+/// The one request that tells a rejected login apart: glass2glass reports every failure alike.
 pub(crate) async fn describe(url: &str, camera: &CameraConfig) -> Result<Offer> {
     let parsed =
         Url::parse(url).map_err(|error| failed!("the camera address is not valid: {error}"))?;
@@ -178,8 +125,6 @@ pub(crate) async fn describe(url: &str, camera: &CameraConfig) -> Result<Offer> 
     Ok(Offer { video, audio })
 }
 
-/// The RTSP source for `camera` at `url`, with `outputs` tracks: the video, then the sound when
-/// there are two.
 fn rtsp_source(url: &str, camera: &CameraConfig, outputs: u8) -> Result<RtspSrcN> {
     let mut source = RtspSrcN::new(url)
         .with_user_agent(USER_AGENT)
@@ -203,9 +148,6 @@ fn rtsp_source(url: &str, camera: &CameraConfig, outputs: u8) -> Result<RtspSrcN
     Ok(source)
 }
 
-/// Adds `source` to `graph`, taking its sound too when `audio` names it, and returns the pads its
-/// video and its sound leave on: an RTSP source's own outputs, or for an FLV stream the `flvdemux`
-/// behind each of its outputs.
 fn add_source(
     graph: &mut Graph<GraphNode>,
     source: Source,
@@ -255,8 +197,6 @@ fn add_source(
     }
 }
 
-/// The graph that plays `offer` from `source`: pictures into `visibility`'s slot while it is
-/// shown, sound at `gain`, and both into `recorder` while it records.
 pub(crate) fn build(
     source: Source,
     camera: &CameraConfig,
@@ -342,8 +282,6 @@ pub(crate) fn build(
     Ok(graph)
 }
 
-/// The decoder for `codec`, this crate's own in Rust for either. A live view and a still
-/// ([`crate::still`]) decode with the same one.
 pub(crate) fn video_decoder(codec: VideoCodec) -> GraphNode {
     match codec {
         VideoCodec::H265 => GraphNodeRef::element(HevcDec::new()),
@@ -351,9 +289,7 @@ pub(crate) fn video_decoder(codec: VideoCodec) -> GraphNode {
     }
 }
 
-/// The graph that relays the video of `offer` from `source` to `feed`, compressed as the camera
-/// sent it, and into `recorder` while it records, with the sound when `offer` has AAC. It decodes
-/// nothing and needs no sound device, so it runs on a machine with no screen or speakers.
+/// Decodes nothing and needs no sound device.
 pub(crate) fn build_relay(
     source: Source,
     camera: &CameraConfig,
@@ -402,7 +338,6 @@ mod platform {
 
     use crate::error::Result;
 
-    /// The default playback device, through WASAPI.
     pub(super) fn audio_sink() -> Result<GraphNode> {
         Ok(GraphNodeRef::element(WasapiSink::new()))
     }
@@ -415,7 +350,6 @@ mod platform {
 
     use crate::error::Result;
 
-    /// The default ALSA device.
     pub(super) fn audio_sink() -> Result<GraphNode> {
         Ok(GraphNodeRef::element(AlsaSink::new()))
     }

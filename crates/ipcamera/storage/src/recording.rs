@@ -1,13 +1,5 @@
-//! Recordings: naming each file as it starts, its thumbnail, finding the ones saved, and renaming
-//! an event's once it closes to carry everything its camera saw ([`retag`]).
-//!
-//! How a recording is named, found and listed it shares with a snapshot, in `saved_file`:
-//! `video-1762560000-<camera id>.mp4`, and its thumbnail too, in `thumbnail`. What is its own is
-//! that its name is taken as it is chosen ([`file_for`]), so two programs recording into one folder
-//! never write the same file;
-//! that the thumbnail is of its first picture, written as the recording starts, so a page can show
-//! the files without decoding any video; and its length, which comes from its name and when the
-//! file was last written, so listing reads no file's contents either.
+//! Recordings: naming each file as it starts, its thumbnail, listing them, and retagging an
+//! event's once it closes.
 
 use std::{
     fs::{self, OpenOptions},
@@ -24,7 +16,6 @@ use crate::{
     thumbnail,
 };
 
-/// How long a thumbnail waits for the recording's first picture.
 const PICTURE_WITHIN: Duration = Duration::from_secs(5);
 
 /// A recording in the folder.
@@ -38,12 +29,11 @@ pub struct Saved {
     pub thumbnail: Option<PathBuf>,
     /// The id of the camera that made it; `None` when the name doesn't say.
     pub camera: Option<String>,
-    /// What the camera saw as an event's sighting started it, from its name; empty for one the
-    /// user started.
+    /// What the camera saw, for one an event started; empty for one the user started.
     pub tags: Vec<String>,
-    /// When it started, in milliseconds since 1970: from its name, else when the file was made.
+    /// When it started, in ms since 1970: from its name, else when the file was made.
     pub started_ms: u64,
-    /// When the file was last written, in milliseconds since 1970: where a recording ends.
+    /// When the file was last written, in ms since 1970: where a recording ends.
     pub written_ms: u64,
     /// Its size on disk.
     pub bytes: u64,
@@ -56,19 +46,10 @@ impl Saved {
     }
 }
 
-/// A new file for a recording `camera` starts at `stamp`, in seconds, tagged with `tags`: what the
-/// camera saw, for a recording an event started; none for one the user did. A second recording in
-/// the same second, as a quick reconnect can start, takes the next second, so no file is written
-/// over.
-///
-/// The name is taken by making the file, empty, in one step that fails when it is already there,
-/// rather than by looking and then making it: the desktop app and the server can record the same
-/// camera into the same folder, and between a look and the making the other could take the name,
-/// and the later of the two would empty the other's recording. The recorder then opens the file
-/// this made. When the file can't be made for any other reason, such as a folder that can't be
-/// written, the name comes back anyway, and the recorder says why when it opens it.
+/// A new, empty file for a recording, made in one step so the app and the server recording into
+/// one folder never take the same name; a second already taken moves on to the next.
 pub fn file_for(folder: &Path, stamp: u64, camera: &str, tags: &[&str]) -> PathBuf {
-    // The recorder makes the folder as well; it has to be there for the name to be taken in it.
+    // The folder must exist for the name to be taken in it.
     let _ = fs::create_dir_all(folder);
     let mut stamp = stamp;
     loop {
@@ -81,14 +62,13 @@ pub fn file_for(folder: &Path, stamp: u64, camera: &str, tags: &[&str]) -> PathB
     }
 }
 
-/// Writes the recording's thumbnail from the next picture in `frames`, on a thread of its own, so
-/// the media thread that asks is never held up. Nothing is written if no picture comes.
+/// Writes the recording's thumbnail from the next picture in `frames`, on a thread of its own.
 pub fn write_thumbnail_soon(video: PathBuf, frames: FrameSlot) {
     let produced = frames.produced();
     let _ = std::thread::Builder::new()
         .name("ipcamera-thumbnail".into())
         .spawn(move || {
-            // The picture the recording starts on is still being decoded: wait for it.
+            // The picture the recording starts on is still being decoded.
             let deadline = Instant::now() + PICTURE_WITHIN;
             while frames.produced() == produced && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(20));
@@ -99,7 +79,7 @@ pub fn write_thumbnail_soon(video: PathBuf, frames: FrameSlot) {
         });
 }
 
-/// Every recording in `folder`, newest first. A folder that isn't there yet has none.
+/// Every recording in `folder`, newest first.
 pub fn list(folder: &Path) -> Vec<Saved> {
     let mut found: Vec<Saved> = VIDEO
         .entries(folder)
@@ -109,7 +89,6 @@ pub fn list(folder: &Path) -> Vec<Saved> {
             Saved {
                 thumbnail: thumbnail::existing(&entry.path),
                 bytes: entry.metadata.len(),
-                // One put in the folder by hand starts when the file was made.
                 started_ms: entry.stamp_ms.unwrap_or_else(|| {
                     saved_file::unix_ms(entry.metadata.created()).min(written_ms)
                 }),
@@ -137,10 +116,7 @@ pub fn revision(folder: &Path) -> u64 {
     )
 }
 
-/// Renames the recording at `video` to carry `tags` in place of those it has, its thumbnail with
-/// it, returning where it is now: an event's video, once closed, takes the tags of everything its
-/// camera saw while it recorded. Its time and camera stay. A name that already carries them is
-/// left as it is; a file of another kind's name, or a name another file has, is refused.
+/// Renames the recording to carry `tags` in place of its own, its thumbnail with it.
 pub fn retag(video: &Path, tags: &[&str]) -> Result<PathBuf> {
     let name = video
         .file_name()
@@ -204,7 +180,6 @@ mod tests {
             0,
             "the name is taken with an empty file, for the recorder to open"
         );
-        // Nothing has written to the first yet, as when two programs ask in the same second.
         assert_eq!(
             file_for(folder.path(), 100, "3f2a-9c", &[]),
             folder.path().join("video-101-3f2a-9c.mp4"),
@@ -278,7 +253,6 @@ mod tests {
         let one = revision(folder.path());
         assert_eq!(revision(folder.path()), one, "nothing changed");
 
-        // A recording grows while it is written.
         std::fs::write(&video, "one and more").unwrap();
         let grown = revision(folder.path());
         assert_ne!(grown, one);
@@ -325,9 +299,7 @@ mod tests {
         );
         assert!(thumbnail::existing(&video).is_none());
 
-        // Tags it already has leave it as it is.
         assert_eq!(retag(&renamed, &["vehicle", "animal"]).unwrap(), renamed);
-        // Neither another kind's file nor a name another file has.
         let other = folder.path().join("notes.txt");
         std::fs::write(&other, "keep").unwrap();
         assert!(retag(&other, &["person"]).is_err());

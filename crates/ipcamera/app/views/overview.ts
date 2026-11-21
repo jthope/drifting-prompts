@@ -1,11 +1,3 @@
-// What the dashboard shows: totals over the cameras, the snapshots and the
-// videos, what was saved day by day, the space each camera's files take, how
-// full the drives under the two folders are, and when the cameras saw
-// something, by weekday and hour. The files are the lists the snapshots and
-// videos pages keep (`snapshots.ts`, `recordings.ts`), read again whenever a
-// folder changes, and the events the log `eventlog.ts` follows; the sums here
-// are plain functions of them, so the tests can hand them made-up files and
-// events.
 import { computed, signal } from "nsh";
 import { type CameraState, type DriveSpace, type EventInfo, type SnapshotInfo, Storage, type VideoInfo } from "ipcamera/native";
 import { events } from "./eventlog";
@@ -22,7 +14,7 @@ export const PERIODS = [
 
 export type PeriodKey = (typeof PERIODS)[number]["value"];
 
-/** The period shown. It outlives the page, so coming back finds the one that was left. */
+/** The period shown. */
 export const period = signal<PeriodKey>("14");
 
 /** How many days the period covers. */
@@ -64,17 +56,12 @@ export const ready = () => snapshotsLoaded() && videosLoaded();
 /** One day of the activity chart: when it starts (local midnight, in milliseconds since 1970) and what was saved in it. */
 export type Day = { start: number; videos: number; snapshots: number; seconds: number };
 
-/** Local midnight before `at`. */
 function dayStart(at: number): number {
   const date = new Date(at);
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
-/**
- * The last `count` days by the local calendar, today last, each with the
- * videos started and the snapshots taken that day. Days come from the
- * calendar, not 24-hour steps, so a change of clocks never splits or skips one.
- */
+/** The last `count` local calendar days, today last, with what was saved each; calendar days, so a clock change never splits one. */
 export function daysOf(shots: SnapshotInfo[], clips: VideoInfo[], count: number, now = Date.now()): Day[] {
   const today = new Date(dayStart(now));
   const days: Day[] = [];
@@ -96,7 +83,7 @@ export function daysOf(shots: SnapshotInfo[], clips: VideoInfo[], count: number,
   return days;
 }
 
-/** The time the days are counted back from. The dashboard moves it on once a minute while it shows, so midnight moves the chart on. */
+/** The time the days are counted back from. */
 export const now = signal(Date.now());
 
 /** The days of the period shown. */
@@ -105,12 +92,7 @@ export const days = computed(() => daysOf(snapshots(), videos(), periodDays(), n
 /** One hour of one weekday (0 for Sunday, as `Date.getDay` counts) and the events that started in it over the period. */
 export type HourCell = { weekday: number; hour: number; events: number };
 
-/**
- * Every hour of every weekday, Sunday's first and midnight first in each, with
- * the events that started in it over the last `count` days by the local
- * calendar, today included. Over two weeks or more, each weekday adds up its
- * days, so the cells say when in the week the cameras see most.
- */
+/** Every hour of every weekday, Sunday and midnight first, with the events that started in it over the last `count` days. */
 export function eventHours(list: EventInfo[], count: number, now = Date.now()): HourCell[] {
   const today = new Date(dayStart(now));
   const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (count - 1)).getTime();
@@ -144,7 +126,7 @@ export const hourTotals = computed(() => hoursOf(hourCells()));
 
 const shortWhen = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-/** How long ago `at` was, as a list of what happened lately says it: `Just now`, `12 min ago`, `5 h ago`, then the date and time. */
+/** How long ago `at` was: `Just now`, `12 min ago`, `5 h ago`, then the date and time. */
 export function agoLabel(at: number, now: number): string {
   const minutes = Math.floor((now - at) / 60_000);
   if (minutes < 1) return "Just now";
@@ -195,7 +177,6 @@ export function drivesOf(videoSpace: DriveSpace, snapshotSpace: DriveSpace, sums
   ];
 }
 
-/** What the system said of the drives, or why it couldn't say. */
 const space = signal<{ videos: DriveSpace; snapshots: DriveSpace } | { problem: string } | undefined>(undefined);
 
 /** The drives under the folders, `[]` until they are known; `spaceProblem` says why they aren't. */

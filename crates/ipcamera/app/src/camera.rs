@@ -1,41 +1,6 @@
 //! The cameras: their streams, PTZ, status and settings, each found by its id.
-//!
-//! This is the work behind `bridge` on Windows. `bridge` is the only way TSX reaches it, and
-//! `video` reads frames from it, so a session belongs to its [`Camera`] rather than to whatever is
-//! showing it. A hot reload or a change of layout can therefore never drop the stream.
-//!
-//! The functions here are what `bridge` calls, each a few lines over the parts below:
-//!
-//! - `hub`: [`Hub`](hub::Hub), every camera the app holds, which of them stream, and the event log
-//!   their watches fill.
-//! - `device`: [`Camera`], one camera's settings, feed, PTZ, sound and recording.
-//! - `feed`: where a connected camera's frames come from, a media session or the test picture.
-//! - `status`, `stats`, `pattern`, `storage`, `explorer`: a stream's status and stats as text, the
-//!   test picture, the folders files are saved in, and showing a file in Explorer.
-//!
-//! The cameras come from `data\settings\cameras.json`, through `ipcamera_core`'s [`Library`], which
-//! also keeps the groups and the views (`crate::library` hands those to TSX, through
-//! [`with_library`]). The hub holds one [`Camera`] per saved camera, in the same order, and adds
-//! and removes them as the user does.
-//!
-//! Which cameras stream is decided here, from what is on screen. TSX says which streams its tiles
-//! show, which it keeps, and which one is selected ([`set_on_screen`]): a camera's own stream, or
-//! another a tile plays (`ipcamera_core::TileStream`), which is a session of its own. A tile on Auto
-//! is never sent as such: TSX has picked its stream by its size first. A stream shown
-//! or kept connects by itself when its camera has a password, unless the user disconnected the
-//! camera. One that is neither disconnects, so a dozen saved cameras don't all stream at once. A
-//! kept stream is one the window comes back to: the last view's, and the cameras opened on their
-//! own since. One no tile shows stays connected and its status current, but nothing is decoded or
-//! drawn until a tile shows it again (`MediaSession::set_shown`). Only the selected tile's stream
-//! is heard.
-//!
-//! A camera that records stays connected when it leaves the screen, so looking at another view or
-//! at the videos doesn't end a recording. Only stopping the recording, or Disconnect, does. A
-//! recording is of the camera's own stream, which connects for it when the tiles show only another.
-//!
-//! The rule for the locks: nothing slow runs while `inner`, `frames` or the hub's lists are held,
-//! because the window reads them while it draws. Starting and stopping a pipeline wait on another
-//! thread, so those take `transition` instead, which only other transitions wait for.
+//! Nothing slow runs while `inner`, `frames` or the hub's lists are held, since the window reads
+//! them as it draws; starting and stopping a pipeline take `transition` instead.
 
 mod device;
 mod explorer;
@@ -109,8 +74,7 @@ pub fn ready(id: &str) -> Result<bool, String> {
     Ok(find(id)?.ready())
 }
 
-/// Starts camera `id`'s streams on screen because the user asked, or its own when none is;
-/// nothing happens to one already running.
+/// Starts camera `id`'s streams on screen, or its own when none is, because the user asked.
 pub async fn connect(id: String) -> Result<(), String> {
     off_thread(id, |camera| {
         camera.held.store(false, Ordering::SeqCst);
@@ -119,8 +83,7 @@ pub async fn connect(id: String) -> Result<(), String> {
     .await
 }
 
-/// Stops camera `id`'s stream because the user asked. It stays stopped, on screen or not, until
-/// the user connects it again.
+/// Stops camera `id`'s stream until the user connects it again.
 pub async fn disconnect(id: String) -> Result<(), String> {
     off_thread(id, |camera| {
         camera.held.store(true, Ordering::SeqCst);
@@ -130,8 +93,7 @@ pub async fn disconnect(id: String) -> Result<(), String> {
     .await
 }
 
-/// Says which streams are on screen, which stay connected although no tile shows them, and which
-/// one is selected, then connects and disconnects them to match.
+/// Says which streams are on screen, kept and selected, then connects and disconnects to match.
 pub async fn set_on_screen(
     shown: Vec<ShownStream>,
     kept: Vec<ShownStream>,
@@ -142,7 +104,6 @@ pub async fn set_on_screen(
     off_main(|| HUB.reconcile()).await
 }
 
-/// The stream TSX names; `None` for none, as the selection is when an empty tile is selected.
 fn stream_of(shown: ShownStream) -> Option<StreamOf> {
     (!shown.camera.is_empty()).then(|| StreamOf {
         stream: ipcamera_core::TileStream::played(&shown.stream),
@@ -150,20 +111,17 @@ fn stream_of(shown: ShownStream) -> Option<StreamOf> {
     })
 }
 
-/// Saves the frame on screen of every camera in `ids` that is streaming, returning how many. The
-/// others are left out; only when none can does this say why.
+/// Saves the frame on screen of every streaming camera in `ids`, returning how many.
 pub async fn snapshot(ids: Vec<String>) -> Result<u32, String> {
     off_main(move || HUB.snapshot(&ids)).await?
 }
 
-/// Starts recording every camera in `ids` that is streaming, returning how many. The others are
-/// left out; only when none can record does this say why.
+/// Starts recording every streaming camera in `ids`, returning how many.
 pub async fn record(ids: Vec<String>) -> Result<u32, String> {
     off_main(move || HUB.record(&ids)).await?
 }
 
-/// Stops every recording, returning how many there were. A camera kept connected only to record
-/// then disconnects, if it is off screen.
+/// Stops every recording, returning how many there were.
 pub async fn stop_recording() -> Result<u32, String> {
     off_main(|| {
         let stopped = HUB
@@ -218,16 +176,13 @@ pub async fn videos() -> Result<Vec<VideoInfo>, String> {
     .await
 }
 
-/// Changes whenever a recording is added, deleted or written to, by this app or anything else.
-/// It lists the folder, which a slow drive or a network share can keep waiting, so off the main
-/// thread; `None` when the listing couldn't be read this time.
+/// Changes whenever a recording is added, deleted or written to; `None` when the listing failed.
 pub async fn videos_revision() -> Option<u64> {
     let folder = HUB.config.videos_dir();
     off_main(move || recording::revision(&folder)).await.ok()
 }
 
-/// Deletes the recording called `name` for good, off the main thread. One still being written
-/// stays.
+/// Deletes the recording called `name` for good; one still being written stays.
 pub async fn delete_video(name: String) -> Result<(), String> {
     let writing = HUB
         .all()
@@ -243,22 +198,20 @@ pub async fn delete_video(name: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// Why a recording can't be deleted yet, as the server says it too.
+/// Worded as the server's.
 const STILL_RECORDING: &str = "That video is still recording. Stop recording first.";
 
 /// Shows the recording called `name` in Explorer.
-pub fn reveal_video(name: &str) -> Result<(), String> {
-    explorer::reveal(&VIDEO, &HUB.config.videos_dir(), name)
+pub async fn reveal_video(name: &str) -> Result<(), String> {
+    explorer::reveal(&VIDEO, &HUB.config.videos_dir(), name).await
 }
 
 /// Opens the videos folder in Explorer.
-pub fn open_videos_folder() -> Result<(), String> {
-    explorer::open_folder(&HUB.config.videos_dir())
+pub async fn open_videos_folder() -> Result<(), String> {
+    explorer::open_folder(&HUB.config.videos_dir()).await
 }
 
-/// Every snapshot in the folder, newest first. Each file's header is read for its size, so this
-/// runs off the main thread. Thumbnails a snapshot lacks are made on a thread of their own, and
-/// change the folder's revision as they land, so the gallery reads it again.
+/// Every snapshot in the folder, newest first, making the thumbnails any lack.
 pub async fn snapshots() -> Result<Vec<SnapshotInfo>, String> {
     let folder = HUB.config.snapshots_dir();
     off_main(move || {
@@ -289,14 +242,13 @@ pub async fn snapshots() -> Result<Vec<SnapshotInfo>, String> {
     .await
 }
 
-/// Changes whenever a snapshot is added, deleted or rewritten, by this app or anything else.
-/// It lists the folder, as [`videos_revision`] does, so off the main thread.
+/// Changes whenever a snapshot is added, deleted or rewritten.
 pub async fn snapshots_revision() -> Option<u64> {
     let folder = HUB.config.snapshots_dir();
     off_main(move || snapshot::revision(&folder)).await.ok()
 }
 
-/// Deletes the snapshot called `name` for good, off the main thread.
+/// Deletes the snapshot called `name` for good.
 pub async fn delete_snapshot(name: String) -> Result<(), String> {
     let folder = HUB.config.snapshots_dir();
     off_main(move || snapshot::delete(&folder, &name))
@@ -305,13 +257,13 @@ pub async fn delete_snapshot(name: String) -> Result<(), String> {
 }
 
 /// Shows the snapshot called `name` in Explorer.
-pub fn reveal_snapshot(name: &str) -> Result<(), String> {
-    explorer::reveal(&SNAPSHOT, &HUB.config.snapshots_dir(), name)
+pub async fn reveal_snapshot(name: &str) -> Result<(), String> {
+    explorer::reveal(&SNAPSHOT, &HUB.config.snapshots_dir(), name).await
 }
 
 /// Opens the snapshots folder in Explorer.
-pub fn open_snapshots_folder() -> Result<(), String> {
-    explorer::open_folder(&HUB.config.snapshots_dir())
+pub async fn open_snapshots_folder() -> Result<(), String> {
+    explorer::open_folder(&HUB.config.snapshots_dir()).await
 }
 
 /// Whether the app keeps an event log: on the desktop it does, watching every camera it can.
@@ -319,8 +271,7 @@ pub fn events_kept() -> bool {
     true
 }
 
-/// Every event the cameras saw, newest first, off the main thread: each one's files are looked
-/// for on disk, since they can be deleted from their own pages, or in Explorer.
+/// Every event the cameras saw, newest first, with those of its files still on disk.
 pub async fn events() -> Result<Vec<EventInfo>, String> {
     off_main(|| {
         let snapshots = HUB.config.snapshots_dir();
@@ -334,7 +285,6 @@ pub async fn events() -> Result<Vec<EventInfo>, String> {
     .await
 }
 
-/// `event` as TSX shows it, with those of its files still in `snapshots` and `videos`.
 fn event_info(snapshots: &Path, videos: &Path, event: CameraEvent) -> EventInfo {
     let snapshot = event
         .snapshot
@@ -382,8 +332,7 @@ pub fn events_revision() -> u64 {
     HUB.events.revision()
 }
 
-/// Deletes each of the events `ids` that the camera doesn't see now, and what each saved, off
-/// the main thread; resolves with how many. One the camera sees now stays.
+/// Deletes the events `ids` and what each saved, except one the camera sees now; returns how many.
 pub async fn delete_events(ids: Vec<String>) -> Result<u32, String> {
     off_main(move || {
         let gone = HUB
@@ -396,8 +345,7 @@ pub async fn delete_events(ids: Vec<String>) -> Result<u32, String> {
     .await?
 }
 
-/// Deletes every event the cameras don't see now, and what they saved, off the main thread;
-/// resolves with how many.
+/// Deletes every event the cameras don't see now, and what they saved; returns how many.
 pub async fn clear_events() -> Result<u32, String> {
     off_main(|| {
         let gone = HUB
@@ -434,8 +382,6 @@ pub fn automation() -> AutomationSettings {
     }
 }
 
-/// `form` as the desktop shows it: a camera that follows Settings → Automation's event video
-/// settings shows those, to start its own from.
 fn with_app_event_video(mut form: CameraForm) -> CameraForm {
     if !form.own_event_video {
         form.event_video = form::event_video_settings(&HUB.config.current().automation.event_video);
@@ -443,8 +389,7 @@ fn with_app_event_video(mut form: CameraForm) -> CameraForm {
     form
 }
 
-/// Saves the automation settings, off the main thread. The hub reads them as it needs them, so
-/// they apply at once.
+/// Saves the automation settings, which apply at once.
 pub async fn save_automation(settings: AutomationSettings) -> Result<(), String> {
     // A size that isn't a whole, positive number of megabytes is no limit.
     let megabytes = |size: f64| {
@@ -476,8 +421,7 @@ pub async fn save_automation(settings: AutomationSettings) -> Result<(), String>
     .await?
 }
 
-/// What the snapshots and videos take, the room left on the videos' drive and the media limit,
-/// off the main thread. It reads the folder listings, and the files cameras are writing.
+/// What the snapshots and videos take, the room left on the videos' drive and the media limit.
 pub async fn media_usage() -> Result<MediaUsage, String> {
     off_main(|| {
         let (videos, snapshots) = HUB.media_sizes();
@@ -495,7 +439,7 @@ pub async fn media_usage() -> Result<MediaUsage, String> {
     .await
 }
 
-/// What the snapshots and videos hold together now, in bytes, off the main thread.
+/// What the snapshots and videos hold together now, in bytes.
 pub async fn media_size() -> Result<f64, String> {
     off_main(|| HUB.media_size() as f64).await
 }
@@ -506,8 +450,7 @@ pub fn set_audio(id: &str, muted: bool, volume: f64) -> Result<(), String> {
     Ok(())
 }
 
-/// Starts or changes a PTZ move, each axis -1..1 and `speed` 0..1. It only queues the move for
-/// PTZ's own thread, so it never waits on the camera.
+/// Queues a PTZ move, each axis -1..1 and `speed` 0..1, so it never waits on the camera.
 pub async fn ptz_move(
     id: String,
     pan: f64,
@@ -525,12 +468,10 @@ pub async fn ptz_stop(id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// How long a spotlight switch may take before the user hears that the camera didn't answer: a
-/// login and a request, each of which can take ten seconds.
+/// A login and a request, each of which can take ten seconds.
 const SPOTLIGHT_ANSWER: Duration = Duration::from_secs(25);
 
-/// Switches camera `id`'s spotlight, through its watch's thread, waiting for the answer off the
-/// main thread.
+/// Switches camera `id`'s spotlight through its watch's thread.
 pub async fn set_spotlight(id: String, on: bool) -> Result<(), String> {
     let answer = find(&id)?.set_spotlight(on)?;
     off_main(move || {
@@ -542,10 +483,9 @@ pub async fn set_spotlight(id: String, on: bool) -> Result<(), String> {
     .await?
 }
 
-/// Searches this machine's networks for cameras, off the main thread.
+/// Searches this machine's networks for cameras.
 pub async fn discover() -> Result<Vec<FoundCamera>, String> {
-    // On the test picture, or in the test runner, nothing may reach a real camera. The test
-    // picture lists `IPCAMERA_FOUND`'s cameras instead, where it names a file.
+    // Nothing may reach a real camera on the test picture; it lists `IPCAMERA_FOUND`'s instead.
     if HUB.source != hub::Source::Stream {
         let stand_ins = (HUB.source == hub::Source::Pattern)
             .then(pattern::found_cameras)
@@ -560,10 +500,9 @@ pub async fn discover() -> Result<Vec<FoundCamera>, String> {
     off_main(|| form::found_cameras(ipcamera_core::find_cameras())).await
 }
 
-/// Asks the camera at the form's address which brand it is, and a Reolink what it has, off the
-/// main thread. The desktop's form holds the password itself, so `id` isn't needed here.
+/// Asks the camera at the form's address what it is; the desktop's form holds the password itself.
 pub async fn detect(_id: String, form: CameraForm) -> Result<DetectedCamera, String> {
-    // On the test picture, or in the test runner, nothing may reach a real camera.
+    // Nothing may reach a real camera on the test picture.
     if HUB.source != hub::Source::Stream {
         return Ok(form::nothing_to_ask(
             &form,
@@ -573,7 +512,6 @@ pub async fn detect(_id: String, form: CameraForm) -> Result<DetectedCamera, Str
     let camera = form::to_config(&form);
     off_main(move || {
         let mut found = ipcamera_core::detect(&camera)?;
-        // Then the size of each RTSP stream nothing above sized, which Auto picks by.
         let asked = ipcamera_core::CameraConfig {
             brand: found.brand,
             ..camera.clone()
@@ -625,8 +563,7 @@ pub fn change_problems(changes: &CameraChanges) -> Vec<FormProblem> {
     form_check::change_problems(changes)
 }
 
-/// Gives every camera in `ids` the changes in one save, returning how many changed. Their running
-/// streams reconnect with them.
+/// Gives every camera in `ids` the changes in one save, returning how many changed.
 pub async fn save_changes(ids: Vec<String>, changes: CameraChanges) -> Result<u32, String> {
     off_main(move || HUB.save_changes(&ids, &changes)).await?
 }
@@ -639,8 +576,7 @@ pub async fn add_camera(form: CameraForm) -> Result<String, String> {
     off_main(move || HUB.add(form::to_config(&form))).await?
 }
 
-/// Makes a change to the groups or the views in `data\settings`, off the main thread, since it
-/// writes a file.
+/// Makes a change to the groups or the views in `data\settings`.
 pub async fn apply(change: Change) -> Result<Applied, String> {
     off_main(move || {
         HUB.library
@@ -660,7 +596,7 @@ pub fn sign_in_needed() -> bool {
     false
 }
 
-/// Never, on the desktop: see [`sign_in_needed`].
+/// Never, on the desktop.
 pub fn signed_in() -> bool {
     false
 }
@@ -685,19 +621,17 @@ pub async fn delete_camera(id: String) -> Result<(), String> {
     off_main(move || HUB.delete(&id)).await?
 }
 
-/// Moves camera `id` to `index` among the cameras, off the main thread, since it writes a file.
+/// Moves camera `id` to `index` among the cameras.
 pub async fn move_camera(id: String, index: u32) -> Result<(), String> {
     off_main(move || HUB.move_camera(&id, index)).await?
 }
 
-/// Calls `use_it` with the cameras, groups and views saved in `data\settings`, for `library`'s
-/// functions.
+/// Calls `use_it` with the cameras, groups and views saved in `data\settings`.
 pub fn with_library<R>(use_it: impl FnOnce(&Library) -> R) -> R {
     use_it(&HUB.library)
 }
 
-/// What went wrong opening the files, for the app to tell the user once: `settings.json` first,
-/// then the cameras, groups and views.
+/// What went wrong opening the files, `settings.json` first, for the app to tell the user once.
 pub fn library_problems() -> Vec<String> {
     HUB.config
         .problem()
@@ -718,9 +652,7 @@ pub fn preferences() -> UiPreferences {
     }
 }
 
-/// Saves the window preferences, off the main thread. A preference that cannot be written must
-/// never interrupt what the user is doing, so a failure is silent. They must not restart the stream
-/// either.
+/// Saves the window preferences, failing silently; it must not restart the stream.
 pub async fn save_preferences(preferences: UiPreferences) {
     let _ = off_main(move || {
         HUB.config.update(|config| {
@@ -738,13 +670,11 @@ pub fn last_page() -> String {
     HUB.config.current().ui.page
 }
 
-/// The newest page save handed to [`save_page`], so an older one that writes after it leaves it be.
+/// The newest save's ticket, so an older save that writes after it leaves its page be.
 static NEWEST_PAGE: AtomicU64 = AtomicU64::new(0);
 
-/// Saves the page the window shows, on a thread of its own. Two saves can finish in either order,
-/// so each takes a ticket, and one that is no longer the newest writes the file without its page:
-/// the newer save's, already in the settings or about to be. The check runs inside `update`,
-/// which writes one change at a time. A failure is silent, as every preference's is.
+/// Saves the page the window shows; a save that is no longer the newest leaves the page alone,
+/// checked inside `update`, which writes one change at a time.
 pub async fn save_page(page: String) {
     let ticket = NEWEST_PAGE.fetch_add(1, Ordering::SeqCst) + 1;
     let _ = off_main(move || {
@@ -762,8 +692,7 @@ pub fn alerts() -> bool {
     HUB.config.current().ui.alerts
 }
 
-/// Saves whether the app shows those messages, off the main thread. A failure is silent, as
-/// every preference's is.
+/// Saves whether the app shows those messages; a failure is silent.
 pub async fn save_alerts(on: bool) {
     let _ = off_main(move || HUB.config.update(|config| config.ui.alerts = on)).await;
 }
@@ -773,8 +702,7 @@ pub fn events_table_width() -> Option<f64> {
     HUB.config.current().ui.events_table_width.map(f64::from)
 }
 
-/// Saves how wide the Events page's table was dragged, off the main thread. A failure is silent,
-/// as every preference's is.
+/// Saves how wide the Events page's table was dragged; a failure is silent.
 pub async fn save_events_table_width(width: f64) {
     let _ = off_main(move || {
         HUB.config
@@ -788,22 +716,17 @@ pub fn saved_window() -> WindowPlace {
     HUB.config.current().window.into()
 }
 
-/// Saves where the window settled, off the main thread. Like every preference, a failure is silent
-/// and it must not restart the stream, or moving the window would reconnect the camera.
+/// Saves where the window settled; it must not restart the stream, or moving it would reconnect.
 pub async fn save_window(place: WindowPlace) {
     let _ = off_main(move || HUB.config.update(|config| config.window = place.into())).await;
 }
 
-/// Runs `work` on a thread of its own, because a TSX call must not wait on a camera, a disk or a
-/// dialog. It fails only when `work` panicked.
 async fn off_main<R: Send + 'static>(
     work: impl FnOnce() -> R + Send + 'static,
 ) -> Result<R, String> {
     blocking(work).await.map_err(|error| error.to_string())
 }
 
-/// Runs `work` on camera `id`, on a thread of its own, because a TSX call must not wait for a
-/// pipeline.
 async fn off_thread<R: Send + 'static>(
     id: String,
     work: impl FnOnce(&Camera) -> Result<R, String> + Send + 'static,

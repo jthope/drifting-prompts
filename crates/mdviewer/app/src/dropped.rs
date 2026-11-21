@@ -1,6 +1,4 @@
-//! A folder dropped on the window, from the `file:` URL the drop gives (`onFileDrop`'s `uris`):
-//! `file:///D:/Notes/My%20Notes` is `D:\Notes\My Notes`, and `file://server/share/notes` is the
-//! network folder `\\server\share\notes`.
+//! A dropped folder's `file:` URL as a path, a host naming a network folder.
 
 use std::path::PathBuf;
 
@@ -17,7 +15,7 @@ pub fn path_of(uri: &str) -> Option<PathBuf> {
         None => (decoded.as_str(), ""),
     };
     let path = if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
-        // `/D:/Notes`: a drive's path keeps no slash before its letter.
+        // `/D:/Notes` drops the slash before the drive letter.
         let bytes = path.as_bytes();
         if bytes.len() >= 3
             && bytes[0] == b'/'

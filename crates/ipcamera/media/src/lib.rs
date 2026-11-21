@@ -1,29 +1,6 @@
-//! RTSP live view: a glass2glass pipeline and the newest decoded frame.
+//! A camera's stream on glass2glass, over RTSP or a Reolink's FLV: live view, recording, relaying.
 //!
-//! Nothing here touches the UI. The pipeline runs on its own thread, publishes the newest
-//! decoded frame into a [`FrameSlot`], and the view paints whatever is in the slot when it
-//! repaints. That keeps decode rate and repaint rate independent: a slow frame is dropped rather
-//! than queued. Sound goes straight from the pipeline to the playback device.
-//!
-//! The frames leave this crate as [`DecodedFrame`] — bytes and a size, nothing GPU-shaped — so
-//! the pipeline has no opinion about how or whether anything is drawn.
-//!
-//! A live view can stay connected while nothing shows it ([`MediaSession::set_shown`]): its stream
-//! keeps arriving and recording, and nothing is decoded until it is shown again.
-//!
-//! A session can also record what it plays ([`MediaSession::start_recording`]): the compressed
-//! stream, as the camera sent it, into an MP4.
-//!
-//! A session can instead relay a camera ([`MediaSession::relay`]), for the server: it decodes
-//! nothing, and passes the compressed video on to any number of viewers through its [`Feed`]. It
-//! records as a live view does, and decodes one picture only when asked ([`Feed::picture`]), for a
-//! snapshot or a recording's thumbnail.
-//!
-//! A session plays RTSP, or one of a Reolink's FLV streams (`flv`), which its web server sends some
-//! streams only as.
-//!
-//! Detect asks here how large a camera's RTSP streams are ([`sized_streams`]), from what each says
-//! to DESCRIBE, for those nothing else sized.
+//! Only the newest decoded frame is kept ([`FrameSlot`]): a slow frame is dropped, never queued.
 
 mod annexb;
 mod avc;

@@ -1,21 +1,3 @@
-// The search in the middle of the title bar, as an editor's command center: a
-// box that shows what is searched for and where the reader is among the
-// matches, and under it, once pressed (or Ctrl+K, or Ctrl+F), a drop-down:
-// the field, where to look (This file, Open tabs, Project, All projects), how
-// to read what is typed (case, whole words, a pattern), and the matches, a
-// section for each file, each a line's number and its words around the match.
-//
-// It is nsh's `Command` in a `Popover`: the app answers the query
-// (`filterable={false}`) from Rust's search (`searchResults` in `model.ts`),
-// and the drop-down lists up to `MOST_LISTED` matches; the files panel lists
-// them all (Ctrl+Return, or the button at the foot). Up and Down move through
-// them, Return goes to one and closes the drop-down, and Escape closes it,
-// keeping the search and its marks. Tab moves the keyboard on to the options
-// and where to look, as it does anywhere: the field keeps Tab for that, so it
-// can't step through the scopes as an editor's does. A row doesn't
-// open its file as the highlight passes over it: nsh 0.5.1's `Command` doesn't
-// say whether the keys moved the highlight or new results did, so the reader
-// would jump to each first match while the query is typed.
 import { type JSX, keymap, Text, View, windowSize } from "nsh";
 import { Command, type CommandEntry, type CommandGroup, type CommandRef, Popover } from "nsh/base";
 import { Button, CountBadge, Icon, IconButton, type IconName, look, popupSurface, Segmented } from "../../../dp/ui";
@@ -23,22 +5,19 @@ import { clearSearch, goToResult, openResultsTab, showResultsInFiles } from "./a
 import { currentMatch, found, projectPath, projects, searchOpen, searchOptions, searchResults, searchScope, searchText } from "./model";
 import { excerptParts, MOST_LISTED, matchOf, ordinal, resultItems, rowCount, rowOf, SCOPES, type SearchScope } from "./search";
 
-/** How the search reads what is typed, as the buttons in its field offer it. */
 const OPTIONS: { key: "caseSensitive" | "wholeWord" | "regex"; label: string; icon: IconName }[] = [
   { key: "caseSensitive", label: "Match case", icon: "case-sensitive" },
   { key: "wholeWord", label: "Whole words", icon: "whole-word" },
   { key: "regex", label: "Regular expression", icon: "regex" },
 ];
 
-/** The drop-down's width, in points, in a window wide enough for it. */
 const DROP_DOWN_WIDTH = 600;
 
-/** The narrowest the box in the title bar gets, in points, short of room: the header keeps room for it. */
+/** The narrowest the search box gets, in points. */
 export const SEARCH_MIN_WIDTH = 160;
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
 
-/** Where the reader is among the matches, as the box says it: `2 / 12`, or how many while none is picked. */
 function position(): string {
   const results = found();
   if (searchText() === "" || !results) return "";
@@ -48,11 +27,6 @@ function position(): string {
   return which > 0 ? `${which.toLocaleString()} / ${total}` : total;
 }
 
-/**
- * The box in the title bar: what is searched for, or how to start; pressing it
- * opens the drop-down. It shows the I-beam, as a field does, since pressing it
- * puts the keyboard in one.
- */
 function SearchBox() {
   const empty = () => searchText() === "";
   return (
@@ -73,7 +47,6 @@ function SearchBox() {
   );
 }
 
-/** A file's section in the drop-down: its name, its folder (and its project, from another one), and how many matches. */
 function FileHeading(props: { group: CommandGroup }) {
   const row = () => rowOf(props.group.heading);
   const file = () => {
@@ -101,7 +74,6 @@ function FileHeading(props: { group: CommandGroup }) {
   );
 }
 
-/** A match's row: its line's number, then the words around it, the match marked. */
 function MatchLine(props: { entry: CommandEntry }) {
   const found = () => matchOf(searchResults(), props.entry.id)?.match;
   const parts = () => {
@@ -122,7 +94,6 @@ function MatchLine(props: { entry: CommandEntry }) {
   );
 }
 
-/** A key's name, small, as a hint beside what it does. */
 function Hint(props: { keys: string; children: JSX.Element }) {
   return (
     <View class="flex-row items-center gap-1">
@@ -132,17 +103,12 @@ function Hint(props: { keys: string; children: JSX.Element }) {
   );
 }
 
-/**
- * While the drop-down shows, Ctrl+Return hands the results to the files panel.
- * Escape is the popover's own, which closes it before the field could take it
- * to empty the search.
- */
+// Escape stays the popover's, which closes it before the field could empty the search.
 function DropDownKeys() {
   keymap.bind("mod+enter", () => showResultsInFiles(), { when: "always" });
   return null;
 }
 
-/** What the drop-down says while it lists no match: why, or that it is searching. */
 function Empty() {
   const said = () => {
     const results = searchResults();
@@ -154,7 +120,6 @@ function Empty() {
   return <Text class="px-3 py-6 text-center text-sm text-muted-foreground">{said()}</Text>;
 }
 
-/** The drop-down under the box: the field and its options, where to look, the matches, and the keys. `onRef` hands over its list, to focus. */
 function DropDown(props: { onRef: (command: CommandRef) => void }) {
   const results = () => searchResults();
   const listed = () => resultItems(results());
@@ -215,6 +180,7 @@ function DropDown(props: { onRef: (command: CommandRef) => void }) {
         renderGroup={(group) => <FileHeading group={group} />}
         renderItem={(entry) => <MatchLine entry={entry} />}
         onQueryChange={(event) => searchText.set(event.query)}
+        // Only on select: nsh's `Command` doesn't say whether keys or new results moved the highlight.
         onSelect={(event) => {
           searchOpen.set(false);
           goToResult(event.id);
@@ -225,10 +191,7 @@ function DropDown(props: { onRef: (command: CommandRef) => void }) {
   );
 }
 
-/**
- * The search in the title bar: the box, the drop-down under it, and a button
- * that ends the search. Ctrl+K and Ctrl+F open the drop-down.
- */
+/** The title bar's search: the box, its drop-down, and a button that ends the search. */
 export function SearchBar() {
   keymap.bind({
     "mod+k": () => searchOpen.set(true),
@@ -248,7 +211,6 @@ export function SearchBar() {
         popupStyle={{ ...surface().style, width: Math.min(DROP_DOWN_WIDTH, windowSize().width - 24) }}
         trigger={<SearchBox />}
         onOpenChange={(event) => searchOpen.set(event.open)}
-        // The keyboard goes to the field as the drop-down shows, however it was opened.
         onOpen={() => command?.focus()}
       >
         <DropDown

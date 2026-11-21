@@ -1,23 +1,5 @@
-//! The groups and the views, the cameras' order, and changes to several cameras at once, as TSX
-//! sees them.
-//!
-//! All of them live in `ipcamera_core`'s [`Library`], and both backends have one to read: the
-//! desktop's is saved in `data\settings`; the web build's is a copy of the server's, or a preview
-//! kept in memory when there is no server. Each backend hands its library over with
-//! `with_library`, and `bridge` passes it to the readers here.
-//!
-//! A change is not made here. These describe it, as a `ipcamera_core` [`Change`], and the backend
-//! makes it where the cameras are kept: the desktop in its files, the web build on the server,
-//! which applies the same `Change` to its own library. Either way `Library::apply` keeps the rules,
-//! so every client is refused in the same words. The camera calls (`list`, `states`, `form`,
-//! `save_form`, `add_camera`, `delete_camera`) are each backend's own, though both build the same
-//! changes: the desktop's also start and stop streams, and the web's keep the password the server
-//! never sends. What the two would write alike comes here, as [`save_changes`] does.
-//!
-//! These only convert: ids become strings, and an empty tile becomes `""`, as does a tile's stream
-//! when it is on Auto. What Auto plays is picked here too ([`auto_stream`]), from the sizes TSX
-//! says the pictures are drawn at. Nothing here streams, so none of it needs to leave the main
-//! thread.
+//! The groups, the views, the cameras' order and changes to several cameras, as TSX sees them.
+//! Nothing here makes a change: each is a `Change` the backend applies where the cameras are kept.
 
 use ipcamera_core::{
     ArrangedTile, Brand, CameraConfig, CameraId, CameraStream, CameraUpdate, CameraView, Cell,
@@ -46,7 +28,6 @@ pub fn groups(library: &Library) -> Vec<GroupInfo> {
         .collect()
 }
 
-/// The camera ids TSX names, as `Library` takes them.
 fn camera_ids(cameras: &[String]) -> Vec<CameraId> {
     cameras
         .iter()
@@ -127,7 +108,6 @@ pub fn groups_of(library: &Library, camera: &str) -> Vec<String> {
         .collect()
 }
 
-/// The camera id in each of `tiles`, `""` for an empty one.
 fn cameras_in(tiles: &[Option<ViewTile>]) -> Vec<String> {
     tiles
         .iter()
@@ -139,8 +119,6 @@ fn cameras_in(tiles: &[Option<ViewTile>]) -> Vec<String> {
         .collect()
 }
 
-/// The stream each of `tiles` shows in place of its camera's own, `""` for the camera's own and
-/// for an empty tile.
 fn streams_in(tiles: &[Option<ViewTile>]) -> Vec<String> {
     tiles
         .iter()
@@ -153,7 +131,6 @@ fn streams_in(tiles: &[Option<ViewTile>]) -> Vec<String> {
         .collect()
 }
 
-/// The fit each of `view`'s `tiles` shows its picture with: its own, else the view's.
 fn fits_in(view: &CameraView, tiles: &[Option<ViewTile>]) -> Vec<String> {
     tiles
         .iter()
@@ -189,7 +166,6 @@ pub fn views(library: &Library) -> Vec<ViewInfo> {
         .collect()
 }
 
-/// A tile's place, as TSX reads it.
 fn cell_info(cell: Cell) -> CellInfo {
     CellInfo {
         column: u32::from(cell.column),
@@ -199,8 +175,7 @@ fn cell_info(cell: Cell) -> CellInfo {
     }
 }
 
-/// Every layout a view can start as or be set to, in the order the picker shows them, on the
-/// views' grid.
+/// Every layout a view can be set to, in the picker's order.
 pub fn layouts() -> Vec<LayoutInfo> {
     Layout::ALL
         .into_iter()
@@ -220,8 +195,7 @@ pub fn grid() -> GridInfo {
     }
 }
 
-/// Arranges a view's tiles as `tiles` say. A number too large for the grid stays too large, for
-/// the library's check to refuse.
+/// Arranges a view's tiles; numbers past the grid are left for the library to refuse.
 pub fn arrange(id: &str, tiles: Vec<ArrangedTileInfo>) -> Change {
     let small = |value: u32| u8::try_from(value).unwrap_or(u8::MAX);
     Change::ArrangeTiles {
@@ -293,8 +267,8 @@ pub fn set_tile_fit(id: &str, index: u32, fit: &str) -> Result<Change, String> {
     })
 }
 
-/// Puts camera `camera` in tile `index` of view `id`, on `stream` (`""` for Auto, `own` for its
-/// own); a camera of `""` empties the tile.
+/// Puts `camera` in tile `index` of view `id` on `stream` (`""` for Auto, `own` for its own); a
+/// camera of `""` empties the tile.
 pub fn set_tile(id: &str, index: u32, camera: &str, stream: &str) -> Change {
     let camera = (!camera.is_empty()).then(|| CameraId::from(camera));
     Change::SetTile {
@@ -305,16 +279,11 @@ pub fn set_tile(id: &str, index: u32, camera: &str, stream: &str) -> Change {
     }
 }
 
-/// One of a camera's streams as [`stream_choices`] makes its rows: what a tile saves for it, and
-/// what the camera said of it.
 struct StreamRow {
-    /// What a tile saves for it: `None` for the camera's own.
     stream: Option<TileStream>,
-    /// Where it is, with no login in it, which tells two ways to one stream apart.
+    /// Where it is, with no login in it.
     address: String,
-    /// What it is called where the camera listed nothing for it: `Main stream`, or its path.
     fallback: String,
-    /// What the camera listed of it, where it did.
     listed: Option<CameraStream>,
 }
 
@@ -345,12 +314,8 @@ impl StreamRow {
     }
 }
 
-/// Every way to camera `camera`'s streams, one row per stream: its own first, the main and the
-/// sub stream at its brand's paths for a camera of a known brand, then those it listed. A way to
-/// a stream already there adds what the camera listed of it to that stream's row and nothing
-/// else, so the row keeps the key it came with: `None` for the camera's own, else the brand's
-/// `main` or `sub`, which follows the camera's channel, else the listed path. In the lists' order
-/// ([`form::stream_order`]).
+/// One row per stream: its own, the brand's main and sub, then those it listed. A listed stream
+/// already there joins that row, which keeps its key.
 fn stream_rows(camera: &CameraConfig) -> Vec<StreamRow> {
     let own_name = match camera.rtsp_path_override.trim() {
         "" if camera.stream == Stream::Sub => "Sub stream".to_string(),
@@ -358,7 +323,6 @@ fn stream_rows(camera: &CameraConfig) -> Vec<StreamRow> {
         path => path.to_string(),
     };
     let mut ways = vec![(None, own_name, None)];
-    // Another brand's paths are anybody's guess: only what it listed.
     if camera.brand != Brand::Other {
         ways.push((
             Some(TileStream::Brand(Stream::Main)),
@@ -411,10 +375,7 @@ fn stream_rows(camera: &CameraConfig) -> Vec<StreamRow> {
     rows
 }
 
-/// Every stream camera `id` has, as the menus that pick one list them ([`stream_rows`]): its own
-/// (its default, which a tile shows unless it picks another) among them, each once, with its
-/// picture's size, its codec and its name where the camera said them. Empty for an unknown
-/// camera.
+/// Every stream camera `id` has, once each, as the menus list them; empty for an unknown camera.
 pub fn stream_choices(library: &Library, id: &str) -> Vec<StreamChoice> {
     let Some(camera) = library.camera(&CameraId::from(id)) else {
         return Vec::new();
@@ -425,9 +386,7 @@ pub fn stream_choices(library: &Library, id: &str) -> Vec<StreamChoice> {
         .collect()
 }
 
-/// The key of camera `id`'s [`stream_choices`] row that is the same stream as `key`, a tile's: `""`
-/// for its own, whichever way `key` reaches it. `key` itself for a stream none of them is, and for
-/// an unknown camera.
+/// The key of camera `id`'s row that is the same stream as `key`; `key` itself where none is.
 pub fn choice_key(library: &Library, id: &str, key: &str) -> String {
     let Some(camera) = library.camera(&CameraId::from(id)) else {
         return key.to_string();
@@ -448,14 +407,9 @@ pub fn choice_key(library: &Library, id: &str, key: &str) -> String {
         )
 }
 
-/// How many times its own size Auto lets a stream be drawn before it plays a larger one. A quarter
-/// larger is hard to tell from the larger stream on a moving picture, and it keeps a grid of small
-/// tiles on the small streams, a fraction of the large ones' decoding.
+/// How much larger than its size Auto draws a stream before it plays a larger one.
 const AUTO_STRETCH: f32 = 1.25;
 
-/// The streams Auto picks among for `camera`: those on the lens of its own stream whose size it
-/// said, each a [`stream_rows`] key (`""` for its own) with its size. None where it didn't say its
-/// own stream's size, which leaves Auto on its own stream.
 fn auto_streams(camera: &CameraConfig) -> Vec<(String, (u32, u32))> {
     let rows = stream_rows(camera);
     let Some(own) = rows
@@ -479,7 +433,7 @@ fn auto_streams(camera: &CameraConfig) -> Vec<(String, (u32, u32))> {
         .collect()
 }
 
-/// Whether Auto has a choice to make for camera `id`: [`auto_streams`] of more than one size.
+/// Whether Auto has a choice to make for camera `id`: streams of more than one size.
 pub fn auto_picks(library: &Library, id: &str) -> bool {
     library.camera(&CameraId::from(id)).is_some_and(|camera| {
         let streams = auto_streams(&camera);
@@ -489,11 +443,8 @@ pub fn auto_picks(library: &Library, id: &str) -> bool {
     })
 }
 
-/// The key of the stream Auto plays for camera `id`'s `pictures`, as [`stream_choices`] has it
-/// (`""` for its own): the smallest of its [`auto_streams`] that none of them draws more than
-/// [`AUTO_STRETCH`] times its size, else the largest; its own among streams of one size. One
-/// stream for every picture, the one the largest calls for, so a camera on Auto in several tiles
-/// is one connection. Its own where Auto has no choice, for no pictures, and for an unknown camera.
+/// The key Auto plays for camera `id`'s `pictures` (`""` for its own): the smallest none draws more
+/// than `AUTO_STRETCH` times its size, else the largest. One stream for all its tiles.
 pub fn auto_stream(library: &Library, id: &str, pictures: &[DrawnPicture]) -> String {
     let Some(camera) = library.camera(&CameraId::from(id)) else {
         return String::new();
@@ -530,14 +481,8 @@ pub fn auto_stream(library: &Library, id: &str, pictures: &[DrawnPicture]) -> St
         .unwrap_or_default()
 }
 
-/// The change that gives every camera in `ids` the changes, in one save, and the ids of the
-/// cameras it changes, for the desktop to restart their streams; `None` when it changes none.
-///
-/// Each camera's own settings, as `library` holds them, take the changes over them and are
-/// compared as settings, so a blank port that saves as the port it already has is no change, and a
-/// camera the changes leave as it was is not written. A camera's saved password stays unless the
-/// changes set one, also where `library` was never told it (the web build's copy). A problem with
-/// the changes or an unknown camera describes no change at all.
+/// The change giving every camera in `ids` the changes, and the ids it changes; `None` for none.
+/// A saved password stays unless the changes set one, also in the web build's copy, which lacks it.
 pub fn save_changes(
     library: &Library,
     ids: &[String],
@@ -580,7 +525,6 @@ fn parse_layout(key: &str) -> Result<Layout, String> {
 mod tests {
     use super::*;
 
-    /// A library like the preview's: one camera with an address, in the first view.
     fn library() -> Library {
         Library::in_memory(vec![CameraConfig {
             name: "Porch".into(),
@@ -599,7 +543,6 @@ mod tests {
         list.into_iter().map(|group| group.id).collect()
     }
 
-    /// Makes `change` on `library` as a backend does, resolving with what it added.
     fn make(library: &Library, change: impl Into<Described>) -> Result<String, String> {
         let change = change.into().0?;
         library
@@ -608,7 +551,6 @@ mod tests {
             .map_err(|error| error.to_string())
     }
 
-    /// A change, or why it couldn't be described.
     struct Described(Result<Change, String>);
 
     impl From<Change> for Described {
@@ -627,7 +569,6 @@ mod tests {
         library.revision()
     }
 
-    /// Makes the changes to several cameras, resolving with the ids it changed.
     fn save_changes_on(
         library: &Library,
         ids: &[String],
@@ -789,7 +730,6 @@ mod tests {
         assert_eq!(views(&library)[0].tiles.len(), 9);
         assert_eq!(views(&library)[0].tiles[8], porch);
         assert_eq!(views(&library)[0].streams, vec![String::new(); 9]);
-        // The tile's own fit, and the view's everywhere else, empty tiles included.
         let original = views(&library)[0].fit.clone();
         assert_eq!(views(&library)[0].fits[8], "16:9");
         assert_eq!(views(&library)[0].fits[..8], vec![original.clone(); 8]);
@@ -901,7 +841,6 @@ mod tests {
                 .map(|choice| (choice.key, choice.title, choice.own))
                 .collect::<Vec<_>>()
         };
-        // Porch is a Dahua on its main stream, and listed none: the brand's two, unsized.
         assert_eq!(
             rows(&library),
             [
@@ -1012,7 +951,6 @@ mod tests {
             "the brand's main and sub are the listed ones, sized; the main lens's first"
         );
 
-        // A tile's stream is found by where it goes, whichever key it was saved under.
         assert_eq!(choice_key(&library, &porch, "/Preview_01_autotrack"), "");
         assert_eq!(choice_key(&library, &porch, "own"), "");
         assert_eq!(choice_key(&library, &porch, "/Preview_01_sub"), "sub");
@@ -1031,7 +969,6 @@ mod tests {
             fit: fit.to_string(),
         };
         let auto = |pictures: &[DrawnPicture]| auto_stream(&library, &porch, pictures);
-        // Porch listed nothing: no sizes to go by.
         assert!(!auto_picks(&library, &porch));
         assert_eq!(auto(&[drawn(320.0, 180.0, "original")]), "");
 
@@ -1056,17 +993,12 @@ mod tests {
         make(&library, update_camera(camera.clone())).unwrap();
         assert!(auto_picks(&library, &porch));
 
-        // A tile of a 4 x 4 grid on a 1080p screen: the sub stream, not the other lens's smaller one.
         assert_eq!(auto(&[drawn(480.0, 270.0, "original")]), "sub");
-        // A quarter larger than the sub stream still is it; more is the main stream.
         assert_eq!(auto(&[drawn(1120.0, 640.0, "original")]), "sub");
         assert_eq!(auto(&[drawn(1280.0, 720.0, "original")]), "");
-        // Larger than every stream: the largest.
         assert_eq!(auto(&[drawn(7680.0, 4320.0, "original")]), "");
-        // Fill shows the picture larger than Original in a tall tile.
         assert_eq!(auto(&[drawn(600.0, 600.0, "original")]), "sub");
         assert_eq!(auto(&[drawn(600.0, 800.0, "fill")]), "");
-        // One stream for all of a camera's pictures, the one the largest calls for.
         assert_eq!(
             auto(&[
                 drawn(480.0, 270.0, "original"),
@@ -1076,7 +1008,6 @@ mod tests {
         );
         assert_eq!(auto(&[]), "", "nothing drawn yet");
 
-        // On its tracking lens, Auto stays on that lens.
         camera.rtsp_path_override = "/Preview_01_autotrack".into();
         make(&library, update_camera(camera)).unwrap();
         assert_eq!(
@@ -1090,7 +1021,6 @@ mod tests {
         );
     }
 
-    /// The change that saves `camera` over the one with its id, password and all.
     fn update_camera(camera: CameraConfig) -> Change {
         Change::UpdateCameras {
             cameras: vec![CameraUpdate {
@@ -1162,7 +1092,6 @@ mod tests {
         let (change, _) = save_changes(&copy, std::slice::from_ref(&porch), &changes)
             .unwrap()
             .expect("the user changes");
-        // Made where the files are, as the server makes it.
         make(&saved, change).unwrap();
         assert_eq!(saved.cameras()[0].user, "viewer");
         assert_eq!(saved.cameras()[0].password, "s3cret", "the password stays");

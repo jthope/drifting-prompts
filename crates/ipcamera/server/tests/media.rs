@@ -1,9 +1,4 @@
-//! Live video, snapshots and recordings, against a pretend camera on this machine (`ipcamera-media`'s,
-//! which needs Windows' encoder, so these run on Windows alone), never a real one: a viewer's
-//! WebSocket, a tile on another of a camera's streams, and a snapshot and a recording taken,
-//! listed, served and deleted.
-//!
-//! Each test serves a library of its own from a temporary folder, so its files go there too.
+//! Live video, snapshots and recordings against a pretend camera on this machine, never a real one.
 
 #![cfg(windows)]
 
@@ -18,8 +13,6 @@ use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
 
 use support::*;
 
-/// The whole path, against a pretend camera: the server connects when the viewer comes, and the
-/// viewer gets the decoder's set-up, then a keyframe it can start from.
 #[test]
 fn a_viewer_gets_the_set_up_then_a_keyframe() {
     let (server, ids) = serve(vec![pretend_camera()]);
@@ -59,7 +52,6 @@ fn a_viewer_gets_the_set_up_then_a_keyframe() {
     );
 }
 
-/// The set-up the server sends `socket` first, failing on a stream that gave up.
 fn set_up(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> serde_json::Value {
     loop {
         let message = next_json(socket);
@@ -70,12 +62,9 @@ fn set_up(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> serde_json::Valu
     }
 }
 
-/// A tile that picks another of a camera's streams gets a session of its own beside the camera's,
-/// with the camera's login, and the status still counts one camera.
 #[test]
 fn a_tile_watches_another_of_its_cameras_streams() {
     let camera = pretend_camera();
-    // The pretend camera serves one path; a tile names it as a path of its own, escaped.
     let path = camera.rtsp_path_override.clone();
     let (server, ids) = serve(vec![camera]);
     let id = ids[0].as_str();
@@ -97,8 +86,7 @@ fn a_tile_watches_another_of_its_cameras_streams() {
     assert_eq!(cameras[0]["playing"], true, "{cameras:?}");
 }
 
-/// A pretend camera on this machine with a password, as a saved camera needs one before the
-/// server takes a snapshot of it, records it or moves it.
+/// With a password, which the server needs before a snapshot, a recording or PTZ.
 fn pretend_camera() -> CameraConfig {
     use ipcamera_media::pretend::{self, Pattern};
 
@@ -114,9 +102,6 @@ fn pretend_camera() -> CameraConfig {
     }
 }
 
-/// The whole of a snapshot: taken of a camera nobody watches, beside one that can't take one,
-/// which is left out as recording leaves it out; listed with its size, served as a PNG, counted in
-/// the status, deleted. A name outside the folder is never served.
 #[test]
 fn a_snapshot_is_taken_listed_served_and_deleted() {
     let (server, ids) = serve(vec![
@@ -210,8 +195,6 @@ fn a_snapshot_is_taken_listed_served_and_deleted() {
     );
 }
 
-/// The whole of a recording: it starts with nobody watching, shows in the status, lists while it
-/// is written and can't be deleted then, gets a thumbnail, is served in ranges, and stops.
 #[test]
 fn a_recording_starts_lists_serves_and_stops() {
     let (server, ids) = serve(vec![pretend_camera()]);

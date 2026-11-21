@@ -3,11 +3,7 @@ import { titleBar } from "nsh/desktop";
 import { BrandBadge, EdgeLine, look } from "./brand";
 import type { IconName } from "./icon";
 
-/**
- * The top of a pane's island beside a reader (its files, its outline): its
- * name, quietly, then its buttons (`children`), as tall as the strip of tabs
- * it lines up with (`FileTabs`), on the island's own color over a panel's line.
- */
+/** The top of a pane's island beside a reader, as tall as the strip of tabs it lines up with. */
 export function PaneHeader(props: { title: string; children?: JSX.Element }) {
   return (
     <View class="h-9 flex-row items-center gap-0.5 pl-3 pr-1">
@@ -20,17 +16,7 @@ export function PaneHeader(props: { title: string; children?: JSX.Element }) {
   );
 }
 
-/**
- * The top of a panel (the PTZ panel, an editor's dialog): its icon on the
- * theme's badge, its title, and the button that closes it (`action`), in the
- * theme's header color over the theme's line; on an island (`island`, the PTZ
- * panel), in the island's own color over a panel's line, as a `PaneHeader` is.
- * `atTop` is for a panel that reaches the window's top edge, where its header
- * is the title bar: it drags the window and leaves the system's window buttons
- * their room, so they never cover its own. `ruled` draws a panel's line under
- * it in every theme, where a page's header draws none in some (a dialog's,
- * which parts its header from its body).
- */
+/** The top of a panel; `atTop` makes it the title bar, leaving the window's buttons their room. */
 export function PanelHeader(props: { title: string; icon: IconName; action: JSX.Element; atTop?: boolean; island?: boolean; ruled?: boolean }) {
   return (
     <View

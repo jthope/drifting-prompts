@@ -18,7 +18,6 @@ use super::{
 };
 use crate::bridge::StatusTone;
 
-/// A running source of frames.
 pub(super) enum Feed {
     Stream(MediaSession),
     Pattern(Pattern),
@@ -37,7 +36,6 @@ impl Feed {
         }
     }
 
-    /// Where the connection is: the test picture is always live.
     pub(super) fn media_status(&self) -> MediaStatus {
         match self {
             Self::Stream(media) => media.status(),
@@ -58,8 +56,6 @@ impl Feed {
         }
     }
 
-    /// Whether a tile shows the pictures. Hidden, a stream decodes nothing and the test picture
-    /// draws nothing, and neither keeps a picture.
     pub(super) fn set_shown(&self, shown: bool) {
         match self {
             Self::Stream(media) => media.set_shown(shown),
@@ -70,14 +66,12 @@ impl Feed {
     pub(super) fn status(&self, setting: &CameraConfig) -> (String, StatusTone) {
         match self {
             Self::Stream(media) => status::describe(&media.status(), setting),
-            // A picture standing in for the camera says what the camera's stream would.
+            // A stand-in picture reads as the camera's stream would.
             Self::Pattern(pattern) if pattern.is_still() => ("Live.".to_string(), StatusTone::Ok),
             Self::Pattern(_) => ("Test pattern.".to_string(), StatusTone::Ok),
         }
     }
 
-    /// Asks for the picture of the next keyframe even while no tile shows the stream, for an
-    /// event's snapshot; the test picture draws one.
     pub(super) fn want_picture(&self) {
         match self {
             Self::Stream(media) => media.want_picture(),
@@ -85,10 +79,6 @@ impl Feed {
         }
     }
 
-    /// Records into `folder` as `rules` say, naming each file for camera `id` and the time of its
-    /// first picture, tagged with what `tags` holds as it opens (what the camera saw, for a
-    /// recording an event started), and giving it a thumbnail. The test picture is drawn here
-    /// rather than sent by a camera, so it has nothing to record.
     pub(super) fn start_recording(
         &self,
         folder: PathBuf,
@@ -113,8 +103,6 @@ impl Feed {
         }
     }
 
-    /// Holds back the last `preroll` of the stream for an event's video to start from; `None`
-    /// holds nothing. The test picture has nothing to hold.
     pub(super) fn set_preroll(&self, preroll: Option<Duration>) {
         if let Self::Stream(media) = self {
             media.set_preroll(preroll);

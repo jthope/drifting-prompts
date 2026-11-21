@@ -9,11 +9,10 @@ description = "The repository's own commands, run through cargo by each product'
 [lints]
 workspace = true
 
-# None of the workspace's crates: it starts them as programs, through cargo and nsh.
+# None of the workspace's crates: it starts them as programs.
 [dependencies]
 anyhow.workspace = true
-# Waits for the server, the web build, `cargo screenshots`' apps and Ctrl+C at once, and stops the
-# programs it started.
+# Waits for the programs it starts and for Ctrl+C at once, and stops the programs.
 tokio = { workspace = true, features = ["process", "signal"] }
 # The settings `cargo screenshots` gives the apps in place of the developer's own.
 serde_json.workspace = true

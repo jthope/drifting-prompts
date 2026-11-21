@@ -9,44 +9,35 @@ description = "IP Camera settings, cameras and camera groups, RTSP addressing an
 [lints]
 workspace = true
 
-# Deliberately free of any UI and of the media stack: everything here is plain data and sockets, so
-# `cargo test -p ipcamera-core` needs no GPU, no window and no decoder.
+# No UI and no media stack: `cargo test -p ipcamera-core` needs no GPU, window or decoder.
 [dependencies]
-# `settings.json` and the files in `data\settings` are saved through the suite's store, and every
-# lock is taken through its `sync::LockExt`.
+# Safe saving of the settings files, and the lock helper.
 dp-store.workspace = true
 md-5.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 
-# Random ids everywhere but the web build. In a browser randomness comes only through JavaScript,
-# and the web build has no glue for it (it would need the wasm-bindgen CLI on every machine), so
-# the preview counts its ids instead (`ids.rs`).
+# Random ids off the web build: randomness there needs JavaScript glue it lacks (`ids.rs`).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 uuid = { workspace = true, features = ["v4"] }
-# Reolink's and Dahua's HTTP APIs, and Dahua's XML. The web build has no `reolink`,
-# `dahua_http` or `onvif` module: the server talks to its cameras.
+# Reolink's and Dahua's HTTP APIs and Dahua's XML; the web build has no camera protocols.
 ureq.workspace = true
 roxmltree.workspace = true
 percent-encoding.workspace = true
-# ONVIF, and the runtime each ONVIF client runs its calls on: `oxvif` is async.
+# ONVIF, and the runtime its async client blocks on.
 oxvif.workspace = true
 tokio.workspace = true
 
-# On Windows `cameras.json` keeps each password encrypted by DPAPI for the account running the app,
-# as Base64 (`saved_password.rs`). Elsewhere the file keeps it as it is, readable by its owner only.
+# DPAPI encrypts each saved password for the account running the app (`saved_password.rs`).
 [target.'cfg(windows)'.dependencies]
 ipcamera-dpapi.workspace = true
 base64.workspace = true
 
-# The integration tests in `tests/` are their own crates, so they see this crate's public API
-# plus these, not its regular dependencies.
 [dev-dependencies]
-# The fake Dahua in `tests/dahua_http.rs` checks each login's digest as a camera does.
+# The fake Dahua in `tests/dahua_http.rs` checks each login's digest.
 md-5.workspace = true
 serde_json.workspace = true
-# The owner's check of a real camera in `tests/dahua_http.rs` asks its ports what they are,
-# without a login.
+# The real-camera check in `tests/dahua_http.rs` asks its ports what they are, without a login.
 ureq.workspace = true
 tempfile.workspace = true

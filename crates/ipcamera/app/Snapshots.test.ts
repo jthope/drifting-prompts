@@ -1,11 +1,3 @@
-// The gallery's filtering, sorting, grouping, sizes and selection, on
-// snapshots made up here. The videos and events pages share all of it
-// (`views/library.ts`, `views/grid.tsx`).
-//
-// `App.test.tsx` covers the page around them, but it can only open the gallery
-// empty: nsh grants a test no file system, so it cannot put PNGs where the app
-// reads them, and widening the app's own grant for a test isn't worth it. These
-// read `views/snapshots.ts` directly, which is all the logic the page shows.
 import { expect, test } from "nsh/test";
 import type { SnapshotInfo } from "ipcamera/native";
 import { columnsFor } from "./views/grid";
@@ -29,7 +21,6 @@ import {
 
 const DAY = 86_400_000;
 
-/** The camera the throwaway settings start with. */
 const camera = () => states()[0].id;
 
 function shot(name: string, takenAt: number, cameraId: string, tags: string[] = [], event = ""): SnapshotInfo {
@@ -42,7 +33,6 @@ function noon(): number {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime();
 }
 
-/** Four snapshots: two of the camera, one of a camera since deleted, one put in the folder by hand, which names no camera. */
 function seed() {
   const today = noon();
   snapshots.set([
@@ -58,7 +48,6 @@ function seed() {
   snapshotLibrary.collapsed.set([]);
 }
 
-/** A press with no key held. */
 const plain = { shift: false, control: false, platform: false };
 
 const names = (list: SnapshotInfo[]) => list.map((each) => each.name);
@@ -89,7 +78,6 @@ test("by camera, cameras go by name, with the snapshots no camera claims last", 
 
   expect(sections().map((section) => section.title)).toEqual(["Camera 1", "Deleted camera", "Unknown camera"]);
   expect(names(sections()[0].items)).toEqual(["today", "yesterday"]);
-  // The viewer steps through them in the page's order, sections and all.
   expect(names(ordered())).toEqual(["today", "yesterday", "months-ago", "last-year"]);
 });
 
@@ -162,7 +150,6 @@ test("the Tag filter keeps those taken by hand, those events took, or one thing 
   snapshotLibrary.tagFilter.set("event");
   expect(names(visible())).toEqual(["car", "car-and-driver"]);
 
-  // An event's Show in Snapshots narrows to what it saved.
   snapshotLibrary.tagFilter.set("all");
   snapshotLibrary.eventFilter.set("e2");
   expect(names(visible())).toEqual(["car-and-driver"]);
@@ -194,7 +181,6 @@ test("rows hold as many pictures as fit, and each section starts with its headin
     "# Unknown camera (1)",
     "last-year",
   ]);
-  // Wider, a section's pictures share a row, and each row is known by its first picture.
   const wide = rowsOf(sections(), 4).filter((row) => row.kind === "tiles");
   expect(wide.map((row) => (row.kind === "tiles" ? row.items.length : 0))).toEqual([2, 1, 1]);
   expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
@@ -210,12 +196,10 @@ test("a heading folds its section away, keeping the heading, and opens it again"
   snapshotLibrary.toggleCollapsed(camera1);
   expect(snapshotLibrary.isCollapsed(camera1)).toBe(true);
   expect(shown()).toEqual(["# Camera 1 (folded)", "# Deleted camera", "months-ago", "# Unknown camera", "last-year"]);
-  // Folded, its snapshots are still the page's: the viewer steps through them, and a heading's checkbox selects them.
   expect(names(ordered())).toEqual(["today", "yesterday", "months-ago", "last-year"]);
   snapshotLibrary.toggleSection(camera1);
   expect(names(snapshotLibrary.chosen())).toEqual(["today", "yesterday"]);
 
-  // Another grouping has sections of its own; back by camera, the section is folded as it was left.
   grouping.set("month");
   expect(shown().some((row) => row.endsWith("(folded)"))).toBe(false);
   grouping.set("camera");
@@ -224,7 +208,6 @@ test("a heading folds its section away, keeping the heading, and opens it again"
   snapshotLibrary.toggleCollapsed(camera1);
   expect(shown()).toEqual(["# Camera 1", "today", "yesterday", "# Deleted camera", "months-ago", "# Unknown camera", "last-year"]);
 
-  // Ungrouped, there is no heading to open it again by, so nothing folds.
   grouping.set("none");
   snapshotLibrary.toggleCollapsed(sections()[0].key);
   expect(shown()).toEqual(["today", "yesterday", "months-ago", "last-year"]);
@@ -238,19 +221,16 @@ test("a press opens a snapshot until one is selected, then picks as Explorer doe
   expect(opened).toBe("today");
   expect(snapshotLibrary.selecting()).toBe(false);
 
-  // Control picks without opening, and from then on a plain press picks too.
   snapshotLibrary.press(yesterday, { ...plain, control: true }, () => (opened = "yesterday"));
   snapshotLibrary.press(lastYear, plain, () => (opened = "last-year"));
   expect(opened).toBe("today");
   expect(names(snapshotLibrary.chosen())).toEqual(["yesterday", "last-year"]);
 
-  // Shift adds every one from the last picked, in the page's order; a plain press takes one out.
   snapshotLibrary.press(today, { ...plain, shift: true }, () => {});
   expect(names(snapshotLibrary.chosen())).toEqual(["today", "yesterday", "months-ago", "last-year"]);
   snapshotLibrary.press(yesterday, plain, () => {});
   expect(names(snapshotLibrary.chosen())).toEqual(["today", "months-ago", "last-year"]);
 
-  // With nothing selected again, a press opens.
   snapshotLibrary.clearSelection();
   snapshotLibrary.press(lastYear, plain, () => (opened = "last-year"));
   expect(opened).toBe("last-year");
@@ -285,7 +265,6 @@ test("Select all takes what the filters keep, and the selection drops what they 
   snapshotLibrary.keepShown();
   expect(names(snapshotLibrary.chosen())).toEqual(["months-ago"]);
 
-  // What a filter hid doesn't come back selected with it.
   clearFilters();
   expect(names(snapshotLibrary.chosen())).toEqual(["months-ago"]);
 });
@@ -307,7 +286,6 @@ test("each size fits its own number of pictures across, and a list one to a row"
   expect(columnsFor(1100, "medium")).toBe(4);
   expect(columnsFor(1100, "small")).toBe(7);
   expect(columnsFor(1100, "list")).toBe(1);
-  // Never none, and never more than a size holds however wide.
   expect(columnsFor(300, "large")).toBe(1);
   expect(columnsFor(4000, "small")).toBe(12);
   expect(snapshotLibrary.size()).toBe("medium");

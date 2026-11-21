@@ -1,9 +1,3 @@
-// The videos page's filtering, grouping, totals and labels, on recordings made up here.
-//
-// As with `Snapshots.test.ts`, `App.test.tsx` can only open the page empty,
-// because a test gets no file system to put recordings where the app reads
-// them. These read `views/recordings.ts` directly instead, and
-// `src/camera/recording.rs` tests the files.
 import { expect, test } from "nsh/test";
 import type { VideoInfo } from "ipcamera/native";
 import { rowsOf } from "./views/library";
@@ -27,7 +21,6 @@ import { snapshotLibrary } from "./views/snapshots";
 
 const DAY = 86_400_000;
 
-/** The camera the throwaway settings start with. */
 const camera = () => states()[0].id;
 
 function video(name: string, startedAt: number, seconds: number, recording = false, cameraId = "cam"): VideoInfo {
@@ -40,7 +33,6 @@ function noon(): number {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime();
 }
 
-/** The page as it first opens: newest first, by day, nothing filtered. */
 function fresh() {
   clearFilters();
   videoLibrary.order.set("newest");
@@ -82,7 +74,6 @@ test("the camera and date filters narrow the videos, and the totals follow", () 
   expect(names(visible())).toEqual(["porch-today"]);
   expect(filtered()).toBe(true);
   expect(videoLibrary.summary()).toContain("Camera 1, Last 7 days");
-  // The player steps through what the page shows, and nothing else.
   expect(names(ordered())).toEqual(["porch-today"]);
 
   videoLibrary.cameraFilter.set("nobody");
@@ -108,7 +99,6 @@ test("oldest first and by camera, the tiles say the date their heading no longer
   fresh();
   const today = noon();
   videos.set([video("new", today, 1, false, camera()), video("old", today - 3 * DAY, 1, false, camera())]);
-  // Under a day's heading, the time is enough.
   expect(startedLabel(videos()[0])).toBe(new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(today)));
 
   videoLibrary.order.set("oldest");

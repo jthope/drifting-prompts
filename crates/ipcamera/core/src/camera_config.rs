@@ -1,14 +1,5 @@
-//! One camera's settings: who made it, how to reach it, its stream and its control ports.
-//!
-//! The [`Brand`] decides the protocols behind the stream: the RTSP path a blank override stands
-//! for, and how PTZ, motion and a spotlight are reached (Dahua's DVRIP, or its HTTP API on
-//! `api_port` when `http_api` is on; Reolink's HTTP API there; ONVIF). A camera that names no
-//! brand is Dahua's.
-//!
-//! `CameraConfig` is a plain value that the media and PTZ code hold a copy of. Each camera the app
-//! knows is one of these in `data\settings\cameras.json`, reached through the
-//! [`Library`](crate::library::Library). Groups refer to a camera only by its
-//! [`CameraId`], so its details exist once however many groups it is in.
+//! One camera's settings: who made it, how to reach it, its stream and its control ports. Its
+//! [`Brand`] decides the default RTSP path and the protocols of its controls.
 
 use std::fmt;
 
@@ -24,82 +15,61 @@ use crate::{
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CameraConfig {
-    /// What groups and layouts call this camera by. Empty until the camera store gives it one.
+    /// What groups and views call this camera by; empty until the camera store gives it one.
     pub id: CameraId,
     /// The name the user gave it.
     pub name: String,
-    /// Who made it, which decides its default RTSP path and the protocols of its controls.
+    /// Who made it.
     pub brand: Brand,
-    /// The camera's address on the network: a host name or an IP address.
+    /// A host name or an IP address.
     pub host: String,
     /// The account it logs in with.
     pub user: String,
-    /// That account's password, as it is: the media and PTZ code log in with it. `cameras.json`
-    /// keeps it encrypted for the Windows account (`saved_password.rs`). Never printed: see the
-    /// `Debug` impl.
+    /// That account's password, in the clear; never printed (see the `Debug` impl).
     pub password: String,
-    /// The RTSP port, 554 on most cameras.
+    /// The RTSP port.
     pub rtsp_port: u16,
     /// The camera's channel, from 1.
     pub channel: u32,
-    /// The main stream or the sub stream. Saved as `sub_stream`, 0 or 1.
+    /// The main stream or the sub stream, saved as `sub_stream`, 0 or 1.
     #[serde(rename = "sub_stream")]
     pub stream: Stream,
-    /// The RTSP path to use instead of Dahua's `/cam/realmonitor?channel=N&subtype=M`; empty for
-    /// that one, and `/` for a bare `rtsp://host:554`. For a Reolink, it can instead name one of
-    /// its FLV streams, `flv:channel0_ext.bcs`, which goes over `api_port` ([`StreamPath`]).
+    /// The RTSP path in place of the brand's (`/` for no path), or a Reolink's `flv:` stream.
     pub rtsp_path_override: String,
     /// Whether RTSP carries the stream over TCP rather than UDP.
     pub use_tcp: bool,
     /// Whether a lost stream reconnects by itself.
     pub auto_reconnect: bool,
-    /// The ONVIF service's port: a camera of another brand's PTZ goes over it, and any camera's
-    /// events with `onvif_events` on.
+    /// The ONVIF service's port.
     pub onvif_port: u16,
     /// The ONVIF device service's path.
     pub onvif_device_path: String,
-    /// The DVRIP port, which a Dahua camera's PTZ goes over unless `http_api` is on.
+    /// The DVRIP port, for a Dahua's PTZ unless `http_api` is on.
     pub dvrip_port: u16,
-    /// The port of the camera's own HTTP API: a Reolink's, which its PTZ, motion and spotlight go
-    /// over (443, HTTPS, as Reolink cameras ship), or a Dahua's (80, plain HTTP), which its PTZ
-    /// and light go over with `http_api` on.
+    /// The port of the camera's own HTTP API: a Reolink's, or a Dahua's with `http_api` on.
     pub api_port: u16,
     /// Whether that API is HTTPS rather than plain HTTP.
     pub api_https: bool,
-    /// For a Dahua: whether its PTZ goes over its HTTP API rather than DVRIP, and its light is
-    /// switched there. Off until Detect turns it on for a camera whose DVRIP port is closed, as
-    /// Amcrest's light bulb cameras', or that has a light. A Reolink always uses its API, and
-    /// another brand's camera has none.
+    /// For a Dahua: whether its PTZ and light go over its HTTP API rather than DVRIP.
     pub http_api: bool,
-    /// Whether the app watches the camera's ONVIF events for motion and what it tells apart, for
-    /// a camera that isn't a Reolink (a Reolink is watched over its own API). Off until the user
-    /// or Detect turns it on: not every camera has ONVIF on, and a failed ONVIF login counts
-    /// against the account like any other.
+    /// Whether the app watches the camera's ONVIF events, for a camera that isn't a Reolink. Off by
+    /// default: a failed ONVIF login counts against the account like any other.
     pub onvif_events: bool,
-    /// The streams the camera said it has when Detect last asked it with a login, for the form
-    /// to offer; empty until then, and for a camera that lists none. Choosing one saves its path
-    /// as `rtsp_path_override`: nothing else reads this.
+    /// The streams the camera listed when Detect last asked it with a login.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub streams: Vec<crate::CameraStream>,
-    /// Whether the camera's ONVIF refused this login when Detect asked with it, where the login
-    /// works another way (a Reolink's or a Dahua's own protocol). Detect then leaves ONVIF
-    /// alone, since every refused login counts against the account, until the form's address,
-    /// login or ONVIF port changes.
+    /// Whether ONVIF refused a login that works another way; Detect then leaves ONVIF alone, since
+    /// every refused login counts against the account, until the address, login or port changes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub onvif_refused: bool,
-    /// Whether the app logs what this camera sees as events, while Settings → Automation logs
-    /// them: on the Events page, with their alerts and what each saves. On until the user turns it
-    /// off; off, the camera is asked what it sees only while it streams, for its badge, as every
-    /// camera is with events off.
+    /// Whether the app logs what this camera sees as events.
     pub log_events: bool,
-    /// How this camera's event videos are made, in place of Settings → Automation's as a whole;
-    /// `None` follows Settings → Automation.
+    /// This camera's own event video settings; `None` follows Settings → Automation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_video: Option<crate::EventVideo>,
 }
 
-/// A Dahua camera's usual ports and paths, with no name, address or login: those are the user's
-/// to enter, and a default that named a camera would be mistaken for one that is set up.
+/// No name, address or login, so a default is never mistaken for a camera that is set up.
 impl Default for CameraConfig {
     fn default() -> Self {
         Self {
@@ -131,8 +101,7 @@ impl Default for CameraConfig {
 }
 
 impl CameraConfig {
-    /// How this camera's event videos are made: its own settings where it has them, else
-    /// `app`'s (Settings → Automation's), within the app's ranges either way.
+    /// This camera's event video settings, else `app`'s, within the app's ranges either way.
     pub fn event_video_or(&self, app: &crate::EventVideo) -> crate::EventVideo {
         self.event_video
             .clone()
@@ -140,8 +109,7 @@ impl CameraConfig {
             .within_limits()
     }
 
-    /// A new camera of `brand`, with that brand's usual ports: Reolink's ONVIF service listens on
-    /// 8000 where Dahua's is on 80, and its API is HTTPS on 443 where Dahua's is plain HTTP on 80.
+    /// A new camera of `brand`, with that brand's usual ports.
     pub fn for_brand(brand: Brand) -> Self {
         let mut camera = Self {
             brand,
@@ -192,25 +160,21 @@ impl fmt::Debug for CameraConfig {
     }
 }
 
-/// Who made a camera, as far as the app needs to know: it decides the RTSP path a blank override
-/// stands for, and how PTZ, motion and a spotlight are reached.
-///
-/// Saved by [`key`](Self::key). A brand this build doesn't know, from a newer app, reads as
-/// [`Other`](Self::Other), so the app never speaks the wrong protocol to it.
+/// Who made a camera. An unknown brand reads as [`Other`](Self::Other), so the app never speaks
+/// the wrong protocol to it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Brand {
-    /// Dahua, and the Amcrest and other cameras built on Dahua's firmware: PTZ over DVRIP, or
-    /// PTZ and a light over its HTTP API.
+    /// Dahua, and cameras built on its firmware such as Amcrest's.
     #[default]
     Dahua,
-    /// Reolink: PTZ, motion, AI detections and the spotlight over its HTTP API.
+    /// Reolink.
     Reolink,
-    /// Any other camera: its stream only, at the RTSP path the user gives.
+    /// Any other camera.
     Other,
 }
 
 impl Brand {
-    /// Every brand, in the order the form lists them.
+    /// Every brand, in order.
     pub const ALL: [Brand; 3] = [Brand::Dahua, Brand::Reolink, Brand::Other];
 
     /// The name saved in `cameras.json`.
@@ -229,7 +193,7 @@ impl Brand {
             .find(|brand| brand.key() == key.trim())
     }
 
-    /// What the form calls it.
+    /// Its display name.
     pub const fn title(self) -> &'static str {
         match self {
             Self::Dahua => "Dahua / Amcrest",
@@ -252,21 +216,19 @@ impl<'de> Deserialize<'de> for Brand {
     }
 }
 
-/// Which of a camera's two streams: the full picture, or the small one it sends beside it.
-///
-/// Saved as Dahua numbers them, 0 and 1. A number that is neither, from a hand edit, reads as the
-/// main stream rather than making the whole file unreadable.
+/// Which of a camera's two streams. Saved as 0 or 1; any other number reads as the main stream
+/// rather than making the file unreadable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Stream {
-    /// The main stream: the camera's full picture.
+    /// The camera's full picture.
     #[default]
     Main,
-    /// The sub stream: a smaller picture that costs less to decode.
+    /// A smaller picture that costs less to decode.
     Sub,
 }
 
 impl Stream {
-    /// Dahua's number for it, which the RTSP path and `cameras.json` carry: 0 or 1.
+    /// Dahua's number for it: 0 or 1.
     pub const fn index(self) -> u8 {
         match self {
             Self::Main => 0,
@@ -283,7 +245,7 @@ impl Stream {
         }
     }
 
-    /// What the stats strip calls it: `main` or `sub`.
+    /// `main` or `sub`.
     pub const fn label(self) -> &'static str {
         match self {
             Self::Main => "main",
@@ -305,12 +267,7 @@ impl<'de> Deserialize<'de> for Stream {
     }
 }
 
-/// Why a camera can't be saved or played, as the app's settings form says it. The form checks the
-/// text the user typed and the library checks the settings that come of it, with these same
-/// sentences, so the desktop, the web build and the server refuse a camera alike.
-///
-/// In C# terms, a validation error as an enum rather than an exception: the caller gets it in a
-/// `Result` and can tell the cases apart, and [`message`](Self::message) is what the user reads.
+/// Why a camera can't be saved or played.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InvalidCamera {
     /// The camera has no name.
@@ -323,12 +280,12 @@ pub enum InvalidCamera {
     BadPort,
     /// The channel is 0.
     BadChannel,
-    /// The stream is one of a Reolink's FLV streams, on a camera of another brand.
+    /// A Reolink's FLV stream, on a camera of another brand.
     FlvNotReolink,
 }
 
 impl InvalidCamera {
-    /// What the user reads: a sentence that says what to enter.
+    /// A sentence that says what to enter.
     pub const fn message(self) -> &'static str {
         match self {
             Self::NoName => "Give the camera a name.",
@@ -352,9 +309,7 @@ impl fmt::Display for InvalidCamera {
 impl std::error::Error for InvalidCamera {}
 
 impl CameraConfig {
-    /// Checks that this camera can be saved: a name, what a stream needs
-    /// ([`validate_stream`](Self::validate_stream)), and control ports that aren't 0. The first
-    /// problem found.
+    /// Checks that this camera can be saved, returning the first problem found.
     pub fn validate(&self) -> Result<(), InvalidCamera> {
         if self.name.trim().is_empty() {
             return Err(InvalidCamera::NoName);
@@ -366,10 +321,7 @@ impl CameraConfig {
         Ok(())
     }
 
-    /// Checks what connecting to the stream needs, so the user gets a sentence instead of a
-    /// connection error: an address, a username, an RTSP port that isn't 0 and a channel from 1,
-    /// and for an FLV stream a Reolink with an API port that isn't 0. A camera in a hand-edited
-    /// file may lack the rest and still play.
+    /// Checks only what connecting to the stream needs: a hand-edited camera may lack the rest.
     pub fn validate_stream(&self) -> Result<(), InvalidCamera> {
         let flv = matches!(self.stream_path(), StreamPath::ReolinkFlv(_));
         if self.host.trim().is_empty() {
@@ -387,15 +339,12 @@ impl CameraConfig {
         }
     }
 
-    /// How the app reaches this camera's stream: at an RTSP path, or as one of a Reolink's FLV
-    /// streams.
+    /// An RTSP path, or one of a Reolink's FLV streams.
     pub fn stream_path(&self) -> StreamPath<'_> {
         StreamPath::of(&self.rtsp_path_override)
     }
 
-    /// Where this camera's stream is, with no login in it, for telling two streams apart: its
-    /// RTSP URL ([`rtsp_url::build`](crate::rtsp_url::build)), or for an FLV stream the camera's
-    /// API port and the stream's name.
+    /// Where this camera's stream is, with no login in it, for telling two streams apart.
     pub fn stream_address(&self) -> String {
         match self.stream_path() {
             StreamPath::Rtsp(_) => crate::rtsp_url::build(self),
@@ -409,8 +358,7 @@ impl CameraConfig {
         }
     }
 
-    /// Environment variables win over the saved settings, which is what makes a one-off run
-    /// against another camera or a CI job possible without editing the saved settings.
+    /// Overrides the address and login with `IPCAMERA_HOST`, `_USER` and `_PASSWORD` when set.
     pub fn apply_env(&mut self) {
         if let Some(host) = non_empty_env("IPCAMERA_HOST") {
             self.host = host;
@@ -423,9 +371,7 @@ impl CameraConfig {
         }
     }
 
-    /// Who it logs in as and where, as the stats strip shows it: `admin@192.0.2.10:554 · ch1 main`,
-    /// or the path in place of the channel and stream when one overrides them, at the API's port
-    /// for an FLV stream.
+    /// Who it logs in as and where: `admin@192.0.2.10:554 · ch1 main`, or the overriding path.
     pub fn stream_label(&self) -> String {
         let stream = match self.rtsp_path_override.trim() {
             "" => format!("ch{} {}", self.channel, self.stream.label()),
@@ -438,16 +384,14 @@ impl CameraConfig {
         format!("{}@{}:{port}  ·  {stream}", self.user, self.host)
     }
 
-    /// These settings with `stream` in place of the stream they name, for a tile that picks
-    /// another; `None` leaves them as they are. The address, the login and the rest stay the
-    /// camera's, so the media code connects to the tile's stream as to any camera.
+    /// These settings with `stream` in place of the stream they name; `None` changes nothing.
     pub fn with_stream(&self, stream: Option<&TileStream>) -> CameraConfig {
         let mut camera = self.clone();
         match stream {
             None | Some(TileStream::Own) => {}
             Some(TileStream::Brand(stream)) => {
                 camera.stream = *stream;
-                // The brand's path, not one the camera's own stream was given.
+                // The brand's path, not the camera's own override.
                 camera.rtsp_path_override.clear();
             }
             Some(TileStream::Path(path)) => camera.rtsp_path_override = path.clone(),

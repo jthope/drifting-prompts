@@ -1,6 +1,3 @@
-// What the gallery shows: the snapshots from Rust, and how they are filtered,
-// sorted and grouped. Like `model.ts`, these are module-level signals, so the
-// header's menus, the page and the viewer share them.
 import { createAnimatedValue, signal } from "nsh";
 import { type SnapshotInfo, Snapshots } from "ipcamera/native";
 import { confirmDelete, notify } from "../../../dp/ui";
@@ -12,16 +9,13 @@ import { storage } from "./model";
 export const snapshots = signal<SnapshotInfo[]>([]);
 /** Whether the first read has arrived, so the page doesn't say there are none while it reads. */
 export const loaded = signal(false);
-/** How the gallery is narrowed, sorted and grouped: by month until the user picks. */
+/** How the gallery is narrowed, sorted and grouped. */
 export const snapshotLibrary = libraryOf(snapshots, (shot) => shot.takenAt, "month");
 export const { order, grouping, cameraFilter, period, filtered, clearFilters, visible, sections, ordered } = snapshotLibrary;
 /** The snapshot open in the viewer, by its file name. */
 export const viewing = signal<string | null>(null);
 
-/**
- * The gallery's scroll offset, fed natively by its list: the hero fades and
- * slides with it, and the header's count fades in, with no JS per frame.
- */
+/** The gallery's scroll offset, fed natively by its list, with no JS per frame. */
 export const galleryScroll = createAnimatedValue(0);
 
 let reading = 0;
@@ -40,7 +34,7 @@ export function reload() {
 
 const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
 
-/** When a snapshot was taken, as its tile says it: as much as its section's title doesn't. */
+/** When a snapshot was taken, as much as its section's title doesn't say. */
 export const takenLabel = snapshotLibrary.timeLabel;
 
 /** When a snapshot was taken, in full, for the viewer. */
@@ -70,11 +64,7 @@ export async function deleteSnapshot(shot: SnapshotInfo): Promise<boolean> {
   }
 }
 
-/**
- * Asks, then deletes `list` for good, one after another: one that fails says
- * why, and the rest still go. What was deleted leaves the selection; what
- * failed stays in it. One alone is asked about as its own Delete asks.
- */
+/** Asks, then deletes `list` for good, one after another, so a failure stops none of the rest. */
 export async function deleteSnapshots(list: SnapshotInfo[]) {
   if (list.length === 0) return;
   if (list.length === 1) {
@@ -103,11 +93,7 @@ export function revealSnapshot(shot: SnapshotInfo) {
 }
 
 export function openSnapshotsFolder() {
-  try {
-    Snapshots.openFolder();
-  } catch (error) {
-    failed(error);
-  }
+  Snapshots.openFolder().catch(failed);
 }
 
 /** What a picture's menu offers, in the grid and in the viewer. */

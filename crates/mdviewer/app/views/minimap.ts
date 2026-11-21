@@ -1,47 +1,18 @@
-// Where the reader's marks of a whole file go, worked out apart from drawing so
-// the tests can read it: the scroll bars' marks and the heading rail.
-//
-// Each view's scroll bar carries the file's shape: a dash for each heading on
-// its left, a tick for each match of the search in its middle, and a line along
-// the section the reader is in on its right. Raw's are its editor's own overview
-// ruler (`rulerMarks`, decorations with an `overviewRuler` mark, beside the
-// search's in `search.ts`); Rendered's are drawn over its scroll bar
-// (`onTrack`), placed from where the page measured its sections.
-//
-// The heading rail stands in for the outline while it is hidden: a short line
-// for each heading at the reader's edge, longer for higher levels, placed by
-// its line's share of the file (`railLines`), the one the reader is under in the
-// focus ring's color. The pointer resting on it opens the headings by name.
-//
-// The map beside each view (`map.tsx`) draws the whole file small, as a
-// `MapPicture` of bars in the map's own units, scaled to its size as it draws.
-// Raw's (`rawMap`) is its lines, a unit each: every run of words a bar in the
-// text's color, the parts its marks name in their syntax colors over it, a band
-// behind each code block, the headings' names written over them. Rendered's
-// (`pageMap`) is its page, a unit a point: each block a shape (a heading's bar, a
-// paragraph's lines, a code block's box, a table's grid), sized by an estimate
-// of its height within its section, whose top and height the page measured. Under
-// the pointer, the map shows that part of the file larger (`lineAtPage`,
-// `blockAround`).
 import type { EditorDecoration, TextViewBlock, TextViewDocument, TextViewInline } from "nsh/base";
 import type { HeadingInfo, MarkInfo, MarkKind } from "mdviewer/native";
 import { headingAt } from "./document";
 
-/**
- * The marks' classes: a heading's in the theme's heading color, the section
- * the reader is in in its focus ring's. A table, so nsh's check of class
- * names, which doesn't know the app's own `syntax-heading`, leaves it alone.
- */
+/** The marks' classes, in a table so nsh's class-name check, which doesn't know `syntax-heading`, leaves them alone. */
 export const MARKS = { heading: "bg-syntax-heading", section: "bg-ring", line: "bg-muted-foreground/50" };
 
-/** The lines section `index` spans: from heading `index`'s line to the line before the next heading; before the first heading for -1. `lineCount` is the file's. */
+/** The lines section `index` spans; -1 is before the first heading. */
 export function sectionLines(headings: HeadingInfo[], index: number, lineCount: number): { first: number; last: number } {
   const first = index < 0 ? 0 : (headings[index]?.line ?? 0);
   const next = headings[index + 1]?.line ?? lineCount;
   return { first, last: Math.max(first, next - 1) };
 }
 
-/** Raw's ruler: a dash for each heading in its left lane, and a line along the section the reader is in (`current`, a heading's index; -1 for none) in its right one. */
+/** Raw's overview ruler marks: the headings, and the section of heading `current` (-1 for none). */
 export function rulerMarks(headings: HeadingInfo[], current: number, lineCount: number): EditorDecoration[] {
   const marks: EditorDecoration[] = headings.map((heading) => ({
     range: { start: { line: heading.line, column: 0 }, end: { line: heading.line, column: 0 } },
@@ -54,23 +25,18 @@ export function rulerMarks(headings: HeadingInfo[], current: number, lineCount: 
   return marks;
 }
 
-/** Where `offset`, a place down a page `content` tall, falls on its scroll bar, `track` tall: in proportion, as the bar maps the page. */
+/** Where `offset` down a page `content` tall falls on a scroll bar `track` tall. */
 export function onTrack(offset: number, content: number, track: number): number {
   if (content <= 0) return 0;
   return Math.min(track, Math.max(0, (offset / content) * track));
 }
 
-/** How long a rail's line is for a heading `depth` levels under the file's top one, in points. */
 const RAIL_WIDTHS = [20, 14, 10, 7];
 
-/** A line of the heading rail: its heading's index, how far down the rail, and how long. */
+/** A line of the heading rail: its heading's index, how far down, and how long. */
 export type RailLine = { index: number; top: number; width: number };
 
-/**
- * The rail's lines, one for each of `headings`, down a rail `height` tall with
- * `margin` above and below: each as far down as its line is into the file's
- * `lineCount` lines, longer the higher its level.
- */
+/** The heading rail's lines, placed by each heading's line's share of the file. */
 export function railLines(headings: HeadingInfo[], lineCount: number, height: number, margin: number): RailLine[] {
   const top = Math.min(6, ...headings.map((heading) => heading.level));
   const room = Math.max(0, height - margin * 2);
@@ -85,22 +51,20 @@ export function railLines(headings: HeadingInfo[], lineCount: number, height: nu
 /** What a bar of the map is, which picks its color. */
 export type MapInk = "text" | "heading" | "code" | "link" | "marker" | "quote" | "punctuation" | "band" | "frame";
 
-/** A bar of the map: from `x` to `x + width` across (in `MAP_COLUMNS`), and from `y` down `height` (in the picture's units). */
+/** A bar of the map: `x` and `width` in `MAP_COLUMNS`, `y` and `height` in the picture's units. */
 export type MapBar = { y: number; height: number; x: number; width: number; ink: MapInk };
 
-/** A heading's name written over the map, at `y` (in the picture's units). */
+/** A heading's name written over the map. */
 export type MapLabel = { y: number; text: string };
 
-/** What a map draws: its bars and its headings' names, in units of which the file is `extent` long (lines, or the page's points). */
+/** What a map draws, in units of which the file is `extent` long. */
 export type MapPicture = { extent: number; bars: MapBar[]; labels: MapLabel[] };
 
 /** How many columns of text the map's width stands for. */
 export const MAP_COLUMNS = 80;
 
-/** The most lines Raw's map draws one by one; a longer file draws every few, each as tall as the lines it stands for. */
 const MOST_MAP_LINES = 4000;
 
-/** The ink of each kind of mark Raw's map draws in color; the others are text. */
 const MARK_INKS: Partial<Record<MarkKind, MapInk>> = {
   heading: "heading",
   code: "code",
@@ -111,13 +75,12 @@ const MARK_INKS: Partial<Record<MarkKind, MapInk>> = {
   punctuation: "punctuation",
 };
 
-/** The headings whose names a map writes: the file's top two levels, so the names stay apart. */
 function labeled(headings: HeadingInfo[]): HeadingInfo[] {
   const top = Math.min(6, ...headings.map((heading) => heading.level));
   return headings.filter((heading) => heading.level <= top + 1);
 }
 
-/** Raw's map of `text`: a bar for each run of words of each line, its `marks` in their colors over them, a band behind each code block and the front matter, and its top headings' names. */
+/** Raw's map of `text`, a unit a line. */
 export function rawMap(text: string, marks: MarkInfo[], headings: HeadingInfo[]): MapPicture {
   const lines = text.split("\n");
   const step = Math.max(1, Math.ceil(lines.length / MOST_MAP_LINES));
@@ -130,7 +93,6 @@ export function rawMap(text: string, marks: MarkInfo[], headings: HeadingInfo[])
   }
   lines.forEach((line, index) => {
     if (!drawn(index)) return;
-    // Words a single space apart are one run.
     for (const run of line.replace(/\r$/, "").matchAll(/\S+(?: \S+)*/g)) {
       const x = run.index ?? 0;
       if (x >= MAP_COLUMNS) break;
@@ -145,7 +107,6 @@ export function rawMap(text: string, marks: MarkInfo[], headings: HeadingInfo[])
   return { extent: lines.length, bars, labels: labeled(headings).map((heading) => ({ y: heading.line, text: heading.title })) };
 }
 
-/** The text `inlines` show, run together. */
 function plainText(inlines: TextViewInline[]): string {
   return inlines
     .map((each) => {
@@ -171,10 +132,9 @@ function plainText(inlines: TextViewInline[]): string {
     .join("");
 }
 
-/** How many lines of the page `characters` of text take, at about 90 to a line. */
 const textLines = (characters: number) => Math.max(1, Math.ceil(characters / 90));
 
-/** About how tall `block` is on the page, in lines of text: what the page map shares a section's height by. */
+/** About how tall `block` is on the page, in lines of text. */
 export function blockWeight(block: TextViewBlock): number {
   switch (block.type) {
     case "heading":
@@ -198,10 +158,8 @@ export function blockWeight(block: TextViewBlock): number {
   }
 }
 
-/** The bars of `block` (`weight` from `blockWeight`), from `y` down `height` points of the page. */
 function blockBars(block: TextViewBlock, y: number, height: number, weight: number): MapBar[] {
   const lineHeight = height / Math.max(1, weight);
-  /** `count` lines of text from `top`, `indent` columns in, the last shorter. */
   const textRows = (top: number, count: number, indent: number, ink: MapInk = "text"): MapBar[] =>
     Array.from({ length: count }, (_, row) => ({
       y: top + row * lineHeight,
@@ -257,13 +215,7 @@ function blockBars(block: TextViewBlock, y: number, height: number, weight: numb
   }
 }
 
-/**
- * Rendered's map of the page: each of `sections` (the page's, in order) from
- * where it starts (`tops`, by section, as the page measured them) to where the
- * next starts (`end`, the page's height, after the last), its blocks sharing
- * that height by their estimated heights (`blockWeight`), each drawn as its
- * shape, and its top headings' names. A section not measured yet is left out.
- */
+/** Rendered's map of the page, a unit a point; a section not measured yet is left out. */
 export function pageMap(sections: TextViewDocument[], tops: (number | undefined)[], end: number): MapPicture {
   const bars: MapBar[] = [];
   const labels: MapLabel[] = [];
@@ -287,12 +239,7 @@ export function pageMap(sections: TextViewDocument[], tops: (number | undefined)
   return { extent: Math.max(end, 1), bars, labels };
 }
 
-/**
- * The line of a file about at `offset` down its page: in the section there
- * (`tops`, by section, `end` after the last), as far into its lines as the
- * offset is into it. `lineCount` is the file's. The inverse of `pageOffset` in
- * `search.ts`.
- */
+/** The line of a file about at `offset` down its page; the inverse of `pageOffset`. */
 export function lineAtPage(offset: number, headings: HeadingInfo[], lineCount: number, tops: (number | undefined)[], end: number): number {
   let section = 0;
   tops.forEach((top, index) => {
@@ -306,12 +253,7 @@ export function lineAtPage(offset: number, headings: HeadingInfo[], lineCount: n
   return Math.min(Math.max(0, lineCount - 1), Math.floor(first + (last - first) * share));
 }
 
-/**
- * The block of `lines` (a file's) around `line`, as the map's preview shows
- * it: from the blank line above to the blank line below, at most `most`
- * lines, around `line` when the block is longer; and the heading it is under,
- * by its index in `headings` (-1 above the first).
- */
+/** The block of `lines` between blank lines around `line`, at most `most`, and its heading's index. */
 export function blockAround(lines: string[], line: number, headings: HeadingInfo[], most = 12): { first: number; lines: string[]; heading: number } {
   const at = Math.min(Math.max(0, line), Math.max(0, lines.length - 1));
   let first = at;

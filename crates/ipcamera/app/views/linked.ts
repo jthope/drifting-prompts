@@ -1,8 +1,3 @@
-// The links between an event and the snapshot and videos it saved: an event's
-// way to its files on their own pages, and a file's way back to its event. It
-// joins `eventlog.ts`, `snapshots.ts` and `recordings.ts`, so none of those
-// needs another; the pages put what it gives in their menus, and the events
-// page's preview plays an event's videos from what it finds here.
 import { computed } from "nsh";
 import type { VideoInfo } from "ipcamera/native";
 import { notify } from "../../../dp/ui";
@@ -15,16 +10,12 @@ import { snapshotLibrary } from "./snapshots";
 /** `1 video`, `6 videos`: an event's clips, as its menu and its row say them. */
 export const clipsLabel = (count: number) => (count === 1 ? "1 video" : `${count} videos`);
 
-/** The recordings in the videos folder, by file name. */
 const videosByName = computed(() => new Map(videos().map((video) => [video.name, video])));
 
 /** The recordings `event` saved, oldest first, as the videos folder last listed them: one not listed yet is left out. */
 export const eventVideos = (event: EventItem): VideoInfo[] => event.videos.flatMap((name) => videosByName().get(name) ?? []);
 
-/**
- * Opens what `event` saved, as large as the app shows it: its picture in the
- * viewer, else its videos on the videos page; one that saved neither says so.
- */
+/** Opens what `event` saved: its picture in the viewer, else its videos on the videos page. */
 export function openEvent(event: EventItem) {
   if (event.picture !== "") viewing.set(event.name);
   else if (event.videos.length > 0) playEventsVideos(event);
@@ -38,7 +29,7 @@ export function showEventsSnapshot(event: EventItem) {
   show({ kind: "snapshots" });
 }
 
-/** Opens the videos page narrowed to `event`'s recordings, its first playing: the player's arrows step through the rest. */
+/** Opens the videos page narrowed to `event`'s recordings, its first playing. */
 export function playEventsVideos(event: EventItem) {
   showEventsVideos(event);
   playing.set(event.videos[0] ?? null);

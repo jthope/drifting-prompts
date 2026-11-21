@@ -1,9 +1,5 @@
-//! Everything Markdown Viewer saves, opened together: `settings.json` (the window's preferences
-//! and place, [`ConfigStore`]) and `projects.json` (the projects, [`ProjectStore`]), side by side
-//! beside the executable.
-//!
-//! Each file still missing is written from the defaults as they open, so there is a file to look
-//! at and edit from the first launch.
+//! `settings.json` and `projects.json`, opened together; a missing file is written from the
+//! defaults.
 
 use std::path::{Path, PathBuf};
 
@@ -20,13 +16,11 @@ pub struct Saved {
 }
 
 impl Saved {
-    /// Opens the two files in `folder`. A file that can't be used never stops the app: it is
-    /// moved aside or left alone, and [`Saved::problem`] says which.
+    /// Opens the two files in `folder`; one that can't be used is reported by [`Saved::problem`].
     pub fn open(folder: &Path) -> Self {
         let settings = ConfigStore::open(folder.join(SETTINGS_FILE));
         let projects = ProjectStore::open(folder.join(PROJECTS_FILE));
-        // If writing either fails, its first save writes it instead. One that is there but could
-        // not be read is left alone, as every write to it is refused.
+        // An existing file that could not be read is left alone: every write to it is refused.
         if !settings.path().exists() {
             let _ = settings.file().create_file();
         }
@@ -45,7 +39,7 @@ impl Saved {
         Self::open(&folder)
     }
 
-    /// What went wrong opening the files, if anything did: the first, for the app to say once.
+    /// The first problem opening the files, if any.
     pub fn problem(&self) -> Option<&str> {
         self.settings.problem().or(self.projects.problem())
     }

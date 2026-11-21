@@ -5,37 +5,26 @@ edition = "2024"
 rust-version = "1.97"
 publish = false
 license = "MIT"
-description = "What the suite's apps share to look and behave alike: the theme files, where the window was left, the folder picker and Explorer, with the styled TSX controls beside this crate."
+description = "What the suite's apps share to look and behave alike: the theme files, where the window was left, picking and showing folders, with the styled TSX controls beside this crate."
 
-# A workspace of its own, as the apps are: it is built with nsh, which the root workspace never
-# builds, and only as a dependency of each app (`dp-ui = { path = "../../dp/ui" }`). `cargo test`
-# here runs its own tests.
+# A workspace of its own: it is built with nsh, which the root workspace never builds.
 [workspace]
 
-# The root workspace's lints, said again as the apps say them. `unsafe_code` is not forbidden: the
-# Win32 and COM calls of the folder picker live here. Instead every
-# `unsafe` block must say why it is sound, in a `// SAFETY:` comment.
 [lints.rust]
+unsafe_code = "forbid"
 missing_docs = "warn"
 
 [lints.clippy]
 all = "warn"
 mod_module_files = "warn"
-undocumented_unsafe_blocks = "warn"
 
 [dependencies]
 # The `Themes` module each app registers (`#[module]`), and the tokens it sets.
-nsh-core = "0.5.1"
+nsh-core = "0.6.1"
 # Reads the theme files into tokens, as nsh reads an app's `theme.json`.
-nsh-base = "0.5.1"
-# What every product saves of its window (`Appearance`, `WindowState`), which `SavedAppearance` and
-# `WindowPlace` hand to TSX.
+nsh-base = "0.6.1"
+# What every product saves of its window.
 dp-store = { path = "../store" }
-
-# The folder picker is Win32 and COM calls, through the `windows` crate nsh's
-# Windows platform re-exports, so their version is always the one nsh builds with.
-[target.'cfg(windows)'.dependencies]
-nsh-platform-windows = { version = "0.5.1", default-features = false }
 
 # Tests only: reads the theme files as JSON, to check each sets every token.
 [dev-dependencies]

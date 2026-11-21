@@ -1,13 +1,3 @@
-// The Appearance settings every product's Settings shows, as its Appearance
-// section (`appearanceSection` in `settings.tsx`): the mode (light, dark, or
-// as the system is), the texture and the elevation over every theme, and a dark
-// theme and a light one, each theme a tile drawn in its own colors, four to a
-// row in the Settings dialog. The app saves the values with its other preferences
-// (`SavedAppearance`): `showAppearance` shows them before the first frame, and
-// `keepAppearance` keeps them as the user picks, which these settings draw and
-// report. And the title bar's quicker way to another theme (`ThemeMenu`): the
-// same mode, then the themes of the appearance it shows, each beside its
-// window in miniature.
 import { colorScheme, effect, Scroll, setColorScheme, signal, Text, View, windowSize } from "nsh";
 import { applyThemeColors, defaultTheme, highContrast, look, picked, type Scheme, swatch, THEME_SECTIONS, THEMES, type ThemeInfo, type ThemeName, theme, themeIn, themeScheme, withAlpha } from "./brand";
 import { Appear } from "./appear";
@@ -24,12 +14,7 @@ import { notify } from "./toast";
 /** Light, dark, or as the system is. */
 export type Mode = "light" | "dark" | "system";
 
-/**
- * How the window looks, as an app saves it with its preferences
- * (`dp_ui::SavedAppearance`): the mode, as whether it is dark and whether it
- * follows the system, the theme picked for each appearance, and the texture and
- * the elevation, each by name.
- */
+/** How the window looks, as an app saves it (`dp_ui::SavedAppearance`). */
 export interface SavedAppearance {
   dark: boolean;
   followSystem: boolean;
@@ -39,22 +24,15 @@ export interface SavedAppearance {
   elevation: string;
 }
 
-/** The theme whose colors show, so a change of appearance shows the other pick's only when it differs. */
 let colorsShown: ThemeName | undefined;
 
-/** Shows `name`'s colors. A failure leaves the colors the app had, and says why. */
 function showColors(name: ThemeName) {
   if (name === colorsShown) return;
   colorsShown = name;
   applyThemeColors(name).catch((error) => notify(`The theme's colors could not be shown: ${String(error)}`, "warn"));
 }
 
-/**
- * Shows the appearance `saved` keeps. An app calls it before its first frame,
- * so a light window never flashes dark or the other way round, and the theme,
- * texture and elevation never flash others. A name this version doesn't know,
- * as a hand-edited `settings.json` can have, is Default.
- */
+/** Shows the appearance `saved` keeps; before the first frame, so nothing flashes. */
 export function showAppearance(saved: SavedAppearance): void {
   picked.dark.set(themeIn(saved.darkTheme, "dark"));
   picked.light.set(themeIn(saved.lightTheme, "light"));
@@ -64,29 +42,21 @@ export function showAppearance(saved: SavedAppearance): void {
   elevation.set(elevationNamed(saved.elevation));
 }
 
-/** The appearance as an app keeps it: the mode, what Appearance and the theme menu report, and what to save. */
+/** The appearance as an app keeps it: the mode, the picks, and what to save. */
 export interface KeptAppearance {
-  /** The mode: light, dark, or as the system is. */
   mode: () => Mode;
   setMode: (mode: Mode) => void;
-  /** Picks `name` for its own appearance, which shows it at once while that appearance shows. */
+  /** Picks `name` for its own appearance. */
   pickTheme: (name: ThemeName) => void;
-  /** Picks Default for the appearance Light or Dark fixes, or for both with System: Settings shows one Default, and the mode decides which appearance it is in. */
+  /** Picks Default for the appearance the mode fixes, or for both with System. */
   pickDefault: () => void;
   setTexture: (name: TextureName) => void;
   setElevation: (name: ElevationName) => void;
-  /** The appearance as it is now, for the app to save with its other preferences. */
+  /** The appearance as it is now, to save. */
   saved: () => SavedAppearance;
 }
 
-/**
- * Keeps the appearance an app shows, from what `saved` keeps (shown already by
- * `showAppearance`): while the mode is System it follows the system, remembering
- * the appearance the system showed last as dark or not, and the colors follow the
- * theme picked for the appearance shown, from one pick to the other. Each pick
- * shows at once and calls `save`, the app's, which saves `saved()` with its
- * other preferences. An app calls it once, in its root component.
- */
+/** Keeps the appearance an app shows, calling `save` after each pick. */
 export function keepAppearance(saved: SavedAppearance, save: () => void): KeptAppearance {
   const followSystem = signal(saved.followSystem);
   const darkMode = signal(saved.dark);
@@ -145,16 +115,10 @@ const MODE_DETAILS: Record<Mode, string> = {
   system: "Light or dark as the system is, following it when it changes, each in the theme picked below.",
 };
 
-/** A short bar standing for a line of text in a theme's small window. */
 function Line(props: { color: string; width: number | `${number}%`; height?: number }) {
   return <View style={{ width: props.width, height: props.height ?? 3, borderRadius: 2, backgroundColor: props.color }} />;
 }
 
-/**
- * A theme's small window, in that theme's colors whatever the app shows now:
- * its title bar, its sidebar with a row selected, a page with a card and a
- * primary button on it, and its status bar.
- */
 function ThemePreview(props: { value: ThemeName }) {
   const shown = () => swatch(props.value);
   return (
@@ -200,11 +164,6 @@ function ThemePreview(props: { value: ThemeName }) {
   );
 }
 
-/**
- * A theme's window in miniature, small enough for a menu's row: its title bar,
- * its sidebar with a row selected, a card on its page with two lines of text
- * and a primary button, and its status bar, in its own colors.
- */
 function ThemeThumb(props: { value: ThemeName }) {
   const shown = () => swatch(props.value);
   return (
@@ -230,39 +189,22 @@ function ThemeThumb(props: { value: ThemeName }) {
   );
 }
 
-/**
- * Room the theme menu leaves between its list and the window's top and bottom,
- * in points: the title bar's, the mode's above the list (its heading, its
- * switch and the line under it, about 80), the list's heading, and a margin.
- */
+/** Room left above and below the theme menu's list, in points. */
 const MENU_ROOM = 200;
 
-/** The heading over the theme menu's list: the appearance its themes are in, and with System, that the system decides it. */
 function themesHeading(mode: Mode, scheme: Scheme): string {
   const named = scheme === "dark" ? "Dark themes" : "Light themes";
   return mode === "system" ? `${named}, while the system is ${scheme}` : named;
 }
 
-/**
- * The title bar's quick way to another theme, beside Settings' tiles: an icon
- * whose menu starts with the mode, Light, Dark or System, the same switch as
- * Settings' (`mode`, and `onMode`, the app's, which saves it), then lists the
- * themes of the appearance that mode shows (Default, then the theme files,
- * high contrast last), each beside its window in miniature, the one shown
- * checked. A mode picked there leaves the menu open, its list now the new
- * appearance's. A theme picked there is picked for its appearance alone, as
- * Settings picks it (`onPick`, the app's, which saves it), and closes the
- * menu; with the mode System, the other appearance keeps its own. The list
- * scrolls in a window too short for it.
- */
+/** The title bar's theme menu: the mode, then the themes of the appearance it shows. */
 export function ThemeMenu(props: { mode: Mode; onMode: (mode: Mode) => void; onPick: (name: ThemeName) => void; class?: string }) {
-  // The appearance shown, which the mode sets at once: its own with Light or Dark, the system's with System.
   const scheme = (): Scheme => colorScheme();
   const themes = () => THEMES.filter((each) => each.scheme === scheme());
   return (
     <PopupMenu trigger={<IconTrigger icon="palette" label="Theme" class={props.class} />}>
       <SectionLabel text="Mode" />
-      {/* A row, so the switch keeps its own width rather than stretching its track across the menu. */}
+      {/* A row, so the switch keeps its own width. */}
       <View class="flex-row px-2 pb-1">
         <Segmented items={MODES} value={props.mode} onChange={props.onMode} />
       </View>
@@ -285,11 +227,6 @@ export function ThemeMenu(props: { mode: Mode; onMode: (mode: Mode) => void; onP
   );
 }
 
-/**
- * A theme to pick, showing its own small window and its name. The one picked
- * for its appearance is ringed, with a check on its window's corner, in the
- * colors of the theme the app shows, as its primary button has them.
- */
 function ThemeTile(props: { value: ThemeName; title: string; selected: boolean; onSelect: () => void }) {
   const primary = () => look().primary;
   return (
@@ -321,22 +258,14 @@ export type AppearanceProps = {
   onMode: (mode: Mode) => void;
   /** Picks `name` for its own appearance. */
   onTheme: (name: ThemeName) => void;
-  /** Picks Default for the appearance the mode fixes, or for both with System, where the mode then decides which shows. */
+  /** Picks Default for the appearance the mode fixes, or for both with System. */
   onDefault: () => void;
   onTexture: (name: TextureName) => void;
   onElevation: (name: ElevationName) => void;
 };
 
-/** A section of the Theme setting: its themes, under `title` (none for Default's), and whether its appearance is the one shown (`inUse`). */
 type ThemeSection = { key: string; title?: string; inUse: boolean; themes: ThemeInfo[] };
 
-/**
- * The sections of themes `mode` offers, with `shown` the appearance the app
- * shows now: Default first, alone and with no heading, then a section of theme
- * files for each appearance the mode shows, Dark then Light. Default is one
- * tile, the one the mode shows: its own appearance's, or with System the one
- * for the appearance shown. With System, `inUse` marks the appearance shown.
- */
 function themeSections(mode: Mode, shown: Scheme): ThemeSection[] {
   const shows = (scheme: Scheme) => mode === "system" || mode === scheme;
   const own = defaultTheme(mode === "system" ? shown : mode);
@@ -350,11 +279,6 @@ function themeSections(mode: Mode, shown: Scheme): ThemeSection[] {
   return [defaults, ...files];
 }
 
-/**
- * A section of themes, a tile for each, under its title when it has one.
- * `inUse` marks the appearance shown. A theme file's tile picks it (`onPick`);
- * Default's picks Default for whatever the mode shows (`onDefault`).
- */
 function ThemeGroup(props: { section: ThemeSection; onPick: (name: ThemeName) => void; onDefault: () => void }) {
   return (
     <View class="gap-2">
@@ -388,14 +312,11 @@ function ThemeGroup(props: { section: ThemeSection; onPick: (name: ThemeName) =>
 export function AppearanceSettings(props: AppearanceProps) {
   const textured = () => TEXTURES.find((each) => each.value === texture())?.description ?? "";
   const contrast = () => highContrast(theme());
-  /** What the elevation does, and that a high contrast theme keeps flat whatever it is. */
   const elevated = () => {
     const said = ELEVATIONS.find((each) => each.value === elevation())?.description ?? "";
     return contrast() ? `${said} High contrast themes stay flat: their outlines mark every state.` : said;
   };
-  /** The name of the theme picked for `scheme`. */
   const pickedTitle = (scheme: Scheme) => THEMES.find((each) => each.value === picked[scheme]())?.title ?? "";
-  /** The theme the mode shows, by name: one, or both with System, said once when both picks are Default. */
   const themed = () => {
     if (props.mode !== "system") return `${pickedTitle(props.mode)}, the ${props.mode} theme the app shows.`;
     const dark = pickedTitle("dark");
@@ -415,7 +336,6 @@ export function AppearanceSettings(props: AppearanceProps) {
           <Setting icon="layers" label="Elevation" detail={elevated()} control={<Segmented items={ELEVATIONS} value={elevation()} onChange={props.onElevation} />} />
         </Appear>
         <Appear index={3}>
-          {/* Default, then a section of theme files for each appearance the mode shows, each by name, then high contrast. */}
           <Setting icon="palette" label="Theme" detail={themed()}>
             <View class="gap-4">
               <Each of={themeSections(props.mode, colorScheme())} key={(each) => each.key}>

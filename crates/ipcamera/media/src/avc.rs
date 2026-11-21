@@ -1,28 +1,7 @@
-//! An H.264 decoder element built on `rust_h264`, a decoder written in Rust by the author of the
-//! `rust_h265` that [`crate::hevc`] is built on.
+//! An H.264 decoder element on `rust_h264`: access units in, I420 pictures out.
 //!
-//! Windows' own H.264 decoder, which glass2glass's Media Foundation element creates with its
-//! defaults, cost about 160 MB per camera: it held pictures back to put them in display order, and
-//! started a worker thread per logical processor, each with pictures of its own. glass2glass has no
-//! setting for either. This decoder runs on the session's own thread,
-//! keeps only the pictures the stream refers back to, and needs nothing installed on any platform,
-//! at the cost of doing the work on the CPU.
-//!
-//! Each access unit's picture comes out as soon as the access unit is in. On its own, `rust_h264`
-//! finishes a picture only when the next one starts, a picture late, so the element finishes it
-//! after the access unit's last slice. A camera that codes the two fields of an interlaced picture
-//! as separate pictures therefore shows each field on its own, at half the height; IP cameras send
-//! whole frames.
-//!
-//! Cameras send pictures in the order they are shown, unless they use B-frames, which arrive after
-//! a picture that is shown after them. [`Reorder`] puts those back in order by their presentation
-//! times, holding back only as many pictures as the stream has turned out to need: none for a
-//! camera without B-frames. While it learns, at the start of a stream, the B-frames that arrive
-//! after a later picture has gone out are dropped.
-//!
-//! Like [`crate::hevc`], it follows glass2glass's own OpenH264 element: H.264 access units in, I420
-//! pictures out, announced by a caps change whenever the picture size changes. The pictures are
-//! already cropped to the size the stream declares.
+//! `rust_h264` finishes a picture only when the next one starts, so each access unit is flushed;
+//! [`Reorder`] puts B-frames back in display order, holding back only what the stream has needed.
 
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -41,28 +20,24 @@ use rust_h264::{
     nal::parse_annex_b,
 };
 
-/// The most pictures [`Reorder`] holds back: the most H.264 lets a stream hold back.
+/// The most pictures H.264 lets a stream hold back.
 const MOST_HELD: usize = 16;
 
-/// How many of the latest presentation times [`Reorder`] remembers, to tell how far out of order a
-/// picture arrived: more than it may ever hold back.
+/// More than [`MOST_HELD`], to tell how far out of order a picture arrived.
 const REMEMBERED: usize = 2 * MOST_HELD;
 
-/// A presentation time this far behind the last picture shown is a jump in the camera's clock,
-/// not a B-frame: B-frames are a few pictures apart.
+/// Further behind the last picture shown is a jump in the camera's clock, not a B-frame.
 const CLOCK_JUMP_NS: u64 = 2_000_000_000;
 
-/// One decoded picture, as I420 bytes.
 struct Picture {
     width: u32,
     height: u32,
     pixels: Vec<u8>,
 }
 
-/// Packs a decoded picture as I420, or says why it cannot be shown.
 fn pack(frame: rust_h264::decoder::Frame) -> Result<Picture, G2gError> {
     if frame.bit_depth != 8 || frame.chroma_format != ChromaFormat::Yuv420 {
-        // 10-bit and 4:2:2 cameras exist, but none of the converters here take them.
+        // The converters here take only 8-bit 4:2:0.
         return Err(G2gError::CapsMismatch);
     }
 
@@ -90,18 +65,12 @@ fn pack(frame: rust_h264::decoder::Frame) -> Result<Picture, G2gError> {
     })
 }
 
-/// Puts pictures that arrive in decoding order into the order they are shown, by their
-/// presentation times, holding back no more of them than the stream has needed so far.
 struct Reorder<T> {
-    /// The pictures held back, by presentation time, and in arrival order for equal times.
+    /// Keyed by presentation time, then arrival, so equal times keep their order.
     held: BTreeMap<(u64, u64), T>,
-    /// How many pictures to hold back.
     depth: usize,
-    /// The presentation times of the latest pictures to arrive, oldest first.
     latest: VecDeque<u64>,
-    /// The presentation time of the last picture let out.
     shown: Option<u64>,
-    /// Counts the pictures that arrived, to keep pictures with equal times in arrival order.
     arrivals: u64,
 }
 
@@ -116,8 +85,6 @@ impl<T> Reorder<T> {
         }
     }
 
-    /// Takes a picture shown at `pts` and returns the pictures now due, in the order they are
-    /// shown.
     fn push(&mut self, pts: u64, picture: T) -> Vec<(u64, T)> {
         let mut due = Vec::new();
         if self
@@ -130,8 +97,7 @@ impl<T> Reorder<T> {
             self.shown = None;
         }
 
-        // Every picture that arrived before this one but is shown after it had to be held back
-        // for this one to go first.
+        // Each earlier arrival shown after this one had to be held back for it.
         let overtaken = self.latest.iter().filter(|&&earlier| earlier > pts).count();
         self.depth = self.depth.max(overtaken).min(MOST_HELD);
         if self.latest.len() == REMEMBERED {
@@ -140,7 +106,7 @@ impl<T> Reorder<T> {
         self.latest.push_back(pts);
 
         if self.shown.is_some_and(|shown| pts < shown) {
-            // A picture shown after this one has gone out already.
+            // Too late: a picture shown after it has gone out.
             return due;
         }
         self.held.insert((pts, self.arrivals), picture);
@@ -155,7 +121,6 @@ impl<T> Reorder<T> {
         due
     }
 
-    /// Lets out every picture held back, in the order they are shown.
     fn drain(&mut self) -> Vec<(u64, T)> {
         let due: Vec<(u64, T)> = std::mem::take(&mut self.held)
             .into_iter()
@@ -190,15 +155,12 @@ fn output_caps(width: Dim, height: Dim, framerate: Rate, colorimetry: Colorimetr
     }
 }
 
-/// Decodes H.264 to I420.
 pub(crate) struct AvcDec {
     decoder: Decoder,
     reorder: Reorder<Picture>,
-    /// Whether a picture has come out of this stream yet.
     decoded_any: bool,
     framerate: Rate,
     colorimetry: Colorimetry,
-    /// The size last announced downstream.
     geometry: Option<(u32, u32)>,
     last_timing: FrameTiming,
     sequence: u64,
@@ -220,13 +182,8 @@ impl AvcDec {
         }
     }
 
-    /// Feeds one access unit in, finishes its picture, and returns the pictures now due, each with
-    /// its presentation time.
-    ///
-    /// A slice the decoder rejects is skipped rather than ending the stream: a camera recovers at
-    /// its next key frame, as a player decoding through a lost packet does. A stream that uses
-    /// something the decoder lacks before it has shown anything fails instead, since it would
-    /// never show anything.
+    /// A rejected slice is skipped, since a camera recovers at its next keyframe; an unsupported
+    /// stream fails before its first picture, since it would never show one.
     fn decode(&mut self, access_unit: &[u8], pts_ns: u64) -> Result<Vec<(u64, Picture)>, G2gError> {
         let mut frames = Vec::new();
         for nal in parse_annex_b(access_unit) {
@@ -352,13 +309,12 @@ impl AsyncElement for AvcDec {
                     self.last_timing = timing;
                     self.emit(pictures, timing, out).await?;
                 }
-                // The decoder announces its own caps; it only needs the colors from upstream.
+                // Only the colors matter: the decoder announces its own caps.
                 PipelinePacket::CapsChanged(Caps::CompressedVideo { colorimetry, .. }) => {
                     self.colorimetry = colorimetry;
                 }
                 PipelinePacket::CapsChanged(_) => {}
-                // The runner sends the one end of stream itself; this only hands over the
-                // pictures still held back.
+                // The runner sends end of stream itself: only hand over what is held back.
                 PipelinePacket::Eos => {
                     let pictures = self.reorder.drain();
                     let timing = self.last_timing;
@@ -391,8 +347,6 @@ impl AsyncElement for AvcDec {
 mod tests {
     use super::*;
 
-    /// Pushes pictures that arrive at `times`, and returns the times of those that come out and of
-    /// those still held back at the end.
     fn order(times: &[u64]) -> (Vec<u64>, Vec<u64>) {
         let mut reorder = Reorder::new();
         let shown = times
@@ -415,7 +369,6 @@ mod tests {
 
     #[test]
     fn b_frames_are_put_back_in_order_after_the_first_ones() {
-        // I P B B P B B P, in decoding order: each P is shown after the two Bs that follow it.
         let (shown, held) = order(&[0, 3, 1, 2, 6, 4, 5, 9, 7, 8]);
         assert_eq!(
             shown,
@@ -427,7 +380,6 @@ mod tests {
 
     #[test]
     fn a_b_frame_pyramid_holds_back_two() {
-        // I P B b b, where the middle B is a reference for the two after it.
         let (shown, held) = order(&[0, 4, 2, 1, 3, 8, 6, 5, 7, 12, 10, 9, 11]);
         assert_eq!(shown, [0, 4, 5, 6, 7, 8, 9, 10]);
         assert_eq!(held, [11, 12], "two pictures held back");
@@ -487,9 +439,6 @@ mod tests {
         ));
     }
 
-    /// The pretend camera's pictures, relayed as a camera sends them and decoded here: each access
-    /// unit gives its own picture at once, with its own time, where Windows' decoder held pictures
-    /// back.
     #[cfg(windows)]
     #[test]
     fn each_access_unit_gives_its_picture_at_once() {

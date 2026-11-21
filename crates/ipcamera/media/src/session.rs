@@ -1,18 +1,7 @@
-//! One session, over RTSP or a Reolink's FLV stream ([`crate::flv`]): a glass2glass pipeline on its
-//! own thread, with reconnect and volume control.
+//! One session, over RTSP or a Reolink's FLV stream, on a thread of its own: reconnect and volume.
 //!
-//! Threading rules this follows, and why:
-//!
-//! - **The session thread owns the pipeline.** It runs a current-thread tokio runtime that drives
-//!   the whole graph, so an element stays on the thread that set it up: glass2glass doesn't ask
-//!   its elements to be `Send`, and its Media Foundation ones aren't. Nothing else ever touches an
-//!   element.
-//! - **The UI thread only touches shared state.** It reads [`MediaStatus`] and the newest frame
-//!   in the [`FrameSlot`], and asks for a new gain, all of which are thread-safe. The session thread
-//!   passes the gain on to the running `volume` element.
-//! - **A dead session is obvious.** Every failure becomes a `Failed` status sentence rather than
-//!   a silent black pane. That includes a crash: a panic in the pipeline is caught and handled
-//!   like any other failure, so the status never stays at `Live` over a frozen picture.
+//! Only the session thread touches the graph (glass2glass's elements need not be `Send`), and a
+//! panic in it becomes a `Failed` status, never a frozen `Live`.
 
 use std::{
     panic::{self, AssertUnwindSafe},
@@ -46,17 +35,14 @@ use crate::{
     relay::Feed,
 };
 
-/// Give up after this many failed reconnects in a row rather than retrying a camera that is
-/// unplugged.
+/// Failed reconnects in a row before giving up on a camera that is unplugged.
 const MAX_ATTEMPTS: u32 = 20;
 
-/// How long the camera has to answer the first request before the attempt counts as failed.
 const ANSWER_WITHIN: Duration = Duration::from_secs(10);
 
-/// How often the session thread looks at what the UI asked for.
 const CHECK_EVERY: Duration = Duration::from_millis(50);
 
-/// What the session thread is doing. The window polls this and turns it into status text.
+/// What the session thread is doing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MediaStatus {
     /// Making the first connection.
@@ -70,40 +56,32 @@ pub enum MediaStatus {
     },
     /// [`MediaSession::stop`] ended it.
     Stopped,
-    /// It gave up, and will not try again. The sentence says why.
+    /// It gave up for good; the sentence says why.
     Failed(String),
 }
 
 impl MediaStatus {
-    /// Whether it gave up because the camera refused the login: the one failure that says the
-    /// password is wrong, which nothing else should then try by itself.
+    /// Whether it gave up because the camera refused the login, which nothing should then retry.
     pub fn login_rejected(&self) -> bool {
         matches!(self, Self::Failed(why) if *why == MediaError::LoginRejected.to_string())
     }
 }
 
-/// What a session does with the stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Output {
-    /// Decodes it into the frame slot and plays its sound: the desktop's live view.
     Display,
-    /// Passes the compressed video on to the feed's viewers, decoding nothing: the server's.
     Relay,
 }
 
 struct Shared {
     output: Output,
     status: Mutex<MediaStatus>,
-    /// The frame slot a live view decodes into, and whether anything shows it.
     visibility: Arc<Visibility>,
-    /// The compressed video for viewers, which only a relaying session fills.
     feed: Feed,
     stop: AtomicBool,
-    /// Desired linear gain, 0.0..=1.0, kept so a reconnected pipeline picks it up again.
+    /// Linear, 0.0..=1.0.
     gain: Mutex<f64>,
-    /// Whether to record, which a reconnected pipeline picks up again too.
     record: RecordControl,
-    /// Set when it gave up for a reason a retry would only repeat ([`MediaSession::refused`]).
     refused: AtomicBool,
 }
 
@@ -138,26 +116,20 @@ impl Shared {
     }
 }
 
-/// A live view of one camera, or a relay of its video. Dropping it stops the pipeline and joins its
-/// thread.
+/// A live view of one camera, or a relay of its video; dropping it stops and joins its thread.
 pub struct MediaSession {
     shared: Arc<Shared>,
     worker: Option<JoinHandle<()>>,
 }
 
 impl MediaSession {
-    /// Validates the settings and hands the connection to a worker thread, which decodes the
-    /// pictures into [`Self::frames`] and plays the sound.
+    /// Decodes the camera's pictures into [`Self::frames`] and plays its sound, on a thread of its
+    /// own.
     pub fn start(camera: &CameraConfig) -> Result<Self> {
         Self::begin(camera, Output::Display)
     }
 
-    /// Validates the settings and hands the connection to a worker thread, which passes the
-    /// camera's video on to [`Self::feed`]'s viewers as the camera sent it ([`crate::relay`]).
-    ///
-    /// It decodes nothing and plays no sound, so it needs no screen and no speakers. It reconnects,
-    /// stops for good, and records ([`Self::start_recording`]) exactly as a live view does, an AAC
-    /// camera's sound included. A picture is decoded only when asked for ([`Feed::picture`]).
+    /// Passes the camera's video on to [`Self::feed`]'s viewers as sent, decoding nothing.
     pub fn relay(camera: &CameraConfig) -> Result<Self> {
         Self::begin(camera, Output::Relay)
     }
@@ -172,8 +144,7 @@ impl MediaSession {
             thread::Builder::new()
                 .name("ipcamera-rtsp".into())
                 .spawn(move || {
-                    // `supervise` catches a crash in the pipeline itself; this is for one anywhere
-                    // else, so even then the thread never ends with the status left as it was.
+                    // A crash outside the pipeline must not leave the status as it was either.
                     if let Err(error) = contain(|| supervise(camera, &shared, play_once)) {
                         shared.set_status(MediaStatus::Failed(error.to_string()));
                     }
@@ -191,36 +162,28 @@ impl MediaSession {
         self.shared.status()
     }
 
-    /// The slot the UI paints from. It outlives reconnects.
+    /// The slot the UI paints from; it outlives reconnects.
     pub fn frames(&self) -> FrameSlot {
         self.shared.visibility.frames()
     }
 
-    /// Whether anything shows the pictures; a session starts shown. A hidden live view stays
-    /// connected, live and recording, but decodes nothing and keeps nothing in [`Self::frames`];
-    /// shown again, it starts from the stream's last keyframe, so its picture is back within a
-    /// moment ([`crate::gate`]). A relay decodes nothing either way.
+    /// Whether anything shows the pictures; a hidden live view stays connected but decodes nothing.
     pub fn set_shown(&self, shown: bool) {
         self.shared.visibility.set_shown(shown);
     }
 
-    /// The compressed video a relaying session passes on. It outlives reconnects, and stays empty
-    /// in a live view.
+    /// The compressed video a relay passes on; it outlives reconnects.
     pub fn feed(&self) -> Feed {
         self.shared.feed.clone()
     }
 
-    /// Sets the playback gain. `0.0` is muted; `1.0` is the camera's own level.
+    /// Sets the playback gain: `0.0` is muted, `1.0` the camera's own level.
     pub fn set_volume(&self, gain: f64) {
         *self.shared.gain.locked() = gain.clamp(0.0, 1.0);
     }
 
-    /// Records the stream from its next keyframe on, or from what [`Self::set_preroll`] holds back
-    /// where `rules` say so, until [`Self::stop_recording`], into files `next_file` names, given
-    /// when each file's first picture arrived. It is called on the media thread whenever a file
-    /// opens: when recording starts, each time a file goes on in the next by `rules`, and each time
-    /// the stream reconnects. The next picture decoded after a file opens reaches
-    /// [`Self::frames`] even while the view is hidden, so a thumbnail can be made of it.
+    /// Records from the next keyframe, or the pre-roll where `rules` say so, into files
+    /// `next_file` names; `next_file` runs on the media thread.
     pub fn start_recording(
         &self,
         rules: RecordRules,
@@ -236,30 +199,24 @@ impl MediaSession {
         );
     }
 
-    /// Holds back the last `preroll` of the stream as the camera sent it (whole keyframe
-    /// intervals, up to [`PREROLL_MOST_BYTES`](crate::PREROLL_MOST_BYTES)), for a
-    /// recording to start from ([`RecordRules::from_preroll`]); `None` holds nothing. It goes on
-    /// across reconnects, starting again from the new stream's first keyframe.
+    /// Holds back the last `preroll` of the stream for a recording to start from; `None` holds
+    /// nothing.
     pub fn set_preroll(&self, preroll: Option<Duration>) {
         self.shared.record.set_preroll(preroll);
     }
 
-    /// Asks for the picture of the stream's next keyframe in [`Self::frames`], even while the view
-    /// is hidden: for an event's snapshot of a camera no tile shows. It comes within a keyframe
-    /// interval of a live stream, and nothing comes while the stream isn't live.
+    /// Asks for the next keyframe's picture in [`Self::frames`], even while hidden.
     pub fn want_picture(&self) {
         self.shared.visibility.want_picture();
     }
 
-    /// Stops recording. The file is finished at the stream's next packet, or within 50 ms.
+    /// Stops recording; the file is finished at the next packet, or within 50 ms.
     pub fn stop_recording(&self) {
         self.shared.record.stop();
     }
 
-    /// Whether it gave up for a reason starting it again would only repeat: the camera rejected the
-    /// login, or sends a stream this machine can't play. Starting it again after a rejected login
-    /// does harm, since failed logins can lock the camera's account, so only a change to the
-    /// camera's settings should. Any other failure may clear up by itself.
+    /// Whether it gave up for a reason a restart would only repeat; restarting after a rejected
+    /// login can lock the camera's account.
     pub fn refused(&self) -> bool {
         self.shared.refused.load(Ordering::SeqCst)
     }
@@ -269,7 +226,7 @@ impl MediaSession {
         self.shared.record.status()
     }
 
-    /// Asks the worker to stop and waits for it, finishing any recording first. Safe to call twice.
+    /// Stops the worker and waits for it, finishing any recording first; safe to call twice.
     pub fn stop(&mut self) {
         self.shared.record.stop();
         self.shared.stop.store(true, Ordering::SeqCst);
@@ -288,9 +245,6 @@ impl Drop for MediaSession {
     }
 }
 
-/// Keeps a pipeline running until the user stops it, reconnecting with a backoff after a failure.
-///
-/// `play` is [`play_once`]; the tests hand in their own, to crash on cue.
 fn supervise(
     camera: CameraConfig,
     shared: &Shared,
@@ -313,13 +267,9 @@ fn supervise(
 
         let ended = match contain(|| play(&runtime, &camera, shared)) {
             Ok(ended) => ended,
-            // A crash, such as a decoder tripping over a corrupt packet, is retried like a broken
-            // stream. It counts as a try that never went live, so one that crashes every time
-            // still gives up after `MAX_ATTEMPTS`.
+            // A crash counts as a try that never went live, so one that always crashes gives up.
             Err(error) => {
-                // The crash skipped the pipeline's own tidying up. Whatever it left on the runtime
-                // goes with it, and the recording's file ends where it was cut, which a
-                // fragmented MP4 plays up to.
+                // The crash skipped the pipeline's tidying up, so its runtime is replaced.
                 shared.record.closed();
                 let Some(fresh) = new_runtime(shared) else {
                     return;
@@ -355,7 +305,6 @@ fn supervise(
     }
 }
 
-/// The runtime that drives the pipeline on this thread, or `None` after saying why there is none.
 fn new_runtime(shared: &Shared) -> Option<Runtime> {
     match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -371,8 +320,6 @@ fn new_runtime(shared: &Shared) -> Option<Runtime> {
     }
 }
 
-/// Runs `work`, turning a panic in it into an error. Like a C# `catch (Exception)` around it: the
-/// panic's message still goes to the log as it happens, and the caller gets a sentence to show.
 fn contain<R>(work: impl FnOnce() -> R) -> Result<R> {
     panic::catch_unwind(AssertUnwindSafe(work)).map_err(|panic| {
         let reason = panic
@@ -384,7 +331,6 @@ fn contain<R>(work: impl FnOnce() -> R) -> Result<R> {
     })
 }
 
-/// Sleeps for `delay`, waking early when the user stops the session.
 fn wait_before_retry(shared: &Shared, delay: Duration) {
     let mut waited = Duration::ZERO;
     while waited < delay && !shared.stopping() {
@@ -393,17 +339,12 @@ fn wait_before_retry(shared: &Shared, delay: Duration) {
     }
 }
 
-/// The number of the next try after a failure, or `None` when it is time to give up.
-///
-/// The limit is for a camera that has gone away, so it counts failures in a row. A stream that
-/// showed a picture had recovered, which makes its drop a new outage. Counting on from there would
-/// stop a camera for good after twenty drops spread over days.
+/// Counts failures in a row: a stream that went live had recovered, so its drop is a new outage.
 fn next_attempt(attempt: u32, went_live: bool, auto_reconnect: bool) -> Option<u32> {
     let failed_in_a_row = if went_live { 0 } else { attempt };
     (auto_reconnect && failed_in_a_row < MAX_ATTEMPTS).then_some(failed_in_a_row + 1)
 }
 
-/// 2 s, 5 s, 10 s, then every 15 s.
 fn backoff(attempt: u32) -> Duration {
     Duration::from_secs(match attempt {
         1 => 2,
@@ -413,24 +354,12 @@ fn backoff(attempt: u32) -> Duration {
     })
 }
 
-/// How one pipeline ended.
 enum Ended {
-    /// The user asked to stop, so there is nothing to reconnect.
     Stopped,
-    Failed {
-        error: MediaError,
-        /// Whether a picture arrived first, which makes this a new outage rather than one more
-        /// failed try ([`next_attempt`]).
-        went_live: bool,
-    },
+    Failed { error: MediaError, went_live: bool },
 }
 
-/// Asks the camera what it sends, builds a pipeline for that, and plays it until it fails or the
-/// user stops. The pipeline is torn down when this returns, because the run that owns it ends.
-///
-/// An RTSP stream is asked with a DESCRIBE. A Reolink's FLV stream is opened with a token from a
-/// login to its API first ([`flv::log_in`]), which blocks, so it happens here before the runtime
-/// rather than on it; the stream's head then says what it sends.
+/// The FLV login blocks, so it happens before the runtime, not on it.
 fn play_once(runtime: &Runtime, camera: &CameraConfig, shared: &Shared) -> Ended {
     let gave_up = |error| Ended::Failed {
         error,
@@ -458,7 +387,7 @@ fn play_once(runtime: &Runtime, camera: &CameraConfig, shared: &Shared) -> Ended
         };
 
         let (source, offer) = match tokio::time::timeout(ANSWER_WITHIN, asked).await {
-            // A relay passes the video on, and keeps only the sound a recording can hold.
+            // A relay keeps only the sound a recording can hold.
             Ok(Ok((source, offer))) if shared.output == Output::Relay => (
                 source,
                 pipeline::Offer {
@@ -494,7 +423,6 @@ fn play_once(runtime: &Runtime, camera: &CameraConfig, shared: &Shared) -> Ended
                 recorder.clone(),
             ),
             Output::Relay => {
-                // The stream before this one has ended, and its pictures with it.
                 shared.feed.forget();
                 pipeline::build_relay(
                     source,
@@ -516,8 +444,7 @@ fn play_once(runtime: &Runtime, camera: &CameraConfig, shared: &Shared) -> Ended
         let (mutator, run) = run_graph_mutable(graph, &clock, LatencyProfile::Live);
         let run = pin!(run);
 
-        // Polled alongside the run, never instead of it: a gain change is carried out by the run
-        // itself, so the run has to keep going while this waits for it.
+        // Polled alongside the run, never instead of it: the run itself carries out a gain change.
         let control = async {
             let mut applied = shared.gain();
             let mut went_live = false;
@@ -534,7 +461,7 @@ fn play_once(runtime: &Runtime, camera: &CameraConfig, shared: &Shared) -> Ended
                     shared.set_status(MediaStatus::Live);
                 }
                 let wanted = shared.gain();
-                // A relay's sound only goes to its recordings, so it has no volume to change.
+                // A relay's sound only goes to its recordings.
                 if offer.audio.is_some()
                     && shared.output == Output::Display
                     && wanted != applied
@@ -559,20 +486,15 @@ fn play_once(runtime: &Runtime, camera: &CameraConfig, shared: &Shared) -> Ended
             },
             () = control => Ended::Stopped,
         };
-        // The file this pipeline was writing ends with it. A recording still asked for starts a
-        // new file in the reconnected stream.
         recorder.locked().close();
         ended
     })
 }
 
-/// Whether a run ended in a way a retry would only repeat.
 fn cannot_play(error: &G2gError) -> bool {
     matches!(error, G2gError::CapsMismatch | G2gError::FixationFailed)
 }
 
-/// A glass2glass failure as a sentence for the status line. Its details, retina's message among
-/// them, go to glass2glass's own log.
 fn sentence(error: &G2gError) -> String {
     match error {
         G2gError::Network(NetworkFailure::Connect) => {

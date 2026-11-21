@@ -1,7 +1,5 @@
-//! Dahua's DVRIP protocol: a binary login, then JSON calls behind a 32-byte header.
-//!
-//! Undocumented by Dahua. The header layouts and login hashes follow the DahuaConsole project and
-//! were confirmed against an ASH21-B-V2. A client is not safe for concurrent calls.
+//! Dahua's DVRIP protocol: a binary login, then JSON calls behind a 32-byte header. Undocumented
+//! by Dahua; the layouts follow the DahuaConsole project. A client is not safe for concurrent use.
 
 use std::{
     fmt,
@@ -23,13 +21,9 @@ const LOGIN_REQUEST: [u8; 2] = [0xa0, 0x05];
 const LOGIN_TRAILER: [u8; 8] = [0x05, 0x02, 0x00, 0x08, 0x00, 0x00, 0xa1, 0xaa];
 
 /// Why a DVRIP connection or call failed.
-///
-/// In C# terms, one exception type per case, as an enum: the caller matches on it, and the
-/// compiler makes sure the one case that must never be retried is told apart from the rest.
 #[derive(Debug)]
 pub enum DvripError {
-    /// The camera refused the login, for the reason given. Retrying automatically could lock the
-    /// account.
+    /// The camera refused the login. Retrying automatically could lock the account.
     LoginRejected(String),
     /// The connection could not be made, or broke.
     Io(io::Error),
@@ -55,17 +49,14 @@ impl std::error::Error for DvripError {
     }
 }
 
-/// Lets `?` turn a socket's error into a [`DvripError`].
 impl From<io::Error> for DvripError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
     }
 }
 
-/// What a DVRIP call returns.
 type Result<T> = std::result::Result<T, DvripError>;
 
-/// A failure of the protocol itself, in words.
 fn protocol(reason: impl Into<String>) -> DvripError {
     DvripError::Protocol(reason.into())
 }
@@ -256,7 +247,7 @@ pub fn legacy_hash(password: &str) -> String {
     result
 }
 
-/// An MD5 digest in uppercase hex, the form the login hashes take.
+/// Uppercase hex, as the login hashes take it.
 fn md5_hex(text: &str) -> String {
     let digest = Md5::digest(text.as_bytes());
     let mut out = String::with_capacity(digest.len() * 2);
@@ -293,7 +284,6 @@ mod tests {
 
     #[test]
     fn legacy_hash_matches_the_known_shape() {
-        // The legacy hash is always eight characters from [0-9A-Za-z].
         let hash = legacy_hash("admin");
         assert_eq!(hash.len(), 8);
         assert!(hash.chars().all(|c| c.is_ascii_alphanumeric()));
@@ -303,7 +293,6 @@ mod tests {
     fn login_hash_has_both_suffixes() {
         let hash = login_hash("admin", "secret", "LoginToMoreWide", "12345");
         assert!(hash.starts_with("admin&&"));
-        // user&& + two 32-character MD5 hex digests: the modern hash, then the legacy one.
         assert_eq!(hash.len(), "admin&&".len() + 32 + 32);
     }
 

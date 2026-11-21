@@ -1,10 +1,5 @@
-//! Markdown Viewer's settings, saved as `settings.json` beside the executable: the window's
-//! preferences and where the window was. The projects are `projects.json`'s ([`crate::projects`]).
-//!
-//! [`ConfigStore`] owns the file and the copy the app is running with, through the suite's store
-//! (`dp_store`): a change is made to a copy, written (write-then-rename), and only then used, and
-//! a file that can't be read is never written over. Like IP Camera's, the file sits beside the
-//! executable, never in `%APPDATA%`. [`crate::Saved`] opens it, beside `projects.json`.
+//! `settings.json`: the window's preferences and place. A file that can't be read is never written
+//! over.
 
 use std::path::{Path, PathBuf};
 
@@ -29,22 +24,22 @@ pub struct Config {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FilesView {
-    /// The folders nested as they are on disk, each opening and closing.
+    /// The folders nested as on disk.
     #[default]
     Tree,
-    /// One heading for each folder that holds files, its whole path, with its files under it.
+    /// One heading per folder that holds files.
     Folder,
-    /// Every file in one list, each with its folder beside it.
+    /// Every file in one list.
     List,
 }
 
-/// How a file shows: its text as written, the page it makes, or both side by side.
+/// How a file shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ViewMode {
-    /// The Markdown as written, highlighted as a code editor highlights it.
+    /// The Markdown as written, highlighted.
     Raw,
-    /// The text on the left and the page on the right.
+    /// The text and the page side by side.
     Split,
     /// The page the Markdown makes.
     #[default]
@@ -62,13 +57,11 @@ pub enum TabOverflow {
     Wrap,
 }
 
-/// The window's preferences: its appearance, its panels and their sizes, how a file shows and how its
-/// tabs fit.
+/// The window's preferences.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ui {
-    /// How the window looks: its mode, themes, texture and elevation, among these fields in the
-    /// file as in every product's.
+    /// How the window looks.
     #[serde(flatten)]
     pub appearance: Appearance,
     /// The sidebar's width, in points.
@@ -79,9 +72,9 @@ pub struct Ui {
     pub files_open: bool,
     /// Whether the outline shows beside the file.
     pub outline_open: bool,
-    /// Whether a map of the whole file shows beside each view of it.
+    /// Whether the map of the whole file shows.
     pub map_open: bool,
-    /// How a file opened in a new tab shows; each tab keeps its own after that.
+    /// How a file opened in a new tab shows.
     pub mode: ViewMode,
     /// How the files panel lists the files.
     pub files_view: FilesView,
@@ -126,21 +119,18 @@ impl Document for Config {
     }
 }
 
-/// The settings file and the copy of it the app is running with. [`crate::Saved`] opens it.
+/// The settings file and the copy of it the app is running with.
 pub struct ConfigStore {
     file: FileStore<Config>,
 }
 
 impl ConfigStore {
-    /// Opens the file at `path`, writing nothing: [`crate::Saved`] writes the defaults when it is
-    /// missing.
     pub(crate) fn open(path: PathBuf) -> Self {
         Self {
             file: FileStore::open(path),
         }
     }
 
-    /// The file underneath, for [`crate::Saved`].
     pub(crate) fn file(&self) -> &FileStore<Config> {
         &self.file
     }
@@ -160,7 +150,7 @@ impl ConfigStore {
         self.file.current()
     }
 
-    /// Bumped by every saved change, so the app can tell when to look again.
+    /// Bumped by every saved change.
     pub fn revision(&self) -> u64 {
         self.file.revision()
     }

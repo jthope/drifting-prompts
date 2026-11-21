@@ -1,29 +1,20 @@
-//! Live numbers for a stream, which its tiles show under the camera's name: picture size and
-//! decode rate, and when its last picture came, which a tile says while the stream is lost. How
-//! many decoded frames were never drawn is counted too, for the tests that check a frame's work
-//! is done once, but no longer shown.
+//! Live numbers for a stream: picture size, decode rate and when its last picture came.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ipcamera_media::FrameSlot;
 
-/// How long the decode rate is averaged over, so the number does not flicker.
 const RATE_WINDOW: Duration = Duration::from_secs(1);
 
 /// The numbers for one running session.
 #[derive(Default)]
 pub struct StreamStats {
-    /// Frames the pipeline decoded for the running session.
     produced: u64,
-    /// Distinct frames that reached the screen, so the rest were never drawn.
     painted: u64,
-    /// The picture size, which is unknown until a frame arrives.
     resolution: Option<(u32, u32)>,
-    /// Decode rate, resampled about once a second.
     fps: f32,
     sampled_at: Option<Instant>,
     produced_then: u64,
-    /// When a sample last found a new picture: within one sample's interval of its arrival.
     pictured_at: Option<Instant>,
 }
 
@@ -58,13 +49,12 @@ impl StreamStats {
         }
     }
 
-    /// Frames the pipeline offered that were never drawn.
     #[cfg(test)]
     fn dropped(&self) -> u64 {
         self.produced.saturating_sub(self.painted)
     }
 
-    /// The size and the frame rate alone, for a narrow tile: `1920×1080 · 25 fps`.
+    /// The size and the frame rate alone, for a narrow tile.
     pub fn brief(&self) -> String {
         let Some((width, height)) = self.resolution else {
             return "waiting for video\u{2026}".to_string();
@@ -77,8 +67,7 @@ impl StreamStats {
         self.resolution.is_none()
     }
 
-    /// When the last picture came, in milliseconds since 1970, given the time `now` is on the
-    /// clock (`clock`); 0 before the first.
+    /// When the last picture came, in milliseconds since 1970 on `clock`; 0 before the first.
     pub fn last_picture_at(&self, now: Instant, clock: SystemTime) -> f64 {
         self.pictured_at
             .and_then(|at| clock.checked_sub(now.saturating_duration_since(at)))
@@ -86,7 +75,7 @@ impl StreamStats {
             .map_or(0.0, |since| since.as_millis() as f64)
     }
 
-    /// The numbers as a wide tile shows them: `1920×1080 · 25.0 fps · TCP`.
+    /// The numbers as a wide tile shows them.
     pub fn line(&self, use_tcp: bool) -> String {
         let Some((width, height)) = self.resolution else {
             return "waiting for video\u{2026}".to_string();
@@ -121,7 +110,6 @@ mod tests {
         let slot = FrameSlot::default();
         let mut stats = StreamStats::default();
 
-        // Three frames decoded, one drawn: only the newest can be.
         slot.store(frame(4, 4));
         slot.store(frame(4, 4));
         slot.store(frame(4, 4));
@@ -183,7 +171,6 @@ mod tests {
 
         slot.store(frame(4, 4));
         stats.sample(&slot, 1, start + Duration::from_secs(1));
-        // Nothing new for five seconds, as when the camera drops off the network.
         stats.sample(&slot, 1, start + Duration::from_secs(6));
 
         assert_eq!(
@@ -209,7 +196,6 @@ mod tests {
             stats.line(false),
             "1920\u{00d7}1080 \u{00b7} 0.0 fps \u{00b7} UDP"
         );
-        // A narrow tile's: the size and the rate alone.
         assert_eq!(stats.brief(), "1920\u{00d7}1080 \u{00b7} 0 fps");
     }
 }

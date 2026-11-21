@@ -1,20 +1,5 @@
-//! Finding text across a project's Markdown files, as the raw view finds it in one.
-//!
-//! A query means here what it means to nsh's editor, which highlights the same matches in the
-//! raw view, so the project's count is the editor's: plain text, or a regular expression in the
-//! `regex` crate's syntax (the crate the editor finds with); any case unless asked otherwise, by
-//! Unicode's case folding (`É` finds `é`); `^` and `$` at every line's start and end. Whole words
-//! only, when asked, keeps a match whose ends are a word's edges, a word being letters, digits and
-//! `_`: an end in punctuation (`.len`, `foo(`) counts as an edge by itself.
-//!
-//! The text is searched as the editor holds it, its line breaks `\n` alone (`\r\n` and `\r` become
-//! `\n`), so a match is where the raw view has it: a line and a column in UTF-16 code units, as the
-//! editor counts them ([`Place`]). A regular expression may match an empty range (`^`), as the
-//! editor counts it too, but never twice at one place.
-//!
-//! [`search`] reads the files of a listing in its order, leaving out one it can't read (gone since,
-//! too large), and stops at [`MOST_MATCHES`], the most the editor counts. It can be called off
-//! between two files (`stop`), so a newer query never waits for an older one.
+//! Finding text across a project's Markdown files. Matches must agree with nsh's editor in the
+//! raw view: the same `regex` crate, multi-line anchors, `\n` line breaks and UTF-16 columns.
 
 use std::{
     borrow::Cow,
@@ -31,27 +16,26 @@ use crate::{
     syntax::Place,
 };
 
-/// The most matches a search counts, across all the files: the most nsh's editor counts in one.
+/// The most matches a search counts across all files: the most nsh's editor counts in one.
 pub const MOST_MATCHES: usize = 10_000;
 
 /// What to find, and how.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchQuery {
-    /// The text to find, or a regular expression with `regex`. Empty finds nothing.
+    /// The text or regular expression to find; empty finds nothing.
     pub text: String,
-    /// Only text of the same case; otherwise any case.
+    /// Only text of the same case.
     pub case_sensitive: bool,
     /// Only whole words.
     pub whole_word: bool,
-    /// `text` is a regular expression, in the `regex` crate's syntax.
+    /// `text` is a regular expression.
     pub regex: bool,
 }
 
 /// Why a query can't be searched for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SearchError {
-    /// The query is meant as a regular expression, and isn't one: why, as the `regex` crate says
-    /// it.
+    /// The query isn't a valid regular expression, and why.
     NotARegex(String),
 }
 
@@ -68,8 +52,7 @@ impl fmt::Display for SearchError {
 
 impl std::error::Error for SearchError {}
 
-/// A match in a file: where it starts and where it ends, not included, and its line as a list of
-/// results shows it.
+/// A match in a file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchMatch {
     /// Where it starts.
@@ -80,9 +63,7 @@ pub struct SearchMatch {
     pub excerpt: Excerpt,
 }
 
-/// The line a match starts on, as a list of results shows it: at most [`EXCERPT_BEFORE`]
-/// characters before the match, `…` where more were left out, the match (as far as its line goes),
-/// and at most [`EXCERPT_AFTER`] after it. The line's indent is left out.
+/// The line a match starts on, shortened around the match with `…`, without its indent.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Excerpt {
     /// The text.
@@ -105,7 +86,7 @@ pub const EXCERPT_AFTER: usize = 120;
 /// The matches in one file of a project.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileMatches {
-    /// The file, by its path in the project (`docs/setup.md`).
+    /// The file's path in the project.
     pub path: String,
     /// Its matches, in order.
     pub matches: Vec<SearchMatch>,
@@ -114,15 +95,15 @@ pub struct FileMatches {
 /// What a search found in a project.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchResults {
-    /// The files with matches, in the listing's order; a file with none is left out.
+    /// The files with matches, in the listing's order.
     pub files: Vec<FileMatches>,
-    /// How many matches, in all the files.
+    /// How many matches in all.
     pub total: usize,
-    /// Whether the search stopped at [`MOST_MATCHES`], leaving later matches out.
+    /// Whether the search stopped at its limit.
     pub truncated: bool,
 }
 
-/// A query, made ready to find: made once, used on every file.
+/// A compiled query.
 #[derive(Clone, Debug)]
 pub struct Finder {
     regex: Regex,
@@ -172,12 +153,10 @@ impl Finder {
             .collect()
     }
 
-    /// The byte ranges of the matches in `text`, in order, at most `limit`.
     fn ranges(&self, text: &str, limit: usize) -> Vec<Range<usize>> {
         let mut found = Vec::new();
         let mut at = 0;
-        // Where the last match ended: an empty match right there is that match's empty end, not
-        // one of its own.
+        // An empty match right where the last one ended isn't a match of its own.
         let mut last_end = None;
         while at <= text.len() && found.len() < limit {
             let Some(found_here) = self.regex.find_at(text, at) else {
@@ -195,8 +174,7 @@ impl Finder {
                 };
                 found.push(range);
             } else {
-                // A match refused for its edges can hide one starting inside it (`ab` in "xab ab"
-                // for the word "ab"): look again a character on.
+                // A match refused for its edges can hide one starting inside it.
                 at = next_char(text, range.start);
             }
         }
@@ -204,9 +182,7 @@ impl Finder {
     }
 }
 
-/// What `finder` finds in `files` of the project in `folder`, read in the order they come, at most
-/// `most` matches (a search of several projects shares [`MOST_MATCHES`] among them); `None` when
-/// `stop` was set before it was done.
+/// The matches of `finder` in `files` of `folder`, at most `most`; `None` once `stop` is set.
 pub fn search(
     folder: &Path,
     files: &[MarkdownFile],
@@ -223,7 +199,6 @@ pub fn search(
             continue;
         };
         let room = most.saturating_sub(results.total);
-        // One past the room says whether there was more.
         let mut matches = finder.find(&text, room + 1);
         if matches.len() > room {
             matches.truncate(room);
@@ -246,19 +221,16 @@ pub fn search(
 /// The most characters a line of a [`ContextBlock`] keeps; a longer one ends with `…`.
 pub const CONTEXT_LINE_MOST: usize = 400;
 
-/// Lines of a file around some of its lines: what a list of results shows of each match, in its
-/// place.
+/// Consecutive lines of a file around some of its lines.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextBlock {
     /// The first line's number, from 0.
     pub first: u32,
-    /// The lines, from `first` on, each at most [`CONTEXT_LINE_MOST`] characters.
+    /// The lines from `first` on.
     pub lines: Vec<String>,
 }
 
-/// The lines of `text` around each of `lines` (from 0, in any order), `around` before and after
-/// each, as the editor holds them (line breaks `\n` alone), in blocks that neither overlap nor
-/// touch: two lines whose surroundings meet share a block. A line past the text's end is left out.
+/// The lines of `text` within `around` of each of `lines`, in blocks that never overlap or touch.
 pub fn context(text: &str, lines: &[u32], around: u32) -> Vec<ContextBlock> {
     let text = lines_as_the_editor_has_them(text);
     let all: Vec<&str> = text.split('\n').collect();
@@ -287,7 +259,6 @@ pub fn context(text: &str, lines: &[u32], around: u32) -> Vec<ContextBlock> {
         .collect()
 }
 
-/// `line` with at most [`CONTEXT_LINE_MOST`] characters, `…` after them when it had more.
 fn shortened(line: &str) -> String {
     match line.char_indices().nth(CONTEXT_LINE_MOST) {
         Some((at, _)) => format!("{}…", &line[..at]),
@@ -295,7 +266,6 @@ fn shortened(line: &str) -> String {
     }
 }
 
-/// `text` with its line breaks `\n` alone, as the editor holds it.
 fn lines_as_the_editor_has_them(text: &str) -> Cow<'_, str> {
     if text.contains('\r') {
         Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
@@ -304,10 +274,8 @@ fn lines_as_the_editor_has_them(text: &str) -> Cow<'_, str> {
     }
 }
 
-/// The excerpt of the match at `range` of `text`, whose line starts at `line_start`. It looks only
-/// at the characters it keeps, so a match on a very long line costs no more than one on a short one.
+/// Looks only at the characters it keeps, so a very long line costs no more than a short one.
 fn excerpt(text: &str, line_start: usize, range: &Range<usize>) -> Excerpt {
-    // Before the match: back from it to the line's start, at most EXCERPT_BEFORE characters.
     let before_all = &text[line_start..range.start];
     let mut before_chars = before_all.char_indices().rev().take(EXCERPT_BEFORE + 1);
     let cut_at = before_chars
@@ -317,7 +285,6 @@ fn excerpt(text: &str, line_start: usize, range: &Range<usize>) -> Excerpt {
         Some(at) => &before_all[at..],
         None => before_all.trim_start(),
     };
-    // The match, as far as its line goes, and what follows it on the line.
     let rest = &text[range.start..];
     let matched: String = rest[..range.len()]
         .chars()
@@ -352,8 +319,6 @@ fn excerpt(text: &str, line_start: usize, range: &Range<usize>) -> Excerpt {
     }
 }
 
-/// The line of a `regex` error that says what is wrong (`unclosed group`), without the pattern and
-/// the caret it draws under it.
 fn reason(error: &regex::Error) -> String {
     let said = error.to_string();
     said.lines()
@@ -363,8 +328,7 @@ fn reason(error: &regex::Error) -> String {
         .to_owned()
 }
 
-/// Whether `range` starts and ends at a word's edge: at each end, a character that isn't a word's
-/// (or the text's edge) on at least one side.
+/// An end in punctuation (`.len`, `foo(`) is a word's edge by itself.
 fn is_whole_word(text: &str, range: &Range<usize>) -> bool {
     let before = text[..range.start].chars().next_back();
     let first = text[range.clone()].chars().next();
@@ -375,12 +339,10 @@ fn is_whole_word(text: &str, range: &Range<usize>) -> bool {
     left && right
 }
 
-/// A word's character, in any language: a letter, a digit or `_`.
 fn is_word(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// The offset after the character at `offset`; past the text's end at its end.
 fn next_char(text: &str, offset: usize) -> usize {
     text[offset..]
         .chars()
@@ -388,13 +350,11 @@ fn next_char(text: &str, offset: usize) -> usize {
         .map_or(offset + 1, |c| offset + c.len_utf8())
 }
 
-/// Where byte offsets of a text are, as lines and UTF-16 columns, for offsets that never go back:
-/// each is counted on from the last, so a long line with many matches is walked once.
+/// Byte offsets as lines and UTF-16 columns; offsets must never go back.
 struct Walker<'a> {
     text: &'a str,
     at: usize,
     place: Place,
-    /// Where the line of the last offset placed starts, as a byte offset.
     line_start: usize,
 }
 
@@ -440,7 +400,6 @@ mod tests {
         }
     }
 
-    /// The matches of `query` in `text`, each as its start and end: (line, column) pairs.
     fn find(query: &SearchQuery, text: &str) -> Vec<((u32, u32), (u32, u32))> {
         Finder::new(query)
             .expect("a query")
@@ -494,7 +453,6 @@ mod tests {
             ..query("ab")
         };
         assert_eq!(find(&whole, "xab ab abc"), [((0, 4), (0, 6))]);
-        // An end in punctuation is an edge by itself.
         let call = SearchQuery {
             whole_word: true,
             ..query(".len")
@@ -557,7 +515,6 @@ mod tests {
         assert_eq!(find(&query("a\r\nb"), "xa\nb"), [((0, 1), (1, 1))]);
     }
 
-    /// A project folder holding `files`, each with its text.
     fn project(files: &[(&str, &str)]) -> TempDir {
         let dir = TempDir::new().expect("a folder");
         for (name, text) in files {
@@ -654,7 +611,7 @@ mod tests {
         assert!(results.truncated);
     }
 
-    /// The excerpt of the first match of `query` in `text`, with the match in brackets.
+    /// The excerpt of the first match, with the match in brackets.
     fn excerpt_of(query: &SearchQuery, text: &str) -> String {
         let found = Finder::new(query)
             .expect("a query")
@@ -717,7 +674,6 @@ mod tests {
                 (8, vec!["line 8", "line 9", "line 10"]),
             ]
         );
-        // At the file's ends, the block stops there.
         assert_eq!(context(&text, &[0], 2)[0].first, 0);
         assert_eq!(context(&text, &[19], 2)[0].lines.len(), 3);
     }

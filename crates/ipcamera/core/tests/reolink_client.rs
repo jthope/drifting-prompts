@@ -1,9 +1,5 @@
-//! The Reolink client against a fake camera on localhost, and, when the owner asks, the real one.
-//!
-//! The fake answers plain HTTP on a loopback port as a Reolink camera answers its API, and records
-//! every request, so a test can assert what the client sent: one login, the token on every call,
-//! the password never in a URL, and no second login after a refused one. It also sends FLV streams
-//! by name, as a Reolink's web server does.
+//! The Reolink client against a fake camera on loopback that records every request; and, when the
+//! owner asks, the real one.
 
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -25,14 +21,10 @@ use serde_json::{Value, json};
 
 const PASSWORD: &str = "s3cret";
 
-/// One request the fake camera saw.
 #[derive(Clone, Debug)]
 struct Seen {
-    /// The query string, `cmd=Login` or `token=...`.
     query: String,
-    /// The commands in the body, by name.
     commands: Vec<String>,
-    /// The body.
     body: Value,
 }
 
@@ -44,11 +36,9 @@ impl Seen {
     }
 }
 
-/// How the fake answers one command: the reply's `code` 0 `value`, or an error's detail.
 type Answer = Box<dyn FnMut(&Value, Option<&str>) -> Result<Value, &'static str> + Send>;
 
-/// How the fake answers a request for an FLV stream, given its name (`channel0_ext.bcs`): the
-/// stream's first bytes, or `None` to hang up, as a Reolink does for a stream it hasn't.
+/// The stream's first bytes, or `None` to hang up.
 type FlvAnswer = Box<dyn Fn(&str) -> Option<Vec<u8>> + Send>;
 
 struct FakeCamera {
@@ -59,14 +49,12 @@ struct FakeCamera {
 }
 
 impl FakeCamera {
-    /// Starts a camera that answers each command, given the token it came with, with `answer`.
     fn start(
         answer: impl FnMut(&Value, Option<&str>) -> Result<Value, &'static str> + Send + 'static,
     ) -> Self {
         Self::serving(answer, |_| None)
     }
 
-    /// As [`start`](Self::start), sending the FLV streams `flv` has.
     fn serving(
         answer: impl FnMut(&Value, Option<&str>) -> Result<Value, &'static str> + Send + 'static,
         flv: impl Fn(&str) -> Option<Vec<u8>> + Send + 'static,
@@ -101,14 +89,13 @@ impl FakeCamera {
         }
     }
 
-    /// A camera that hands out `tok1`, `tok2`, ... and answers everything else with `answer`.
+    /// A camera that hands out `tok1`, `tok2`, ….
     fn with_logins(
         answer: impl FnMut(&Value, Option<&str>) -> Result<Value, &'static str> + Send + 'static,
     ) -> Self {
         Self::with_logins_and_flv(answer, |_| None)
     }
 
-    /// As [`with_logins`](Self::with_logins), sending the FLV streams `flv` has.
     fn with_logins_and_flv(
         mut answer: impl FnMut(&Value, Option<&str>) -> Result<Value, &'static str> + Send + 'static,
         flv: impl Fn(&str) -> Option<Vec<u8>> + Send + 'static,
@@ -156,7 +143,6 @@ impl Drop for FakeCamera {
     }
 }
 
-/// Answers one HTTP request, and closes the connection.
 fn serve(stream: TcpStream, seen: &Mutex<Vec<Seen>>, answer: &mut Answer, flv: &FlvAnswer) {
     let mut reader = BufReader::new(stream.try_clone().expect("a second handle"));
     let mut request_line = String::new();
@@ -224,8 +210,7 @@ fn serve(stream: TcpStream, seen: &Mutex<Vec<Seen>>, answer: &mut Answer, flv: &
             Err(detail) => json!({ "cmd": command["cmd"], "code": 1, "error": { "rspCode": -1, "detail": detail } }),
         })
         .collect();
-    // Some firmware answers a request of several commands with one reply, when one of them is a
-    // command the model doesn't have: an answer of `SPOILS_THE_REQUEST` stands for such a command.
+    // Some firmware answers a request with one command it lacks with a single reply.
     let spoiled = commands.len() > 1
         && replies
             .iter()
@@ -500,7 +485,6 @@ fn a_ptz_move_goes_at_a_speed_only_where_the_camera_takes_one() {
 
 #[test]
 fn a_zoom_the_camera_refuses_without_a_speed_is_sent_again_with_one() {
-    // A zoom-only camera, which by its type takes no speed, but whose zoom wants one.
     let camera = FakeCamera::with_logins(|command, _| match command["cmd"].as_str() {
         Some("GetAbility") => {
             Ok(json!({ "Ability": { "abilityChn": [{ "ptzType": { "ver": 1 } }] } }))
@@ -543,14 +527,11 @@ fn a_zoom_the_camera_refuses_without_a_speed_is_sent_again_with_one() {
     );
 }
 
-/// What the fake camera answers a command it doesn't have with, which costs a request of several
-/// commands all its other replies.
+/// A command the fake lacks, which spoils a request of several.
 const SPOILS_THE_REQUEST: &str = "not support";
 
 #[test]
 fn a_camera_that_answers_several_commands_with_one_reply_is_asked_one_at_a_time() {
-    // A zoom camera with no AI: its one reply to the three commands used to fail them all, and
-    // with them PTZ, which asks what the camera does before its first move.
     let camera = FakeCamera::with_logins(|command, _| match command["cmd"].as_str() {
         Some("GetAbility") => {
             Ok(json!({ "Ability": { "abilityChn": [{ "ptzType": { "ver": 1 } }] } }))
@@ -595,8 +576,7 @@ fn a_reolink_camera_is_told_apart_without_a_login() {
 
     let other = FakeCamera::start(|_, _| Err("not support"));
     assert!(!ReolinkClient::answers("127.0.0.1", other.port, false));
-    // Something that takes the connection and hangs up at once: a closed port would do as well,
-    // but Windows takes two seconds to refuse one.
+    // Hangs up at once, as a closed port would, which the system takes seconds to refuse.
     let hangs_up = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = hangs_up.local_addr().unwrap().port();
     thread::spawn(move || hangs_up.incoming().for_each(drop));
@@ -660,13 +640,8 @@ fn a_watch_learns_the_camera_polls_it_and_switches_its_spotlight() {
     );
 }
 
-/// Reads the real camera named by `IPCAMERA_REOLINK_HOST`, `_USER` and `_PASSWORD`, with
-/// `_PORT` (443) and `_HTTPS` (`1`; `0` for plain HTTP), and prints what it says. It changes
-/// nothing. The owner runs it:
-/// `cargo test -p ipcamera-core --test reolink_client -- --ignored --nocapture`.
-///
-/// These are its own variables, not `IPCAMERA_*`, which name the Dahua camera: a Reolink login
-/// sent there would be a failed one.
+/// Reads the camera `IPCAMERA_REOLINK_HOST`, `_USER` and `_PASSWORD` name, changing nothing. Not
+/// `IPCAMERA_*`'s camera: a Reolink login sent there would fail.
 #[test]
 #[ignore = "needs the owner's Reolink camera"]
 fn the_real_camera_says_what_it_is_and_sees() {
@@ -708,7 +683,6 @@ fn a_camera_that_says_where_its_zoom_is_can_be_zoomed_to_a_position() {
     });
     let mut client = camera.connect().unwrap();
 
-    // The fake leaves out the range, as a camera that doesn't tell it does.
     assert_eq!(client.zoom_position(1).unwrap(), None);
     client.zoom_to(1, 20).unwrap();
 
@@ -765,9 +739,6 @@ fn the_streams_offered_are_the_ones_the_camera_lists() {
     );
 }
 
-/// An FLV stream's start as a Reolink sends it: the header with its flags unset, an `onMetaData`
-/// script with the picture's size and codecs, and the first video tag, of video codec `codec`
-/// (7 is H.264).
 fn flv_start(width: f64, height: f64, codec: u8) -> Vec<u8> {
     fn tag(kind: u8, body: &[u8]) -> Vec<u8> {
         let size = body.len() as u32;
@@ -810,10 +781,9 @@ fn the_streams_it_sends_only_as_flv_are_offered_by_their_own_names() {
         },
         |name| match name {
             "channel0_ext.bcs" => Some(flv_start(896.0, 672.0, 7)),
-            // H.265, as some Reolinks send their largest picture over FLV.
             "channel0_main.bcs" => Some(flv_start(3840.0, 2160.0, 12)),
             "channel0_autotrack_sub.bcs" => Some(flv_start(896.0, 512.0, 7)),
-            // The same lens, answering to another model's name for it too.
+            // The same lens, answering to another lens's name too.
             "channel0_telephoto_sub.bcs" => Some(flv_start(896.0, 512.0, 7)),
             "channel0_telephoto_main.bcs" => Some(b"<html>not found</html>".to_vec()),
             _ => None,
@@ -850,7 +820,6 @@ fn the_streams_it_sends_only_as_flv_are_offered_by_their_own_names() {
         assert!(!request.query.contains(PASSWORD));
     }
 
-    // Asked with no RTSP streams, main is tried too, and an H.265 one isn't offered.
     assert_eq!(client.flv_streams(1, &[]).unwrap(), offered);
 
     let url = client.flv_url("channel0_ext.bcs").unwrap();

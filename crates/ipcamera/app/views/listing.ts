@@ -1,29 +1,18 @@
-// What a page's table does with its rows, whatever they are: the order a
-// column title sorts them in, which of them are selected, and the page of them
-// shown. The Cameras page (`roster.ts`) and the Groups page (`grouplist.ts`)
-// each make their own with `listingOf`, over the rows their search and filters
-// keep. Like `library.ts`'s, what it makes are module-level signals, so a
-// page's header, table, selection bar and dialogs share them, and coming back
-// to the page finds them as they were left.
 import { type Accessor, computed, type Signal, signal, untracked } from "nsh";
 
 /** What a table is sorted by: a column's key and which way; `null` for the saved order. */
 export type Sort<K extends string> = { key: K; descending: boolean } | null;
 
-/** How a press of a row changes the selection: that row alone, that row in or out, or every row from the last one pressed to it. */
+/** How a press changes the selection: that row alone, that row in or out, or a range from the last one pressed. */
 export type Pick = "only" | "toggle" | "range";
 
-/** The kind of pick a press with these keys held makes, as Explorer has it. */
+/** The kind of pick a press with these keys held makes. */
 export const pickOf = (keys: { shift: boolean; control: boolean; platform: boolean }): Pick => (keys.shift ? "range" : keys.control || keys.platform ? "toggle" : "only");
 
 /** How many rows a page can hold, as the footer offers them. */
 export const PAGE_SIZES = [10, 25, 50, 100];
 
-/**
- * "Camera 2" before "Camera 10", and 10.0.0.9 before 10.0.0.20, whatever the
- * case: runs of digits compare as numbers, the rest as text. By hand, because
- * the engine nsh runs on has no `Intl.Collator`.
- */
+/** Compares runs of digits as numbers and the rest as text, whatever the case; by hand, since nsh has no `Intl.Collator`. */
 export function byText(a: string, b: string): number {
   const runs = (text: string) => text.toLowerCase().match(/\d+|\D+/g) ?? [];
   const [left, right] = [runs(a), runs(b)];
@@ -35,11 +24,7 @@ export function byText(a: string, b: string): number {
   return left.length - right.length;
 }
 
-/**
- * The name a copy of `name` takes, as Duplicate makes one: "Garage copy", then
- * "Garage copy 2" when that is taken (`taken`, every name there is). A copy of
- * a copy is named after the original: "Garage copy 2", not "Garage copy copy".
- */
+/** The name a copy of `name` takes among `taken`: "Garage copy", "Garage copy 2"; a copy of a copy is named after the original. */
 export function copyName(name: string, taken: Iterable<string>): string {
   const base = name.trim().replace(/ copy(?: \d+)?$/, "");
   const names = new Set([...taken].map((each) => each.trim()));
@@ -56,30 +41,26 @@ export type Listing<R extends { id: string }, K extends string> = {
   sortBy: (key: K) => void;
   /** The rows the search and filters keep, in the chosen order. */
   shown: Accessor<R[]>;
-  /** The ids of the selected rows. Only rows the table shows stay selected (`keepShown`). */
+  /** The ids of the selected rows; only rows the table shows stay selected. */
   selected: Signal<string[]>;
-  /** The selected rows, in the table's order: what every action on the selection acts on. */
+  /** The selected rows, in the table's order. */
   chosen: Accessor<R[]>;
   /** A press of row `id`, as `how` says. */
   pick: (id: string, how: Pick) => void;
-  /** Selects every row on the page shown, or, when every one already is, takes them out: the title row's checkbox. Rows selected on other pages stay as they are. */
+  /** Selects every row on the page shown, or takes them out when all are; other pages' rows stay. */
   togglePage: () => void;
-  /** Selects every row the search and filters keep, on every page: Control+A. */
+  /** Selects every row the search and filters keep, on every page. */
   selectAll: () => void;
-  /** Selects `ids` alone, as rows just made are: the first is where a Shift press runs from. */
+  /** Selects `ids` alone; the first is where a Shift press runs from. */
   selectOnly: (ids: string[]) => void;
   clearSelection: () => void;
-  /** Drops from the selection what the table no longer shows: filtered out, or deleted. The page calls it as the rows change. */
+  /** Drops from the selection what the table no longer shows. */
   keepShown: () => void;
   /** How many rows a page holds. */
   pageSize: Signal<number>;
   /** How many pages the rows shown take: at least one, empty or not. */
   pageCount: Accessor<number>;
-  /**
-   * The page shown, from 0: the one turned to, unless the search, a filter,
-   * the order or the page size changed since, which start again at the first;
-   * and never past the last, which deleting rows can leave it.
-   */
+  /** The page shown, from 0; a new search, filter, order or page size starts again at the first. */
   currentPage: Accessor<number>;
   /** Turns to page `index`, from 0, kept within the pages there are. */
   turnTo: (index: number) => void;
@@ -89,13 +70,7 @@ export type Listing<R extends { id: string }, K extends string> = {
   pageSpan: Accessor<{ from: number; to: number; total: number }>;
 };
 
-/**
- * A table over `kept`, the rows the page's search and filters keep, in the
- * saved order. `compare` says how two rows compare by a column, before the
- * direction is applied; rows `blank` says have nothing in that column go last
- * either way, so they are found in one place. `filters` is what the search and
- * filters are set to: a change to it starts the pages again at the first.
- */
+/** A table over `kept`; rows `blank` says are empty in a column sort last either way, and a change to `filters` starts again at the first page. */
 export function listingOf<R extends { id: string }, K extends string>(options: {
   kept: Accessor<R[]>;
   compare: (a: R, b: R, key: K) => number;
@@ -103,8 +78,6 @@ export function listingOf<R extends { id: string }, K extends string>(options: {
   filters: Accessor<unknown>;
 }): Listing<R, K> {
   const blank = options.blank ?? (() => false);
-
-  // The order.
 
   const sort = signal<Sort<K>>(null);
 
@@ -127,14 +100,10 @@ export function listingOf<R extends { id: string }, K extends string>(options: {
       .map((each) => each.row);
   });
 
-  // Pages.
-
   const pageSize = signal(25);
 
-  /** What the page turned to is good for: a new search, filter, order or page size starts again at the first. */
   const pagingKey = computed(() => JSON.stringify([options.filters(), sort(), pageSize()]));
 
-  /** The page last turned to, from 0, with the paging it was turned to under. */
   const turnedTo = signal({ key: "", index: 0 });
 
   const pageCount = computed(() => Math.max(1, Math.ceil(shown().length / pageSize())));
@@ -156,10 +125,7 @@ export function listingOf<R extends { id: string }, K extends string>(options: {
     return { from: total === 0 ? 0 : first + 1, to: Math.min(total, first + pageSize()), total };
   });
 
-  // The selection.
-
   const selected = signal<string[]>([]);
-  /** Where a Shift press runs from: the row last pressed on its own or with Control. */
   let anchor: string | null = null;
 
   const chosen = computed(() => {
@@ -173,7 +139,7 @@ export function listingOf<R extends { id: string }, K extends string>(options: {
       const from = list.indexOf(anchor);
       const to = list.indexOf(id);
       const span = list.slice(Math.min(from, to), Math.max(from, to) + 1);
-      // Added to what is selected, as Shift with Control would be: a range never drops a row picked by hand.
+      // A range adds to the selection: it never drops a row picked by hand.
       selected.set([...new Set([...selected(), ...span])]);
       return;
     }

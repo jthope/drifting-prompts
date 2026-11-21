@@ -1,12 +1,5 @@
-//! Dahua's HTTP API in both its dialects, its PTZ and a watch over it, against a fake camera on
-//! localhost; and, when the owner asks, a real one.
-//!
-//! The fake answers as a Dahua does: the CGI (`GET /cgi-bin/…`, `key=value` replies), or the XML
-//! API that Amcrest Link's light bulb cameras speak (`POST /dev-api/…`, XML both ways). It checks
-//! each digest login against the password as a camera does, so a test can tell a right password
-//! from a wrong one without the password crossing the wire, and records what it was asked. Its
-//! light is a light bulb camera's (a white light in `Lighting_V2`, beside the infrared lamp) or a
-//! floodlight's (`coaxialControlIO`).
+//! Dahua's HTTP API in both dialects, its PTZ and a watch over it, against a fake camera on
+//! loopback that checks each digest login; and, when the owner asks, a real one.
 
 use std::{
     collections::BTreeMap,
@@ -30,18 +23,14 @@ use md5::{Digest, Md5};
 const PASSWORD: &str = "s3cret";
 const REALM: &str = "Login to FAKE0001";
 
-/// What kind of camera the fake is.
 #[derive(Clone, Copy)]
 struct Kind {
-    /// Whether it speaks the XML API (`/dev-api/`) rather than the CGI.
     xml: bool,
-    /// The channel number its PTZ answers to: 0 on most firmware, 1 on some.
     ptz_channel: u32,
-    /// Whether it says what its PTZ does.
     caps: bool,
-    /// Whether its light is a `Lighting_V2` white light, as a bulb's is; else the coaxial one.
+    /// A `Lighting_V2` white light; else the coaxial one.
     lighting: bool,
-    /// How many logged-in requests a nonce answers before it runs out; 0 for never.
+    /// How many logged-in requests a nonce answers; 0 for no limit.
     nonce_lasts: usize,
 }
 
@@ -53,11 +42,9 @@ const BULB: Kind = Kind {
     nonce_lasts: 0,
 };
 
-/// An Amcrest Link light bulb camera, as the AMLINK specification describes its API.
 const AMLINK_BULB: Kind = Kind { xml: true, ..BULB };
 
-/// The rows of the fake's `Lighting_V2` table, in order: the infrared lamp, the bulb in the day
-/// and night profiles, and a stub with no brightness in the normal one.
+/// The infrared lamp, the bulb in two profiles, and a stub with no brightness.
 const ROWS: [(&str, &str, bool, &str); 4] = [
     ("0][0][0", "InfraredLight", true, "Auto"),
     ("0][0][1", "WhiteLight", true, "Off"),
@@ -67,16 +54,11 @@ const ROWS: [(&str, &str, bool, &str); 4] = [
 
 #[derive(Default)]
 struct State {
-    /// Each request's path, whether it carried a login, and its body.
     asked: Vec<(String, bool, String)>,
-    /// Logins answered with a wrong password.
     refused: usize,
-    /// Every request's header lines, to check the password never crossed.
     headers: Vec<String>,
-    /// What `setConfig` and `control` changed: each row's mode, by `0][0][1`, and `coaxial`.
     config: BTreeMap<String, String>,
     nonce: u32,
-    /// Logged-in requests on the current nonce.
     used: usize,
 }
 
@@ -123,7 +105,6 @@ impl FakeDahua {
         }
     }
 
-    /// What was asked with a login, in order: the path, then the body when there is one.
     fn asked(&self) -> Vec<String> {
         self.state
             .lock()
@@ -175,7 +156,6 @@ impl Drop for FakeDahua {
     }
 }
 
-/// A loopback port nothing listens on.
 fn closed_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.local_addr().unwrap().port()
@@ -188,7 +168,6 @@ fn md5_hex(text: &str) -> String {
         .collect()
 }
 
-/// The `name="value"` pairs of a digest `Authorization` header.
 fn digest_fields(header: &str) -> BTreeMap<String, String> {
     header
         .trim()
@@ -199,13 +178,11 @@ fn digest_fields(header: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// The text of each `<name …>value</name>` in `xml`, in order.
 fn all_of(xml: &str, name: &str) -> Vec<String> {
     let mut found = Vec::new();
     let mut rest = xml;
     while let Some(at) = rest.find(&format!("<{name}")) {
         let after = &rest[at + name.len() + 1..];
-        // `<Mode …>`, not `<ModeX>`.
         if !after.starts_with([' ', '>']) {
             rest = after;
             continue;
@@ -219,7 +196,6 @@ fn all_of(xml: &str, name: &str) -> Vec<String> {
     found
 }
 
-/// An XML body's fields as `name=value` pairs, for a test to read: `channel=0 code=Right …`.
 fn fields(xml: &str) -> String {
     [
         "name", "channel", "code", "arg1", "arg2", "arg3", "Type", "IO",
@@ -234,7 +210,6 @@ fn fields(xml: &str) -> String {
     .join(" ")
 }
 
-/// Answers one request and closes the connection.
 fn serve(stream: TcpStream, kind: Kind, state: &Mutex<State>) {
     let mut reader = BufReader::new(stream.try_clone().expect("a second handle"));
     let mut request_line = String::new();
@@ -278,7 +253,6 @@ fn serve(stream: TcpStream, kind: Kind, state: &Mutex<State>) {
         )
     };
 
-    // Only this camera's dialect is here: Reolink's API and ONVIF, which Detect asks too, aren't.
     let ours = if kind.xml {
         method == "POST" && path.starts_with("/dev-api/")
     } else {
@@ -325,7 +299,6 @@ fn serve(stream: TcpStream, kind: Kind, state: &Mutex<State>) {
 
 const BAD: (&str, &str) = ("400 Bad Request", "Error\r\nBad Request!\r\n");
 
-/// What a camera speaking the CGI answers `path`.
 fn answer_cgi(path: &str, kind: Kind, state: &mut State) -> (&'static str, String) {
     let query = path.trim_start_matches("/cgi-bin/");
     let channel = |query: &str| {
@@ -408,7 +381,6 @@ fn answer_cgi(path: &str, kind: Kind, state: &mut State) -> (&'static str, Strin
     }
 }
 
-/// What a camera speaking the XML API answers a POST of `body` to `path`.
 fn answer_xml(path: &str, body: &str, kind: Kind, state: &mut State) -> (&'static str, String) {
     let reply = |inside: &str| {
         format!(r#"<?xml version="1.0" encoding="utf-8" standalone="yes"?><root>{inside}</root>"#)
@@ -439,8 +411,6 @@ fn answer_xml(path: &str, body: &str, kind: Kind, state: &mut State) -> (&'stati
             }
         }
         "configManager/getConfig" if body.contains(">Lighting_V2<") => {
-            // The table, a channel, its profiles, their lights: each array an element repeated
-            // with the table's name.
             let mut profiles: BTreeMap<&str, String> = BTreeMap::new();
             for (row, light, bank, mode) in ROWS {
                 if light == "WhiteLight" && !kind.lighting {
@@ -466,7 +436,6 @@ fn answer_xml(path: &str, body: &str, kind: Kind, state: &mut State) -> (&'stati
             ))
         }
         "configManager/setConfig" => {
-            // The whole table comes back: each row's mode, in the order the camera sent them.
             let rows: Vec<&str> = ROWS
                 .iter()
                 .filter(|(_, light, _, _)| kind.lighting || *light != "WhiteLight")
@@ -507,7 +476,6 @@ fn reply(mut stream: TcpStream, status: &str, headers: &str, text: &str) {
     let _ = stream.flush();
 }
 
-/// Waits up to five seconds for `done`.
 fn eventually(mut done: impl FnMut() -> bool) -> bool {
     let until = Instant::now() + Duration::from_secs(5);
     while Instant::now() < until {
@@ -519,9 +487,7 @@ fn eventually(mut done: impl FnMut() -> bool) -> bool {
     false
 }
 
-/// The PTZ moves the fake was asked, in order.
-/// Waits until `camera` has been sent `count` PTZ requests. A stop replaces a move the camera
-/// hasn't been sent yet, so a test that wants both lets the move go out first.
+/// A stop replaces a move not sent yet, so a test that wants both lets the move go out first.
 fn sent(camera: &FakeDahua, count: usize) {
     assert!(
         eventually(|| moves(camera).len() >= count),
@@ -727,10 +693,7 @@ fn a_watch_follows_and_switches_a_bulbs_light_in_either_dialect() {
         assert_eq!(answer.recv_timeout(Duration::from_secs(5)).unwrap(), Ok(()));
         assert_eq!(camera.config("0][0][1").as_deref(), Some("Manual"));
         assert_eq!(camera.config("0][1][1").as_deref(), Some("Manual"));
-        let untouched = |row: &str, mode: &str| {
-            // The CGI names only what changes; the XML API sends the table back whole.
-            camera.config(row).is_none_or(|sent| sent == mode)
-        };
+        let untouched = |row: &str, mode: &str| camera.config(row).is_none_or(|sent| sent == mode);
         assert!(untouched("0][2][1", "Off"), "a stub");
         assert!(untouched("0][0][0", "Auto"), "the infrared lamp");
         assert!(
@@ -764,7 +727,7 @@ fn a_floodlight_without_a_lighting_row_switches_its_coaxial_light_in_either_dial
 
 #[test]
 fn detect_finds_a_dahua_over_its_api_where_dvrip_is_closed_in_either_dialect() {
-    // Both at once: each waits on closed ports, which Windows takes two seconds to refuse.
+    // Both at once: the system takes seconds to refuse each closed port.
     let cameras = [BULB, AMLINK_BULB].map(FakeDahua::start);
     let detected = thread::scope(|scope| {
         cameras
@@ -792,8 +755,7 @@ fn detect_finds_a_dahua_over_its_api_where_dvrip_is_closed_in_either_dialect() {
     }
 }
 
-/// Which of `host`'s ports accept a connection, and what the HTTP ones say to a request without a
-/// login: the status, the server, and how they ask to log in. No login is sent.
+/// Prints which of `host`'s ports answer, and what the HTTP ones say, without a login.
 fn survey(host: &str) {
     const PORTS: [u16; 14] = [
         80, 443, 554, 8000, 8080, 8081, 8443, 8554, 8888, 8899, 9000, 34567, 37777, 2020,
@@ -875,7 +837,6 @@ fn survey(host: &str) {
                     }
                     Err(error) => {
                         println!("{method} {url}: {error}");
-                        // That scheme isn't spoken here: no need to ask its other paths.
                         break;
                     }
                 }
@@ -884,17 +845,8 @@ fn survey(host: &str) {
     }
 }
 
-/// Asks the real camera named by `IPCAMERA_DAHUA_HOST`, `_USER` and `_PASSWORD` what it is and
-/// has, changing nothing: no move, and no light switched. First which of its ports answer and
-/// how they ask to log in, with no login; then Detect, as the camera form's does (its API on
-/// `_PORT`, 80, first; `_HTTPS`, 0); then, where Dahua's HTTP API answered, one login there for
-/// its model, PTZ, light and the raw lighting tables. A refused login stops it there. The owner
-/// runs it:
-///
-/// ```powershell
-/// $env:IPCAMERA_DAHUA_HOST = '192.168.1.63'; $env:IPCAMERA_DAHUA_USER = 'admin'; $env:IPCAMERA_DAHUA_PASSWORD = '…'
-/// cargo test -p ipcamera-core --test dahua_http -- --ignored --nocapture
-/// ```
+/// Asks the camera `IPCAMERA_DAHUA_HOST`, `_USER` and `_PASSWORD` name what it is and has,
+/// changing nothing; a refused login stops it there.
 #[test]
 #[ignore = "needs the owner's camera"]
 fn the_real_camera_says_what_its_api_has() {

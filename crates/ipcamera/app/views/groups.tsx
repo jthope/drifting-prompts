@@ -1,13 +1,3 @@
-// The Groups page: every group in a table, to find them and change many at
-// once, as the Cameras page lists the cameras. Under the header the other
-// pages have, with the search and the filters in its bar, a row for each
-// group: its name, how many cameras it holds, which, and what they are doing,
-// sortable by each. Rows select as the Cameras page's do, and the bar that
-// floats up while some are selected puts cameras in them or takes them out,
-// duplicates them or deletes them. A row's pencil opens the group's dialog
-// (`members.tsx`): its name, and its cameras in order. The rows come a page at
-// a time, between the column titles and the footer, as on the Cameras page.
-// What it shows is in `grouplist.ts`.
 import { computed, createAnimatedValue, effect, keymap, List, Scroll, type ScrollRef, signal, Text, View, type ViewStyle } from "nsh";
 import {
   Button,
@@ -85,57 +75,46 @@ import { ListingFooter, PageCheck } from "./paged";
 
 const tabular = { fontVariant: ["tabular-nums" as const] };
 
-/** Either side of the table, as the header's banner is set in. */
 const GUTTER = 24;
 
-/**
- * Each column's share of a row, the same in the titles and the rows: a fixed
- * width, or a share of what is left with the narrowest it gets.
- */
 const COLUMN: Record<"check" | "name" | "cameras" | "members" | "status" | "actions", ViewStyle> = {
   check: { width: 40 },
-  name: { flex: 1.4, minWidth: 140 },
+  name: { flex: 1.4, minWidth: 140, maxWidth: 280 },
   cameras: { width: 100 },
-  members: { flex: 2, minWidth: 140 },
+  members: { flex: 2, minWidth: 140, maxWidth: 480 },
   status: { width: 180 },
   actions: { width: 64 },
 };
 
-/** The page's width from which each column that can give way shows: below it, the column goes and its room goes to the rest. */
 const SHOWN_FROM = { cameras: 560, status: 680, members: 800 };
 
 type Columns = { cameras: boolean; members: boolean; status: boolean };
 
-/** "1 camera", "3 cameras". */
 const cameraCount = (count: number) => (count === 1 ? "1 camera" : `${countLabel(count)} cameras`);
 
-/** Which way the table is sorted by `key`, for its title. */
 const directionOf = (key: SortKey): SortDirection => {
   const by = sort();
   return by?.key === key ? (by.descending ? "descending" : "ascending") : null;
 };
 
-/** A row's menu, from its right press or its `…`: the selection's on a row of a selection of several, else the row's own, with the row alone selected. */
 function rowMenu(row: GroupRow): MenuEntries {
   if (selected().includes(row.id) && chosen().length > 1) return groupSelectionMenu(chosen().map((each) => each.group));
   pick(row.id, "only");
-  // Moving a group is in the sidebar's order, which the table shows only while no column sorts it.
+  // Moving is in the sidebar's order, which the table shows only while no column sorts it.
   return groupMenu(row.group, sort() === null);
 }
 
-/** One group's row: its checkbox, its cells, and its pencil and menu at the end. */
-function GroupLine(props: { row: GroupRow; columns: Columns }) {
+function GroupLine(props: { row: GroupRow; columns: Columns; line: boolean }) {
   const on = () => selected().includes(props.row.id);
   const row = () => props.row;
   const status = () => statusOf(row());
   return (
     <View style={{ paddingHorizontal: GUTTER - 8 }} onContextMenu={(event) => popup(rowMenu(row()), event.pagePosition)}>
-      <TableRow selected={on()}>
+      <TableRow selected={on()} line={props.line}>
         <View class="items-center" style={COLUMN.check}>
           <CheckBox label={`Select ${row().name}`} checked={on()} onChange={() => pick(row().id, "toggle")} />
         </View>
 
-        {/* The cells are one press: a click selects as Explorer does, a double click opens the group's dialog. */}
         <View
           role="button"
           accessibilityLabel={`${row().name}, ${cameraCount(row().cameras.length)}`}
@@ -189,7 +168,6 @@ function GroupLine(props: { row: GroupRow; columns: Columns }) {
   );
 }
 
-/** The column titles, which stay under the header's bar as the rows scroll, with the checkbox for the page (`PageCheck`). */
 function Titles(props: { columns: Columns }) {
   return (
     <View class="bg-background" style={{ paddingHorizontal: GUTTER - 8 }}>
@@ -215,7 +193,6 @@ function Titles(props: { columns: Columns }) {
   );
 }
 
-/** The search and the filters, in the header's bar. */
 function Filters() {
   const cameraLabel = () => {
     const camera = cameraFilter();
@@ -251,7 +228,6 @@ function Filters() {
   );
 }
 
-/** The header: how many groups show and what the filters keep, their stats, and the search, filters and button in its bar. */
 function GroupsHeader(props: { scroll: ReturnType<typeof createAnimatedValue> }) {
   const counted = () => `${filtered() ? `${countLabel(shown().length)} of ` : ""}${groupCount(rows().length)}`;
   const subtitle = () => [counted(), summary()].filter((part) => part !== "").join("  ·  ");
@@ -279,12 +255,10 @@ function GroupsHeader(props: { scroll: ReturnType<typeof createAnimatedValue> })
         />
       }
     >
-      {/* The filters scroll sideways in a window too narrow for them, rather than pushing the buttons out. */}
       <Scroll horizontal scrollbar={false} class="min-w-0 flex-1" contentClass="flex-row items-center pr-2">
         <Filters />
       </Scroll>
       <View class="flex-row items-center gap-2">
-        {/* The count the masthead said, once the masthead has gone. */}
         <Text class="text-sm text-muted-foreground" style={{ numberOfLines: 1, opacity: collapsedness(props.scroll), ...tabular }}>
           {counted()}
         </Text>
@@ -297,11 +271,6 @@ function GroupsHeader(props: { scroll: ReturnType<typeof createAnimatedValue> })
   );
 }
 
-/**
- * The selection's keys, bound while the page shows: Control+A, Delete, Return
- * to edit one group and Control+D to duplicate; never while a field has the
- * keyboard or a dialog is open.
- */
 function SelectionKeys() {
   const free = () => editing() === null && bulkEditing() === null && groupEditing() === null;
   const list = () => chosen().map((row) => row.group);
@@ -312,7 +281,6 @@ function SelectionKeys() {
   return null;
 }
 
-/** The bar over the page's foot while some groups are selected: put cameras in them or take them out, duplicate them, delete them. */
 function Selection() {
   const list = () => chosen().map((row) => row.group);
   return (
@@ -328,7 +296,6 @@ function Selection() {
   );
 }
 
-/** Before the first group: what groups are for, and the button that makes one. */
 function NoGroups() {
   return (
     <EmptyState
@@ -340,7 +307,6 @@ function NoGroups() {
   );
 }
 
-/** When the search and the filters leave nothing: the button that clears them. */
 function NothingMatches() {
   return (
     <View class="items-center gap-3 px-6 py-12">
@@ -350,7 +316,6 @@ function NothingMatches() {
   );
 }
 
-/** A row of the list: the titles, or a group's. */
 type Line = { kind: "titles"; key: string } | { kind: "group"; key: string; row: GroupRow };
 
 /** The Groups page, in place of the stage and the PTZ panel. */
@@ -368,9 +333,9 @@ export function GroupsPage() {
   });
 
   const lines = computed((): Line[] => (onPage().length === 0 ? [] : [{ kind: "titles", key: "titles" }, ...onPage().map((row) => ({ kind: "group" as const, key: row.id, row }))]));
+  const lastKey = computed(() => lines().at(-1)?.key);
 
   let scroller: ScrollRef | undefined;
-  /** Turns to page `index`, and brings its first row into view under the column titles, as the Cameras page does. */
   const turn = (index: number) => {
     turnTo(index);
     scroll.getValue().then((at) => {
@@ -382,7 +347,6 @@ export function GroupsPage() {
     <View testID="groups" class="flex-1 bg-background" onLayout={(event) => width.set(event.bounds.size.width)}>
       <SelectionKeys />
       <If when={rows().length > 0} else={<NoGroups />}>
-        {/* The rows scroll between the column titles, which stick under the header's bar, and the footer, which stays put. */}
         <View class="flex-1">
           <Scroll ref={(ref: ScrollRef) => (scroller = ref)} scrollValue={scroll} class="flex-1">
             <GroupsHeader scroll={scroll} />
@@ -394,12 +358,11 @@ export function GroupsPage() {
               stickyHeaderIndices={[0]}
               stickyHeaderOffset={HEADER_BAR}
               estimatedItemSize={TABLE_ROW}
-              // Room under the last row for the selection's bar to float over.
               contentStyle={{ paddingTop: 8, paddingBottom: 96 }}
             >
               {(line) => (
                 <If when={line().kind === "group" ? (line() as Extract<Line, { kind: "group" }>).row : undefined} else={<Titles columns={columns()} />}>
-                  {(row) => <GroupLine row={row()} columns={columns()} />}
+                  {(row) => <GroupLine row={row()} columns={columns()} line={line().key !== lastKey()} />}
                 </If>
               )}
             </List>

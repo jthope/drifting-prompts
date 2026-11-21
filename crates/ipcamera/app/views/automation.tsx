@@ -1,11 +1,3 @@
-// Settings' Automation section: whether the app logs what the cameras see,
-// what it does by itself as one sees something (an alert, a picture, a
-// recording, and how long an event stays open), how the videos events save are
-// made for every camera that doesn't have its own (`eventvideo.ts`), and how
-// much media it may keep. Each choice is saved as it changes, in
-// `settings.json`'s `automation` (the alerts with the preferences), and the
-// desktop app reads them as it needs them, so they apply at once. Only where
-// the app does anything by itself: the desktop.
 import { signal, View } from "nsh";
 import { Automation, type AutomationSettings, type EventCaptureInfo, type EventVideoSettings } from "ipcamera/native";
 import { Appear, CheckBox, CheckField, InlineSelect, SettingRow, SettingsGroup } from "../../../dp/ui";
@@ -33,7 +25,6 @@ export const CAPTURES: { value: EventCaptureInfo; title: string }[] = [
   { value: "nothing", title: "Nothing" },
 ];
 
-/** The windows offered for grouping events, in minutes: 0 groups nothing. */
 const WINDOWS = [0, 1, 2, 5, 10, 15, 30];
 
 /** A window as its menu says it: `5 minutes`, `Don't group` for 0. */
@@ -42,10 +33,8 @@ export function windowLabel(minutes: number): string {
   return minutes === 1 ? "1 minute" : `${minutes} minutes`;
 }
 
-/** The limits offered for all media, in megabytes: none, then 1 GB to 2 TB. */
 const MEDIA_LIMITS = [0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1024, 2048].map((gigabytes) => gigabytes * 1024);
 
-/** The limits offered for one video file, in megabytes. */
 const VIDEO_LIMITS = [0, 100, 250, 500, 1024, 2048, 4096];
 
 /** A limit in megabytes as a menu says it: `250 MB`, `5 GB`, `1 TB`; `No limit` for 0. */
@@ -74,10 +63,8 @@ export function windowItems(current: number) {
   return numberItems(WINDOWS, current, windowLabel);
 }
 
-/** Whether events save videos, for which the Event videos group shows. */
 const savesVideo = (capture: EventCaptureInfo) => capture === "video" || capture === "pictureAndVideo";
 
-/** Settings → Automation's Event videos group: how every camera's event videos are made, unless a camera has its own. */
 function EventVideoGroup(props: { video: EventVideoSettings; onChange: (video: EventVideoSettings) => void }) {
   const change = (next: Partial<EventVideoSettings>) => props.onChange({ ...props.video, ...next });
   return (
@@ -150,13 +137,7 @@ function EventVideoGroup(props: { video: EventVideoSettings; onChange: (video: E
   );
 }
 
-/**
- * The kinds that save a video, each a box with its name, in the columns of
- * `KIND_COLUMNS`, under Save videos of: Settings → Automation's for every
- * camera, and a camera's own in its Events part. The columns are narrow and of
- * one width, so the three sit together rather than spread across the row; where
- * even that is too wide, the third goes under the others.
- */
+/** The kinds that save a video, each a box, in the columns of `KIND_COLUMNS`. */
 export function KindChecks(props: { video: EventVideoSettings; onChange: (video: EventVideoSettings) => void }) {
   return (
     <View class="flex-row flex-wrap gap-x-4 gap-y-2.5">
@@ -178,7 +159,6 @@ export function KindChecks(props: { video: EventVideoSettings; onChange: (video:
 /** The Automation section. */
 export function AutomationSection() {
   const settings = signal(Automation.settings());
-  /** What the snapshots and videos hold now, in bytes, once read. */
   const held = signal<number | null>(null);
   Automation.mediaSize()
     .then((bytes) => held.set(bytes))
@@ -205,7 +185,6 @@ export function AutomationSection() {
             detail="Watch every camera the app can, on screen or not, and log what each sees on the Events page. Off, a camera is asked what it sees only while it streams, for its badge."
             control={<CheckBox label="Log events" checked={settings().logEvents} onChange={(on) => change({ logEvents: on })} />}
           />
-          {/* These follow events: with none logged, there is nothing to tell, save or group. */}
           <If when={settings().logEvents}>
             <SettingRow
               icon="monitor"

@@ -1,22 +1,5 @@
-//! Markdown Viewer's own model: its projects and settings, the Markdown files in a project, and
-//! what a file's outline is.
-//!
-//! A project is a folder the user opened (New), listed in the sidebar by its folder's name. Its
-//! Markdown files are whatever is in that folder and the folders under it, read again as they
-//! change ([`files`]); nothing about them is saved but the tabs they are open in and which was in
-//! front. A file shows raw or rendered, with its headings beside it ([`outline`]). A search finds
-//! text in all of them, where the raw view would ([`search()`]).
-//!
-//! What the app saves is two files beside the executable, opened together as [`Saved`]:
-//! `settings.json` for the window's preferences ([`ConfigStore`]) and `projects.json` for the
-//! projects ([`ProjectStore`]).
-//!
-//! Nothing here draws anything: this crate has no UI and no nsh, so it compiles anywhere, and
-//! `cargo test -p mdviewer-core` runs in milliseconds. The app (`crates/mdviewer/app`) reaches it
-//! through its bridge.
-//!
-//! The types everything is built from are at the crate's root (`mdviewer_core::Config`,
-//! `mdviewer_core::Heading`). [`files`] is a namespace of its own, for reading folders and files.
+//! Markdown Viewer's model: projects and settings, the Markdown files in a project, a file's
+//! outline and syntax marks, and search. No UI and no nsh.
 
 mod config;
 pub mod files;

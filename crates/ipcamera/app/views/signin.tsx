@@ -1,8 +1,3 @@
-// The page a server with a password shows in place of the app, until someone
-// signs in. Only the web build ever shows it: the desktop app keeps its cameras
-// itself and has no server to sign in to. The password is the one
-// `ipcamera-server --set-password` saved; the server answers a wrong one in its
-// own words, and makes the next try wait a few seconds.
 import { signal, Text, View } from "nsh";
 import { Server } from "ipcamera/native";
 import { Button, TextField } from "../../../dp/ui";

@@ -1,14 +1,5 @@
-//! What the server and the web build say to each other beyond the library's own changes: its
-//! status, the snapshots and recordings it saved, its folders, and the requests to take a
-//! snapshot, record, move a camera, switch its spotlight and detect which camera is at an address;
-//! and signing in to a server that has a password.
-//!
-//! Both ends read these types, as both read [`Change`](crate::change::Change), so the JSON can't
-//! drift apart. In C# terms, they are the DTOs of the server's API. A URL in them is the server's
-//! own path (`/files/snapshots/…`), which the web build puts after the server's address.
-//!
-//! What may be missing is an `Option`, as a nullable is in C#, and is left out of the JSON when it
-//! is `None`: a thumbnail not made yet, a camera a file's name doesn't say.
+//! The server API's request and reply types, shared by the server and the web build. A URL in them
+//! is the server's own path, and a missing value is left out of the JSON.
 
 use serde::{Deserialize, Serialize};
 
@@ -18,49 +9,44 @@ use crate::{
     ids::CameraId,
 };
 
-/// `GET /api/status`: what the web build checks about once a second.
+/// `GET /api/status`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Status {
-    /// The library's revision, which goes up with every change to the cameras, groups or views.
+    /// The library's revision, raised by every change to the cameras, groups or views.
     pub revision: u64,
-    /// A number that changes whenever a snapshot is added, deleted or rewritten; 0 with none.
+    /// Changes whenever a snapshot is added, deleted or rewritten; 0 with none.
     pub snapshots: u64,
-    /// A number that changes whenever a recording or its thumbnail is added, deleted or written
-    /// to; 0 with none.
+    /// Changes whenever a recording or its thumbnail is added, deleted or written to; 0 with none.
     pub videos: u64,
-    /// The cameras that have a stream, record, did, have a PTZ connection or are watched: one
-    /// that does none of these is left out.
+    /// The cameras that stream, record, did, have a PTZ connection or are watched.
     pub cameras: Vec<CameraStatus>,
 }
 
-/// One camera's stream, recording and PTZ, as [`Status`] lists it.
+/// One camera's stream, recording and PTZ.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CameraStatus {
     /// Which camera.
     pub id: CameraId,
-    /// Whether the server has a stream of it that hasn't given up: connecting, live or
-    /// reconnecting.
+    /// Whether its stream is connecting, live or reconnecting.
     #[serde(default)]
     pub playing: bool,
-    /// Why its stream gave up, until it is asked to connect again or its settings change; `None`
-    /// when it hasn't.
+    /// Why its stream gave up, until it connects again or its settings change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_problem: Option<String>,
     /// Whether it records, or waits for its stream to.
     pub recording: bool,
-    /// Why its last recording stopped by itself, until the next one starts; `None` when none did.
+    /// Why its last recording stopped by itself, until the next one starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub record_problem: Option<String>,
     /// What PTZ last reported; `None` before its first move.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ptz_status: Option<String>,
-    /// What the server's watch of the camera says, while its stream runs; `None` for a camera it
-    /// doesn't watch.
+    /// What the server's watch says, while its stream runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watch: Option<WatchStatus>,
 }
 
-/// What a camera's watch says now: what it sees and its spotlight (`CameraWatch` in `core`).
+/// What a camera's watch says now.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WatchStatus {
     /// Whether something moves in its picture.
@@ -76,7 +62,7 @@ pub struct WatchStatus {
     pub summary: String,
 }
 
-/// `POST /api/cameras/<id>/spotlight`: switches the camera's spotlight.
+/// `POST /api/cameras/<id>/spotlight`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpotlightRequest {
     /// On, or off.
@@ -86,11 +72,10 @@ pub struct SpotlightRequest {
 /// `POST /api/detect`: which camera is at `setting`'s address.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DetectRequest {
-    /// The saved camera the form edits, whose saved password the server logs in with when
-    /// `setting` has none; `None` for a new camera.
+    /// The saved camera whose password is used when `setting` has none; `None` for a new camera.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<CameraId>,
-    /// The form's settings: the address, the login and the ports to ask on.
+    /// The address, the login and the ports to ask on.
     pub setting: CameraConfig,
 }
 
@@ -99,38 +84,36 @@ pub struct DetectRequest {
 pub struct DetectReply {
     /// Who made the camera.
     pub brand: Brand,
-    /// Where its HTTP API answered: a Reolink's, or a Dahua's.
+    /// Where its HTTP API answered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_port: Option<u16>,
     /// Whether that API is HTTPS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_https: Option<bool>,
-    /// For a Dahua: whether its PTZ and light go over that API rather than PTZ over DVRIP.
+    /// For a Dahua: whether its PTZ and light go over that API rather than DVRIP.
     #[serde(default)]
     pub http_api: bool,
-    /// What the camera says it is, when it was asked with a login.
+    /// What the camera says it is, when asked with a login.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<DeviceInfo>,
-    /// What it can do, when it was asked with a login.
+    /// What it can do, when asked with a login.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub features: Option<CameraFeatures>,
     /// Whether it was asked with a password, which a Reolink needs to say more.
     pub asked_with_password: bool,
-    /// Whether its ONVIF event service reports motion, or its PTZ service has a light, for a
-    /// camera that isn't a Reolink.
+    /// Whether ONVIF reports motion or has a light, for a camera that isn't a Reolink.
     #[serde(default)]
     pub onvif_events: bool,
-    /// The port ONVIF answered on, when it did.
+    /// The port ONVIF answered on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub onvif_port: Option<u16>,
-    /// Why ONVIF told nothing of a camera found another way, as a sentence.
+    /// Why ONVIF told nothing of a camera found another way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub onvif_problem: Option<String>,
-    /// The streams the camera listed, when it was asked with a login.
+    /// The streams the camera listed, when asked with a login.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub streams: Vec<CameraStream>,
-    /// Whether its ONVIF refused the login, now or when it was asked before, where the login
-    /// works another way: the form remembers it, and Detect leaves ONVIF alone from then on.
+    /// Whether ONVIF refused a login that works another way; Detect then leaves ONVIF alone.
     #[serde(default)]
     pub onvif_refused: bool,
 }
@@ -142,14 +125,13 @@ pub struct SnapshotEntry {
     pub name: String,
     /// Where the server serves the picture.
     pub url: String,
-    /// Where the server serves its thumbnail, which the gallery shows; `None` while it has none.
+    /// Where the server serves its thumbnail; `None` while it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnail: Option<String>,
     /// The camera that took it; `None` when its name doesn't say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<CameraId>,
-    /// What the camera saw as an event took it (`vehicle`, `person`), from its name; empty for
-    /// one taken by hand.
+    /// What an event's camera saw (`vehicle`, `person`), from its name; empty when taken by hand.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     /// When it was taken, in milliseconds since 1970.
@@ -183,8 +165,7 @@ pub struct VideoEntry {
     /// The camera that made it; `None` when its name doesn't say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<CameraId>,
-    /// What the camera saw as an event's sighting started it, from its name; empty for one
-    /// someone started.
+    /// What an event's camera saw, from its name; empty for one someone started.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     /// When it started, in milliseconds since 1970.
@@ -200,17 +181,17 @@ pub struct VideoEntry {
 /// One of the server's folders, as `GET /api/storage` describes it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StorageEntry {
-    /// Where it is on the server: an absolute path.
+    /// Its absolute path on the server.
     pub path: String,
     /// Whether it is the default folder beside the server, not one its `settings.json` names.
     pub is_default: bool,
-    /// The drive it is on, as Explorer names it (`D:`).
+    /// The drive it is on (`D:`).
     pub drive: String,
     /// What is left on that drive, in bytes.
     pub free: u64,
     /// How much that drive holds, in bytes.
     pub total: u64,
-    /// Why the drive's space couldn't be read, when it couldn't; then `free` and `total` are 0.
+    /// Why the drive's space couldn't be read; then `free` and `total` are 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
 }
@@ -252,7 +233,7 @@ pub struct Recorded {
     pub count: u32,
 }
 
-/// `POST /api/cameras/<id>/ptz`: a move, which lasts only while the web build keeps sending it.
+/// `POST /api/cameras/<id>/ptz`: a move, which lasts only while it is sent again.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PtzMove {
     /// -1 to 1: positive is right.
@@ -265,8 +246,7 @@ pub struct PtzMove {
     pub speed: f64,
 }
 
-/// `GET /api/session`: whether the server asks for a password, and whether this request came with
-/// a session's key.
+/// `GET /api/session`: whether a password is needed, and whether this request has a session's key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     /// Whether the server has a password, without which it answers nothing else.
@@ -285,13 +265,11 @@ pub struct SignIn {
 /// A session, as `POST /api/session` answers a right password.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignedIn {
-    /// The session's key: sent with every request after, as `Authorization: Bearer <key>`, or as
-    /// `?key=<key>` where a browser makes the request itself (a player, a picture, a WebSocket).
+    /// The session's key: `Authorization: Bearer <key>`, or `?key=<key>` where a browser fetches.
     pub key: String,
 }
 
-/// `name` as one segment of a URL's path, as the server's URLs carry a file's name: every byte
-/// but letters, digits and `-._~` escaped.
+/// `name` as one segment of a URL's path: every byte but letters, digits and `-._~` escaped.
 pub fn path_segment(name: &str) -> String {
     let mut segment = String::with_capacity(name.len());
     for byte in name.bytes() {

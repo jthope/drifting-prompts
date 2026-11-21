@@ -4,11 +4,7 @@ import { look } from "./brand";
 import { Icon } from "./icon";
 import { ChipTrigger, popupSurface } from "./menu";
 
-/**
- * A label above a control, with help or an error under it. An error replaces
- * the help. `action` sits at the label's end: a small button about the field,
- * such as one that undoes a change to it.
- */
+/** A label above a control, with help or an error under it; `action` sits at the label's end. */
 export function Field(props: { label: string; help?: string; error?: string; action?: JSX.Element; class?: string; children: JSX.Element }) {
   return (
     <View class={`gap-1.5 ${props.class ?? ""}`}>
@@ -45,11 +41,7 @@ export function FieldRow(props: { children: JSX.Element }) {
   return <View class="flex-row items-start gap-3">{props.children}</View>;
 }
 
-/**
- * A labeled text input. `masked` hides what is typed, for passwords. `action` is the `Field`'s, in
- * the label's row; `trailing`, a button beside the input itself. `readOnly` shows the value and
- * takes no typing: a value something else on the form decides.
- */
+/** A labeled text input; `masked` hides what is typed, and `trailing` sits beside the input. */
 export function TextField(props: {
   label: string;
   value: string;
@@ -97,10 +89,7 @@ export function TextField(props: {
   );
 }
 
-/**
- * One choice from a short list, as a compact button showing the choice, for a
- * toolbar. `label` is what it chooses: what a screen reader says.
- */
+/** One choice from a short list, as a compact button showing the choice. */
 export function InlineSelect<T extends string>(props: {
   label: string;
   items: { value: T; title: string }[];
@@ -148,11 +137,7 @@ export function SelectField<T extends string>(props: {
   );
 }
 
-/**
- * A checkbox's box alone, checked in the theme's colors. `mixed` shows a dash
- * for neither, as a "select all" over some does; a press then asks for
- * checked. `label` is what a screen reader says.
- */
+/** A checkbox's box alone; `mixed` shows a dash, and a press then asks for checked. */
 export function CheckBox(props: { label: string; checked: boolean; mixed?: boolean; class?: string; onChange: (checked: boolean) => void; children?: JSX.Element }) {
   const check = () => look().check;
   const marked = () => props.checked || props.mixed === true;
@@ -176,10 +161,7 @@ export function CheckBox(props: { label: string; checked: boolean; mixed?: boole
   );
 }
 
-/**
- * A checkbox with its label beside it, checked in the theme's colors. `mixed`
- * is `CheckBox`'s; `action` sits after the label, as a `Field`'s does.
- */
+/** A checkbox with its label beside it. */
 export function CheckField(props: { label: string; checked: boolean; mixed?: boolean; action?: JSX.Element; onChange: (checked: boolean) => void }) {
   return (
     <View class="flex-row items-center gap-2">
@@ -199,7 +181,7 @@ const tones: Record<SliderTone, { range: string; thumb: string }> = {
   info: { range: "bg-info", thumb: "border-info" },
 };
 
-/** A horizontal slider, with its value after it when `format` gives one. A theme can fill it in its own colors, whatever its tone. */
+/** A horizontal slider, with its value after it when `format` gives one. */
 export function LevelSlider(props: {
   label: string;
   value: number;

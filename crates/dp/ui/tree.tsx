@@ -1,7 +1,3 @@
-// Lists that hold lists: a tree of folders and files in a panel, and an
-// outline of headings beside a page. Both draw their rows as a list on a page
-// does in the theme shown (`look().listRow`): a fill while hovered, and the
-// theme's selection while chosen.
 import { Text, View } from "nsh";
 import { Tree, type TreeItem, type TreeRef } from "nsh/base";
 import { look } from "./brand";
@@ -10,34 +6,12 @@ import { Icon, type IconName } from "./icon";
 import { type MenuEntries, popupMenu } from "./menu";
 import { Press } from "./press";
 
-/** How far each level of a tree or an outline is indented, in points. */
 const INDENT = 14;
 
 /** A press on a row of a `TreeList`: its click count, and the keys held (`control` is Command on a Mac). */
 export type TreePress = { clickCount: number; control: boolean; shift: boolean };
 
-/**
- * A tree of items, a folder's chevron before its icon (a project's files):
- * nsh's `Tree`, with the keys of a tree (arrows, Home, End, typeahead,
- * Return), drawn in the theme's rows. Only the rows in view are made.
- * `expanded` and `selected` are the app's: a press on a folder asks to expand
- * or collapse it (`onExpandedChange`), on another item to choose it
- * (`onSelect`), as the arrows do; Return on an item or a double press is
- * `onAction`. `icon` picks each row's icon (`null` for none), `lead` a quieter
- * text in its place (a match's line number), `detail` a quieter text after its
- * label (a file's folder), `found` the part of its label a search found, marked
- * as the search marks it, `count` how many matches a search found in it, at the
- * row's end, `dimmed` whether it fades (a file a search found nothing in), and
- * `menu` its right-click menu.
- *
- * For several items chosen at once, `marked` are the ones to show as chosen
- * (while it has any, it alone marks the rows), and `onPress` takes every press
- * on a row, with its keys: the row takes the press from the tree, which
- * selects one item only, so the app picks, opens or expands as it decides.
- * The arrows still move `selected` (`onSelect`) and the keyboard stays the
- * tree's. nsh 0.5.1's `Tree` selects a single item; a release that selects
- * several replaces `marked` and `onPress`.
- */
+/** nsh's `Tree` in the theme's rows; it selects one item only, so `marked` and `onPress` let the app choose several. */
 export function TreeList(props: {
   label: string;
   items: TreeItem[];
@@ -81,7 +55,6 @@ export function TreeList(props: {
         const detail = () => (props.detail ? props.detail(entry.id) : "");
         const lead = () => (props.lead ? props.lead(entry.id) : "");
         const icon = () => props.icon(entry.id, entry.folder);
-        /** The label cut at what a search found in it: before, the match, after; the whole label first when nothing was. */
         const parts = (): [string, string, string] => {
           const at = props.found?.(entry.id);
           return at ? [entry.label.slice(0, at[0]), entry.label.slice(at[0], at[1]), entry.label.slice(at[1])] : [entry.label, "", ""];
@@ -95,7 +68,7 @@ export function TreeList(props: {
             onPress={
               props.onPress
                 ? (event) => {
-                    // The tree's own press would have taken the keyboard; this one keeps it there.
+                    // Keeps the keyboard in the tree, as its own press would.
                     tree?.focus();
                     props.onPress?.(entry.id, {
                       clickCount: event.clickCount,
@@ -133,15 +106,10 @@ export function TreeList(props: {
   );
 }
 
-/** A line of an outline: its title, how deep it is (0 at the top), and how many matches a search found under it (0 or absent for none). */
+/** A line of an outline: its title, its depth (0 at the top), and the matches found under it. */
 export type OutlineLine = { title: string; depth: number; count?: number };
 
-/**
- * An outline beside a page (a file's headings): a row for each line, indented
- * by its depth, `current` the one the reader is in, marked as the theme marks
- * a selection, and how many matches a search found in each line's part at its
- * end. A press goes there (`onSelect`, with the line's index).
- */
+/** An outline beside a page, `current` the line the reader is in. */
 export function OutlineList(props: { lines: OutlineLine[]; current: number; onSelect: (index: number) => void }) {
   return (
     <View class="gap-0.5">

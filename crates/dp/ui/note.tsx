@@ -1,14 +1,9 @@
-// A message worth passing on, with a button that copies it: what a camera
-// answered, or why it didn't. nsh 0.5.1's text can't be selected, so the
-// button is how such a message leaves the app.
+// nsh's text can't be selected, so a button copies the message.
 import { Clipboard, Text, View } from "nsh";
 import { IconButton } from "./button";
 import { notify } from "./toast";
 
-/**
- * `text`, with a quieter `detail` line under it, and a button that puts both
- * on the clipboard. `tone` "error" draws the text in the destructive color.
- */
+/** `text` and a quieter `detail`, with a button that copies both. */
 export function CopyableNote(props: { text: string; detail?: string; tone?: "error" | "normal" }) {
   const copy = () => {
     const text = props.detail ? `${props.text}\n${props.detail}` : props.text;

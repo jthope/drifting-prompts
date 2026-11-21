@@ -1,13 +1,4 @@
-// The themes' looks: the default themes keep nsh's stock colors everywhere a
-// theme reaches. No theme has depth of its own: the elevation adds shadows and
-// lights over every theme, black and white at low alphas, never a color of its
-// own. The high contrast themes take none.
-//
-// Colors are read as Rust reads them (`themeColors`), from the app's theme file
-// and the files in `themes/`; a test's own engine has nsh's default theme file,
-// so `token()` would not have the app's. `nsh check` still fails if
-// `theme.json` stops defining a token that a class names. Rust's own tests
-// check that every file sets every token.
+// Colors are read as Rust reads them (`themeColors`): a test's engine has nsh's default theme file, so `token()` lacks the app's.
 import { expect, test } from "nsh/test";
 import { type CanvasRenderingContext2D, setColorScheme } from "nsh";
 import { Themes } from "ipcamera/native";
@@ -15,10 +6,9 @@ import { connectThemes, contrast, defaultTheme, fadeFrom, type Look, look, over,
 import { ELEVATIONS, type ElevationName, elevationNamed } from "../../dp/ui/elevation";
 import { type Finish, headerTexture, TEXTURES, textureNamed } from "../../dp/ui/texture";
 
-// No app opens here, so the themes' module is handed over as `App.tsx` hands it.
+// No app opens here, so the themes' module is connected by hand.
 connectThemes(Themes);
 
-/** The tokens `classes` name for a color: `hover:bg-toolbar-hover` names `toolbar-hover`, `selected:bg-accent/25` names `accent`. */
 function tokensIn(classes: string): string[] {
   const words = new Set(["sm", "xs", "base", "lg", "xl", "center", "right", "left", "white", "black", "transparent"]);
   return classes
@@ -27,10 +17,8 @@ function tokensIn(classes: string): string[] {
     .filter((name): name is string => name !== undefined && !words.has(name));
 }
 
-/** nsh's stock tokens, the only ones the default themes' classes name. */
 const STOCK = ["background", "foreground", "card", "card-foreground", "popover", "popover-foreground", "primary", "primary-foreground", "secondary", "secondary-foreground", "muted", "muted-foreground", "accent", "accent-foreground", "destructive", "border", "input", "ring", "sidebar", "sidebar-foreground", "sidebar-accent", "sidebar-accent-foreground", "sidebar-border", "sidebar-ring"];
 
-/** Every color in `paint` is black or white at an alpha: shade and light, never a color of its own. */
 function expectBlackOrWhite(paint: string) {
   expect(paint).not.toContain("#");
   for (const color of paint.match(/rgb\([^)]*\)/g) ?? []) {
@@ -40,7 +28,6 @@ function expectBlackOrWhite(paint: string) {
 
 const LEVELS: ElevationName[] = ["none", "soft", "raised"];
 
-/** The styles the elevation reaches in `shown`. */
 const lifted = (shown: Look) => [
   shown.primary.style,
   shown.popup.style,
@@ -55,10 +42,8 @@ const lifted = (shown: Look) => [
   shown.thumb,
 ];
 
-/** Every paint and shadow the elevation reaches in `shown`, as text. */
 const depthOf = (shown: Look) => [shown.glow, shown.cornerLight, shown.edge, shown.badge.fill, shown.badge.shadow, ...lifted(shown).flatMap((style) => Object.values(style).map(String))];
 
-/** The classes of every place a look styles, joined. */
 const classesOf = (shown: Look) =>
   [
     shown.header,
@@ -103,7 +88,6 @@ const classesOf = (shown: Look) =>
     ...Object.values(shown.edges),
   ].join(" ");
 
-/** The themes from `themes/`, as Settings offers them. */
 const files = () => THEMES.filter((each) => each.file);
 
 for (const scheme of ["dark", "light"] as const) {
@@ -111,37 +95,31 @@ for (const scheme of ["dark", "light"] as const) {
 
   test(`the default theme keeps the stock colors (${scheme})`, () => {
     setColorScheme(scheme);
-    // Whatever the elevation, its depth is shade and light over the stock colors.
     for (const level of LEVELS) {
       const raised = look(name, level);
       for (const paint of [...depthOf(raised), raised.halo]) expectBlackOrWhite(paint);
     }
     const stock = look(name, "none");
     const classes = classesOf(stock);
-    // Default keeps the stock tokens, but for the tab line and readable field outline it sets itself.
     for (const named of tokensIn(classes)) expect(STOCK.includes(named) || named === "tab-border" || named === "field-border").toBe(true);
     if (scheme === "dark") expect(themeColors(name)["tab-border"]).toMatch(/^#0078d4/);
     expect(stock.halo.startsWith("radial-gradient(circle, ")).toBe(true);
-    // The headers share the sidebar's color.
     expect(stock.header).toBe("bg-sidebar");
     const border = themeColors(name).border;
     expect([0, 1, 2].map((index) => stock.accent(index))).toEqual([border, border, border]);
     expect(stock.slider).toBeUndefined();
     expect(stock.rings.visible).toBe("focus-visible:ring-2 focus-visible:ring-ring");
     expect(stock.primary.frame).toBe("bg-primary hover:opacity-80 active:opacity-70");
-    // A hover shows on any surface: a tint of the text's color, not `accent`, which is `secondary`'s own in the dark.
     for (const kind of [stock.buttons.secondary, stock.buttons.ghost]) expect(kind.frame).toContain("hover:bg-foreground/10");
     expect(stock.popup.class).toBe("rounded-lg border border-border bg-popover");
   });
 
   test(`no theme has depth of its own: the elevation adds it, shadows then lights (${scheme})`, () => {
-    // At None the default theme is nsh's flat look.
     const flat = look(name, "none");
     for (const none of [flat.glow, flat.cornerLight, flat.edge, flat.badge.fill, flat.badge.shadow]) expect(none).toBe("none");
     for (const style of lifted(flat)) expect(style).toEqual({});
     expect(flat.toggle.frame).not.toContain("shadow");
 
-    // Soft casts shadows under what is raised, with no light and nothing pressed in.
     const soft = look(name, "soft");
     expect(soft.glow).not.toBe("none");
     for (const style of [soft.primary.style, soft.popup.style, soft.tooltip.style, soft.surface, soft.control, soft.navLift, soft.thumb]) {
@@ -153,7 +131,6 @@ for (const scheme of ["dark", "light"] as const) {
     expect(soft.check.style).toEqual({});
     expect(soft.cornerLight).toBe("none");
 
-    // Raised adds the light: a sheen on the primary button, a lit or shaded edge, and fields pressed in.
     const raised = look(name, "raised");
     expect(raised.primary.style.backgroundImage).toContain("linear-gradient");
     expect(String(raised.primary.style.boxShadow)).toContain("inset 0 1px 0");
@@ -179,12 +156,9 @@ test("every theme file takes the elevation's depth over its own colors, and the 
     expect(soft.popup.style.boxShadow).toBeDefined();
     const raised = look(each.value, "raised");
     if (raised.primary.style.backgroundImage) expect(raised.primary.style.backgroundImage).toContain("linear-gradient");
-    // The light goes over the theme's own color, which still shows under it.
     expect(raised.cornerLight.endsWith(flat.cornerLight)).toBe(true);
     expect(raised.edge.endsWith(flat.edge)).toBe(true);
-    // A theme's own outline stays, under the elevation's shadows.
     if (flat.onStyle.boxShadow) expect(String(raised.onStyle.boxShadow).startsWith(String(flat.onStyle.boxShadow))).toBe(true);
-    // What the elevation adds is shade and light, never a color of its own.
     const added = (paint: string, own: string) => (paint.endsWith(own) ? paint.slice(0, paint.length - own.length) : paint);
     expectBlackOrWhite(added(raised.cornerLight, flat.cornerLight));
     expectBlackOrWhite(added(raised.glow, flat.glow));
@@ -196,7 +170,6 @@ test("content fades into its own surface at either edge, the same both ways but 
     setColorScheme(scheme);
     const sidebar = themeColors(theme()).sidebar;
     const top = fadeFrom("sidebar", "top");
-    // Solid in the sidebar's color along the edge, so nothing shows through there, and nothing of it at the far end.
     expect(top).toBe(`linear-gradient(180deg, ${sidebar}, ${sidebar} 16%, ${withAlpha(sidebar, 0.7)} 40%, ${withAlpha(sidebar, 0)})`);
     expect(fadeFrom("sidebar", "bottom")).toBe(top.replace("180deg", "0deg"));
   }
@@ -217,11 +190,8 @@ test("the panes' islands stand in three steps in every theme, a tool pane's betw
       expect([frame, tool, document]).toEqual([over(colors.sidebar, page), page, page]);
       continue;
     }
-    // A theme file keeps its page for the document; Default keeps its frame, one color with its title bar.
     if (each.file) expect(document).toBe(page);
     else if (each.scheme === "dark") expect(frame).toBe(over(colors.sidebar, page));
-    // The frame and the document stand the set contrast apart, each step shows against the next, and the tool
-    // pane's lies between the other two.
     expect(contrast(frame, document)).toBeGreaterThan(each.scheme === "dark" ? 1.299 : 1.179);
     expect(contrast(frame, tool)).toBeGreaterThan(1.08);
     expect(contrast(tool, document)).toBeGreaterThan(1.08);
@@ -238,24 +208,19 @@ test("a scroll view's edges cast the elevation's shade, the same both ways but f
         expect([shade("top"), shade("bottom")]).toEqual(["none", "none"]);
         continue;
       }
-      // Down from a top edge, up from a bottom one, from the same stops.
       expect(shade("top")).toContain("linear-gradient(180deg, ");
       expect(shade("bottom")).toBe(shade("top").replace("180deg", "0deg"));
       expectBlackOrWhite(shade("top"));
-      // Darker along a dark page's edge, where a shade shows less.
       expect(shade("top")).toContain(themeScheme(each.value) === "dark" ? "rgb(0 0 0 / 0.4)" : "rgb(0 0 0 / 0.08)");
     }
   }
 });
 
 test("a light falls on each place by how light its own color is", () => {
-  // The default's primary button is pale in the dark and near black in the light: more white shows a sheen on pale.
   expect(look("default-dark", "raised").primary.style.backgroundImage).toContain("rgb(255 255 255 / 0.5)");
   expect(look("default-light", "raised").primary.style.backgroundImage).toContain("rgb(255 255 255 / 0.14)");
-  // Dark+'s blue button has a softer sheen so its white text stays readable.
   expect(look("dark-plus", "raised").primary.style.backgroundImage).toContain("linear-gradient");
   expect(look("dark-plus", "raised").primary.style.backgroundImage).not.toContain("rgb(255 255 255 / 0.14)");
-  // On a light theme's white card, the bottom falls into shade.
   expect(look("light-modern", "raised").edge).toContain("rgb(0 0 0 / 0.07)");
   expect(look("dark-modern", "raised").edge).toContain("rgb(255 255 255 / 0.12)");
 });
@@ -271,7 +236,6 @@ test("each appearance has its own themes, Default first and high contrast last",
     expect(own[own.length - 1].contrast).toBe(true);
     for (const each of own) expect(themeScheme(each.value)).toBe(scheme);
   }
-  // The dark ones, then the light ones.
   const order = THEMES.map((each) => each.scheme);
   expect(order).toEqual([...order].sort());
 });
@@ -300,10 +264,8 @@ test("a name this version doesn't know, or one of the other appearance, picks De
 
 test("every theme file is offered, each under a name of its own, and Default is one name in both appearances", () => {
   expect(files().map((each) => each.value).sort()).toEqual([...Themes.names()].sort());
-  // Default is one theme to the user, dark or light as the mode is, so neither of its titles says which.
   expect(THEMES.filter((each) => !each.file).map((each) => each.title)).toEqual(["Default", "Default"]);
   const titles = files().map((each) => each.title);
-  // No two theme files share a name, and none takes Default's or the mode's.
   expect(new Set(titles).size).toBe(titles.length);
   for (const title of titles) expect(["Default", "Light", "Dark", "System"].includes(title)).toBe(false);
   for (const name of ["Dark Modern", "Dark+", "Monokai", "Light Modern", "Solarized Light", "Dark High Contrast"]) {
@@ -314,7 +276,6 @@ test("every theme file is offered, each under a name of its own, and Default is 
 test("a theme file's look names only tokens the file sets", () => {
   for (const each of files()) {
     const colors = themeColors(each.value);
-    // The page is opaque.
     expect(colors.background).toMatch(/^#[0-9a-f]{6}$/);
     const shown = look(each.value, "none");
     const classes = [classesOf(shown), shown.menuItem.picture, shown.menuItem.line].join(" ");
@@ -493,17 +454,14 @@ for (const scheme of ["dark", "light"] as const) {
     expect(headerTexture(168, "none")).toBeUndefined();
     for (const name of ["haze", "dots"] as const) {
       const light = headerTexture(168, name)?.light ?? "";
-      // Two pools, each fading to nothing, so the theme shows through everywhere else.
       expect(light.match(/radial-gradient\(circle at /g)?.length).toBe(2);
       expect(light.match(/\/ 0\) [\d.]+px\)/g)?.length).toBe(2);
       expectBlackOrWhite(light);
-      // White in the dark, black in the light.
       for (const color of light.match(/rgb\([^)]*\)/g) ?? []) expect(color.startsWith(scheme === "dark" ? "rgb(255 255 255" : "rgb(0 0 0")).toBe(true);
     }
     expect(headerTexture(168, "haze")?.dots).toBeUndefined();
 
     const dots = drawnDots(headerTexture(168, "dots") as Finish, 1000, 168);
-    // One fill for every dot, in the middle of its 14-point cell, and only where the light falls.
     expect(dots.fills).toBe(1);
     expect(dots.centers.length).toBeGreaterThan(20);
     expect(dots.centers.length).toBeLessThan((1000 / 14) * (168 / 14) * 0.5);
@@ -542,19 +500,16 @@ test("the Default themes chart in five colors, the brand's violet first, each it
     const colors = themeColors(defaultTheme(scheme));
     const charts = [1, 2, 3, 4, 5].map((number) => colors[`chart-${number}`].slice(0, 7));
     expect(new Set(charts).size).toBe(5);
-    // Not nsh's stock grays: each has a hue, its red, green and blue apart.
     for (const each of charts) {
       const channels = [1, 3, 5].map((at) => parseInt(each.slice(at, at + 2), 16));
       expect(Math.max(...channels) - Math.min(...channels)).toBeGreaterThan(60);
     }
-    // Violet leads: more blue than red, and more red than green.
     const [r, g, b] = [1, 3, 5].map((at) => parseInt(charts[0].slice(at, at + 2), 16));
     expect(b > r && r > g).toBe(true);
   }
 });
 
 test("every theme's dashboard chips read: one ink for all, standing out from each chart color by at least 3:1", () => {
-  // The tiles take the first four chart colors.
   for (const each of THEMES) {
     const colors = themeColors(each.value);
     const ink = look(each.value, "none").chartInk;

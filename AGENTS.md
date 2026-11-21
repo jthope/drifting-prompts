@@ -16,7 +16,7 @@ and a file's outline. Its README is `crates/mdviewer/README.md`.
 The first product is IP Camera, a desktop viewer for IP cameras: live RTSP video from several cameras in saved tile
 layouts, PTZ over Dahua DVRIP, snapshots and recordings. `crates/ipcamera/server` is its server, which relays the
 cameras' live video to a browser with no desktop app, and takes their snapshots, records them and moves them there:
-the start of a web-only build. The app is `crates/ipcamera/app`, on nsh (Native Shell) 0.5.1: TSX for the interface,
+the start of a web-only build. The app is `crates/ipcamera/app`, on nsh (Native Shell) 0.6.1: TSX for the interface,
 and a Rust crate of its own for the cameras and the live picture, which it draws with Direct2D. Under it,
 `crates/ipcamera/core` (settings, cameras, groups, views, RTSP addressing, PTZ) and `crates/ipcamera/media` (the
 glass2glass pipeline: RTSP, decoding, sound, recording) are plain Rust that cargo builds whole: nothing to install,
@@ -54,9 +54,8 @@ crates/
                       `logos.ts` every product's logo); `theme.json`, every app's own tokens over nsh's, and
                       `themes/`, the other themes; its Rust (`src/`): the `Themes` module each app registers
                       `SavedAppearance` and `WindowPlace`, how the window looks and where it was left (`lib.rs`), `listen` and `listen_later` for
-                      the bridges' listeners (`listen.rs`), and the folder picker
-                      (`folder_dialog.rs`) and Explorer (`explorer.rs`), the only `unsafe` outside IP Camera's app
-                      and `ipcamera-dpapi`
+                      the bridges' listeners (`listen.rs`), and picking, opening and showing folders through
+                      nsh's own calls (`folders.rs`)
   ipcamera/           IP Camera
     core/             ipcamera-core: the settings file (`config.rs`: `settings.json`, its only writer), a camera's
                       settings and their one check (`camera_config.rs`), groups (`camera_group.rs`), views
@@ -109,7 +108,7 @@ crates/
                       as the server ends (`closing.rs`), the saved files and their folders (`files.rs`), one viewer's
                       WebSocket and what goes over it (`live.rs`); `player/`, the page and its plain-JS WebCodecs
                       player, built in (`page.rs`)
-    app/              the app, nsh package `ipcamera`, on nsh 0.5.1, a Cargo workspace of its own, so `cargo` at
+    app/              the app, nsh package `ipcamera`, on nsh 0.6.1, a Cargo workspace of its own, so `cargo` at
                       the root never builds it:
       App.tsx           the shell: the window's state, its panels and its shortcuts
       views/            each region (sidebar, header, stage, PTZ panel, status bar, Dashboard, Settings, Snapshots, Videos,
@@ -159,7 +158,7 @@ crates/
       src/              `bridge.rs`, everything TSX imports from `mdviewer/native`; `dropped.rs`, a dropped folder's `file:` URL as a path
   xtask/              the repository's own commands, run through cargo (aliases in `.cargo/config.toml`), each
                       product's by its name: `cargo ipcamera` is `nsh run` in crates/ipcamera/app; `cargo
-                      ipcamera-web` starts ipcamera-server on the desktop app's `crates\ipcamera\app\target\debug`
+                      ipcamera-web` starts ipcamera-server on the desktop app's `crates\ipcamera\app\target\debug\.nsh`
                       settings and `nsh run --target web` against it; `cargo package-ipcamera` and `cargo
                       package-ipcamera-web` run `nsh package` for each; `cargo mdviewer` and `cargo package-mdviewer`
                       the same for Markdown Viewer; `cargo screenshots` the READMEs' screenshots of both
@@ -217,7 +216,7 @@ other, and `dp-*` crates depend on no product.
 | the server, relaying, the browser player | `crates/ipcamera/server/README.md`, `crates/ipcamera/server/src/lib.rs`, `live.rs`, `crates/ipcamera/media/src/relay.rs` |
 | snapshots, recording and PTZ on the web | `crates/ipcamera/server/README.md`, `crates/ipcamera/server/src/streams.rs`, `ptz.rs`, `files.rs`, `crates/ipcamera/media/src/still.rs`, `crates/ipcamera/app/src/web_backend.rs` |
 | how snapshots and recordings are named, listed and written | `crates/ipcamera/storage/src/lib.rs` |
-| something nsh 0.5.1 lacks | `crates/README.md` "Workarounds for nsh 0.5.1" |
+| something nsh 0.6.1 lacks | `crates/README.md` "Workarounds for nsh 0.6.1" |
 | the checks, CI, the xtask commands, `.cargo/config.toml` | `crates/README.md` "The workspaces", "Checks and CI" |
 | releasing either app, `release.yml` | `crates/README.md` "Releases", each product's README "Releases" |
 | the READMEs' screenshots | `crates/README.md` "Screenshots", `crates/xtask/src/screenshots.rs` |
@@ -229,7 +228,7 @@ change. Each README has one job:
   errors to expect. It is written plainly, for a developer reading it for the first time, and stays short; detail goes
   in the READMEs below, and the root links to them.
 - `crates/README.md` is what the products share: the workspaces, the checks and CI, releases, `dp-store`, `dp-ui`,
-  the themes, the workarounds for nsh 0.5.1 and the brands.
+  the themes, the workarounds for nsh 0.6.1 and the brands.
 - `crates/<product>/README.md` is each product as a whole (`crates/ipcamera/README.md`: its crates, what it needs, the
   web build, releases, what it saves, the camera checks; `crates/mdviewer/README.md`: all of Markdown Viewer).
 - `crates/ipcamera/app/README.md` is everything you see in IP Camera's app, and `crates/ipcamera/server/README.md` the
@@ -254,7 +253,7 @@ cargo run -p ipcamera-server                                 # http://127.0.0.1:
 cargo ipcamera                                              # `nsh run` in crates/ipcamera/app from the root; arguments go to nsh run
 cargo package-ipcamera                                      # `nsh package --target windows`: crates\ipcamera\app\.nsh\out\ipcamera\ and .zip
 cargo package-ipcamera-web                                  # `nsh package --target web` into crates\ipcamera\app\.nsh\out\web\, with no IPCAMERA_SERVER: copy it to `web` beside ipcamera-server
-cargo ipcamera-web                                          # the server and the web build on it at http://localhost:8787/, one Ctrl+C for both; the desktop app's crates\ipcamera\app\target\debug settings unless --settings; arguments go to the server
+cargo ipcamera-web                                          # the server and the web build on it at http://localhost:8787/, one Ctrl+C for both; the desktop app's crates\ipcamera\app\target\debug\.nsh settings unless --settings; arguments go to the server
 cargo mdviewer                                              # `nsh run` in crates/mdviewer/app from the root; arguments go to nsh run
 cargo package-mdviewer                                      # `nsh package --target windows`: crates\mdviewer\app\.nsh\out\mdviewer\
 cargo screenshots                                           # the READMEs' screenshots, in real windows (only when the owner asks); `ipcamera` or `mdviewer` for one; needs resvg
@@ -295,7 +294,7 @@ password included, where `launch.json`'s keeps its own in `target\debug`, so che
 time: starting another ends the first.
 
 The floor is Rust 1.95 for the root workspace (`rust-version`: the highest any dependency declares, from
-glass2glass's `loom`) and 1.97 for the workspaces built with nsh (nsh 0.5.1's); raise it when a dependency's floor
+glass2glass's `loom`) and 1.97 for the workspaces built with nsh (nsh 0.6.1's); raise it when a dependency's floor
 rises, and keep `ci.yml`'s `msrv` job in step with the root's. MSVC `D8050 ... failed to get command line into debug records` or gcc's "Cannot create
 temporary file" come from a Low integrity label on the repository folder, not from long paths: check
 `icacls . | Select-String 'Mandatory Label'` first, and leave clearing it to the owner, since it is a security setting.
@@ -308,8 +307,9 @@ MSVC's `link.exe`, which took far longer over the app's debug build, and keeps f
 crates only, every other one keeping line tables (a new crate of ours gets a line there): with all of it, each debug
 build's PDB passed a gigabyte and the apps' `target` folders reached tens of gigabytes. `xtask` keeps the variables `cargo run` sets
 (`CARGO_PKG_NAME`, `CARGO_MANIFEST_DIR`) from the cargo builds it starts: `ring`'s build script watches them, and
-passed on they rebuilt `rustls`, nsh and the app whenever `cargo ipcamera` followed another build. Keep the `nsh-*` dependencies at the version of the installed `nsh` (`nsh --version`);
-the installer takes the version as `$env:NSH_VERSION = 'v0.5.1'`.
+passed on they rebuilt `rustls`, nsh and the app whenever `cargo ipcamera` followed another build. Keep the `nsh-*` dependencies at the version of the installed `nsh` (`nsh --version`),
+which each app's `nsh.json` requires too (`"nsh": "=0.6.1"`, so another `nsh` stops at once); the installer takes the
+version as `$env:NSH_VERSION = 'v0.6.1'`.
 
 ## Rules
 
@@ -337,8 +337,9 @@ the installer takes the version as `$env:NSH_VERSION = 'v0.5.1'`.
 - **`Library` is the only way to cameras, groups and views, and `config.rs` the only writer of `settings.json`.** Saves
   are atomic (temp file and rename), and a store never overwrites a file it could not read. Groups and views list
   cameras by id, and file names carry the id (`snapshot-<secs>-<id>.png`): a name is never an id. Everything is saved
-  beside the executable (`settings.json`, `data\`; Markdown Viewer's `settings.json` and `projects.json`, in a `.nsh`
-  folder beside its development host: see Pitfalls), never in `%APPDATA%` or the user's profile.
+  beside the executable (`settings.json`, `data\`; Markdown Viewer's `settings.json` and `projects.json`), and by
+  either app's development host in a `.nsh` folder beside it (see Pitfalls), never in `%APPDATA%` or the user's
+  profile.
 - **Camera safety.** Never print, log or repeat a camera's password, or leave a copy where it gets distributed
   (`.nsh\out`, a packaged build). `cameras.json` keeps each one encrypted for the account that saved it
   (`saved_password.rs`), so read a saved camera through `Library`, never from the file's text. Never try a blank or
@@ -347,10 +348,10 @@ the installer takes the version as `$env:NSH_VERSION = 'v0.5.1'`.
   reconnects by itself. Don't save or screenshot the real camera's picture, which shows the owner's property (sample its
   brightness instead), and don't record it: ask the owner to try it.
 - **nsh's defaults first.** Build with nsh's components, tokens and behavior as they are. When a design detail would
-  take a workaround, drop the detail rather than add the workaround, and say what was dropped. A workaround for something nsh 0.5.1 lacks names in a comment what replaces it, and is listed
-  in `crates/README.md` "Workarounds for nsh 0.5.1" until a release makes it unnecessary.
-- **nsh is pinned to 0.5.1.** Its website and gallery follow its `main` branch, which moves on past 0.5.1: check what
-  you take from them against the installed crates (`~/.cargo/registry/src/*/nsh-*-0.5.1`).
+  take a workaround, drop the detail rather than add the workaround, and say what was dropped. A workaround for something nsh 0.6.1 lacks names in a comment what replaces it, and is listed
+  in `crates/README.md` "Workarounds for nsh 0.6.1" until a release makes it unnecessary.
+- **nsh is pinned to 0.6.1.** Its website and gallery follow its `main` branch, which moves on past 0.6.1: check what
+  you take from them against the installed crates (`~/.cargo/registry/src/*/nsh-*-0.6.1`).
 - **A component asks `look()` how to draw and never checks which theme is shown**, so a new theme reaches every place
   at once. Colors are tokens: classes that name them (`bg-title-bar`, `ring-ring`), or `Themes.colors` for a style a
   class can't say. No color literals outside `crates/dp/ui/brand.tsx`, `elevation.ts` and `texture.ts` (black and
@@ -384,7 +385,7 @@ the installer takes the version as `$env:NSH_VERSION = 'v0.5.1'`.
 - Lints: the root workspace sets `unsafe_code = "forbid"`, `missing_docs = "warn"`, `clippy::all = "warn"` and
   `clippy::mod_module_files = "warn"`, and clippy runs with `-D warnings`. A new crate in the root workspace sets
   `[lints] workspace = true`. The workspaces of their own (`crates/ipcamera/app`, `crates/mdviewer/app`,
-  `crates/dp/ui`) repeat them in their `Cargo.toml`'s `[lints]`; IP Camera's app, `dp-ui` and, in the root workspace,
+  `crates/dp/ui`) repeat them in their `Cargo.toml`'s `[lints]`; IP Camera's app and, in the root workspace,
   `ipcamera-dpapi` put `clippy::undocumented_unsafe_blocks` in place of forbidding `unsafe`.
 - Crates: a product's crate goes in its folder, named for it (`crates/ipcamera/core` is `ipcamera-core`); one that
   two products use goes in `crates/dp/` as `dp-<name>`, and only once the second one needs it. Never a bare
@@ -396,10 +397,9 @@ the installer takes the version as `$env:NSH_VERSION = 'v0.5.1'`.
   by subject, since each is a program to build and link; what they share is a module under `tests/support/` that each
   takes in with `#[path]` (the server's). A test waits for what it needs, never a fixed time, and none stands up
   a closed local port it could do without: the system takes two seconds to refuse one.
-- `unsafe` lives only in `crates/ipcamera/app` and `crates/dp/ui` (workspaces of their own), for the Win32, COM and
-  Direct2D calls in IP Camera's `src/video.rs` and `dp-ui`'s `src/folder_dialog.rs`, and in `crates/ipcamera/dpapi`,
-  for DPAPI's two calls, which keeps it out of every other crate of the root workspace. Every
-  `unsafe` block has a `// SAFETY:` comment, which clippy checks there.
+- `unsafe` lives only in `crates/ipcamera/app` (a workspace of its own), for the Win32, COM and Direct2D calls in its
+  `src/video.rs`, and in `crates/ipcamera/dpapi`, for DPAPI's two calls, which keeps it out of every other crate of
+  the root workspace. Every `unsafe` block has a `// SAFETY:` comment, which clippy checks there.
 - Errors: a library crate returns an error enum of its own that says which case it is (`StoreError`, `DvripError`,
   `InvalidCamera`, `MediaError`, `StorageError`), each reading as a sentence; `anyhow` is for the programs (`server`'s
   `main.rs`, `xtask`). The bridge turns an error into the `String` TSX shows. What may be missing is an `Option`, not
@@ -500,14 +500,14 @@ Verified constraints, by area:
 
 - **Ports.** nsh's development server takes 8790 (`nsh run`) and the web preview 8787 here, so `ipcamera-server` is on
   8770.
-- **nsh 0.5.1.** A link inside text (`TextView`'s, or any nested `Text` with `onPress`) shows the pointing hand, over
+- **nsh 0.6.1.** A link inside text (`TextView`'s, or any nested `Text` with `onPress`) shows the pointing hand, over
   selectable text too, and its address as a hint while the pointer rests on it. Any other cursor comes from views alone
   (`cursor` in `nsh-platform-windows`' `input.rs`): nested text merges into its paragraph's view, so a `cursor-*`
   class on a span does nothing.
   `nsh run` builds the app again whenever a `.json` file anywhere in the app's folder changes, `target` included,
   and skips only folders named `.nsh` and `node_modules`: an app that saves JSON beside its development host (in
-  `target\debug`) shows a build with every save. Markdown Viewer's host saves in `target\debug\.nsh\` for this
-  (`dp_ui::development_folder`); IP Camera's doesn't yet.
+  `target\debug`) shows a build with every save. Both apps' hosts save in `target\debug\.nsh\` for this
+  (`dp_ui::development_folder`).
   `Menu` (`nsh/desktop`) does nothing in a browser, so a button opens its menu through `MenuOpener` and a right click
   through `popup` (`views/actions.ts`), which draw it there (`crates/dp/ui/menu.tsx`); a dialog covering the window places a
   `MenuLayer` last. A drawn menu's items are `id:menu` to a test, which opens the app as the web with
@@ -530,8 +530,8 @@ Verified constraints, by area:
 - **The window.** `keepWindowPlace` (`crates/dp/ui/window.ts`) only places the window and never shows or hides it: nsh
   shows it when its first frame is ready, and a race can leave it hidden for good. Stopping PTZ when the window closes
   is in `VideoView`'s `Drop`, because nsh's close event goes to JS, which a closing window never waits for.
-- **Real-window runs.** `nsh run` and `nsh test --target windows` read and write `crates\ipcamera\app\target\debug\settings.json`
-  and `crates\ipcamera\app\target\debug\data\settings` (the app's own workspace, not the root's `target`). Back both up before a scripted run and restore them after; the backup holds the
+- **Real-window runs.** `nsh run` and `nsh test --target windows` read and write `crates\ipcamera\app\target\debug\.nsh\settings.json`
+  and `crates\ipcamera\app\target\debug\.nsh\data\settings` (the app's own workspace, not the root's `target`). Back both up before a scripted run and restore them after; the backup holds the
   password, so delete it. A shell whose working directory is inside `data\settings` locks the folder: restore by
   copying files in, not by deleting the folder. Swapping the test cameras into `data\settings` doesn't swap the
   snapshots and videos folders: the Snapshots, Videos and Dashboard pages there show the owner's own pictures, the real

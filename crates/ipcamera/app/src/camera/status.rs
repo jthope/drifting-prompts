@@ -1,14 +1,11 @@
-//! What the status line says about a stream, and what its tiles say over its picture when it
-//! lost the camera or gave up.
+//! What the status line and a stream's tiles say about its connection.
 
 use ipcamera_core::CameraConfig;
 use ipcamera_media::MediaStatus;
 
 use crate::bridge::{StatusTone, StreamTrouble};
 
-/// What a stream's tiles say over its picture: whether it is in trouble, and what happened as a
-/// sentence (`""` while it isn't). Connecting for the first time isn't trouble: the tile's
-/// numbers already say it waits for a picture.
+/// What a stream's tiles say over its picture; connecting for the first time isn't trouble.
 pub fn trouble(status: &MediaStatus) -> (StreamTrouble, String) {
     match status {
         MediaStatus::Reconnecting { attempt } => (
@@ -25,8 +22,6 @@ pub fn trouble(status: &MediaStatus) -> (StreamTrouble, String) {
     }
 }
 
-/// A reason the media stack gives (`the camera rejected the username or password`) as a sentence
-/// of its own: capitalized, with a full stop.
 fn sentence(why: &str) -> String {
     let why = why.trim();
     let mut letters = why.chars();

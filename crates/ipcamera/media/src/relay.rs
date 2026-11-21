@@ -1,20 +1,7 @@
 //! Passing a camera's compressed video on to any number of viewers, as the camera sent it.
 //!
-//! A relaying session ([`crate::MediaSession::relay`]) decodes nothing. Its graph ends in a
-//! [`FeedSink`] right after the parser, which hands each access unit to the session's [`Feed`].
-//! Each viewer watches the feed through a [`Viewer`] of its own. In C# terms, the feed is an event
-//! source with a short memory, and each viewer an async enumerator over it.
-//!
-//! Three rules keep viewers cheap and their pictures whole:
-//!
-//! - **Every picture starts from a keyframe.** Nothing before a keyframe can be decoded, so the
-//!   feed publishes nothing until the first one, and every keyframe it publishes carries the
-//!   stream's parameter sets, even when the camera sent them only once.
-//! - **A late viewer starts at once.** The feed keeps the pictures since the last keyframe, and a
-//!   new viewer gets them first, so the picture appears without waiting for the next keyframe.
-//! - **A slow viewer skips, it never queues.** The pictures waiting for a viewer are bounded. One
-//!   that falls further behind loses what it missed and waits for the next keyframe, so it catches
-//!   up instead of falling further behind, and memory stays bounded.
+//! A viewer starts at a keyframe carrying the parameter sets, and one that falls behind skips to
+//! the next keyframe rather than queue.
 
 use std::{
     collections::VecDeque,
@@ -40,19 +27,16 @@ use crate::{
     still::{self, Backlog},
 };
 
-/// How many pictures can wait for a viewer before it counts as fallen behind: about two seconds
-/// of a 30 fps camera.
+/// Pictures that can wait for a viewer before it counts as fallen behind.
 const WAITING: usize = 64;
 
-/// The most pictures the feed keeps for late viewers. A camera whose keyframes are further apart
-/// than this sends late viewers to the next keyframe instead.
+/// Keyframes further apart than this send late viewers to the next keyframe instead.
 const BACKLOG: usize = 300;
 
-/// What a viewer's decoder is set up with, sent before the first picture and again whenever it
-/// changes.
+/// What a viewer's decoder is set up with, sent before the first picture and on every change.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VideoConfig {
-    /// The WebCodecs codec string, such as `avc1.42C00A` or `hev1.1.6.L93.B0`.
+    /// The WebCodecs codec string, such as `avc1.42C00A`.
     pub codec: String,
     /// The picture's width and height, when the stream declares them.
     pub size: Option<(u32, u32)>,
@@ -61,30 +45,28 @@ pub struct VideoConfig {
 /// One access unit: one picture's compressed video.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Picture {
-    /// Whether it decodes on its own. A keyframe carries the parameter sets ahead of it.
+    /// Whether it decodes on its own; a keyframe carries the parameter sets ahead of it.
     pub keyframe: bool,
     /// When the camera took it, in microseconds on the stream's clock.
     pub timestamp_us: u64,
-    /// The access unit, in Annex-B form: NAL units after start codes.
+    /// The access unit in Annex-B form.
     pub bytes: Vec<u8>,
 }
 
 /// What a viewer gets from the feed, in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Relayed {
-    /// Set the decoder up again: the pictures after this need it.
+    /// Set the decoder up again for the pictures after this.
     Config(VideoConfig),
     /// The next picture.
     Picture(Arc<Picture>),
 }
 
-/// What the feed remembers for viewers that join late.
 #[derive(Default)]
 struct Memory {
     config: Option<VideoConfig>,
-    /// The pictures since the last keyframe, that keyframe first.
+    /// Since the last keyframe, that keyframe first.
     backlog: Vec<Arc<Picture>>,
-    /// How many keyframes have gone out, so a thumbnail can wait for the next one.
     keyframes: u64,
 }
 
@@ -93,8 +75,7 @@ struct Inner {
     sender: broadcast::Sender<Relayed>,
 }
 
-/// A relaying session's compressed video, for any number of viewers. It outlives reconnects.
-/// Cloning it gives another handle on the same feed.
+/// A relaying session's compressed video, for any number of viewers; it outlives reconnects.
 #[derive(Clone)]
 pub struct Feed(Arc<Inner>);
 
@@ -109,8 +90,7 @@ impl Default for Feed {
 }
 
 impl Feed {
-    /// A new viewer, which gets the decoder's set-up and the pictures since the last keyframe
-    /// first, then each picture as it arrives.
+    /// A new viewer, starting with the set-up and the pictures since the last keyframe.
     pub fn watch(&self) -> Viewer {
         // Under the lock, so no picture falls between the backlog and the live ones.
         let memory = self.0.memory.locked();
@@ -131,27 +111,23 @@ impl Feed {
         self.0.sender.receiver_count()
     }
 
-    /// How many keyframes have gone out, so far: a number to wait past for the next one.
+    /// How many keyframes have gone out: a number to wait past for the next one.
     pub fn keyframes(&self) -> u64 {
         self.0.memory.locked().keyframes
     }
 
-    /// The newest picture, decoded from the pictures since the last keyframe ([`crate::still`]).
-    /// It blocks while it decodes, so call it off any thread that must stay quick. Fails when no
-    /// picture has arrived yet.
+    /// The newest picture, decoded; blocks while it decodes.
     pub fn picture(&self) -> Result<DecodedFrame> {
         still::decode(self.backlog()?)
     }
 
-    /// The last keyframe alone, decoded: the picture a recording that started at it begins with.
-    /// It blocks while it decodes, as [`Self::picture`] does.
+    /// The last keyframe alone, decoded; blocks while it decodes.
     pub fn keyframe_picture(&self) -> Result<DecodedFrame> {
         let mut backlog = self.backlog()?;
         backlog.pictures.truncate(1);
         still::decode(backlog)
     }
 
-    /// A copy of the pictures since the last keyframe, with the stream's codec and size.
     fn backlog(&self) -> Result<Backlog> {
         let memory = self.0.memory.locked();
         let config = memory
@@ -168,7 +144,6 @@ impl Feed {
         })
     }
 
-    /// Sets the decoder up anew, when the stream's codec or size changed.
     fn configure(&self, config: VideoConfig) {
         let mut memory = self.0.memory.locked();
         if memory.config.as_ref() == Some(&config) {
@@ -180,7 +155,6 @@ impl Feed {
         let _ = self.0.sender.send(Relayed::Config(config));
     }
 
-    /// Passes a picture on to every viewer.
     fn publish(&self, picture: Picture) {
         let picture = Arc::new(picture);
         let mut memory = self.0.memory.locked();
@@ -197,14 +171,11 @@ impl Feed {
         let _ = self.0.sender.send(Relayed::Picture(picture));
     }
 
-    /// Forgets the pictures of a stream that has ended, so a viewer that joins before the next
-    /// one starts isn't handed stale pictures.
     pub(crate) fn forget(&self) {
         self.0.memory.locked().backlog.clear();
     }
 }
 
-/// The codec a WebCodecs codec string names: `avc1.…` is H.264, `hev1.…` and `hvc1.…` H.265.
 fn codec_of(config: &VideoConfig) -> Option<VideoCodec> {
     match config.codec.split('.').next()? {
         "avc1" | "avc3" => Some(VideoCodec::H264),
@@ -215,16 +186,14 @@ fn codec_of(config: &VideoConfig) -> Option<VideoCodec> {
 
 /// One viewer of a [`Feed`].
 pub struct Viewer {
-    /// What the feed remembered when this viewer joined, to go first.
     pending: VecDeque<Relayed>,
     receiver: broadcast::Receiver<Relayed>,
-    /// Set from the start, after a new set-up and after falling behind: pictures are skipped until
-    /// a keyframe, since nothing before one can be decoded.
+    /// Pictures are skipped until a keyframe, since nothing before one decodes.
     awaiting_keyframe: bool,
 }
 
 impl Viewer {
-    /// The next thing to send this viewer. `None` once the feed has gone.
+    /// The next thing to send this viewer; `None` once the feed has gone.
     pub async fn next(&mut self) -> Option<Relayed> {
         loop {
             let next = match self.pending.pop_front() {
@@ -249,15 +218,12 @@ impl Viewer {
     }
 }
 
-/// The last element of a relaying graph: hands each access unit to the [`Feed`].
 pub(crate) struct FeedSink {
     feed: Feed,
-    /// Set at the first picture published, which is when the session counts as live.
     live: Arc<AtomicBool>,
     codec: Option<VideoCodec>,
     size: Option<(u32, u32)>,
     parameter_sets: ParameterSets,
-    /// Whether the first keyframe has gone out. Nothing before it can be decoded.
     started: bool,
 }
 
@@ -322,7 +288,6 @@ impl AsyncElement for FeedSink {
     where
         Self: 'a;
 
-    /// Compressed H.264 or H.265 only: the access units the parser in front hands over.
     fn intercept_caps(&self, upstream: &Caps) -> Result<Caps, G2gError> {
         match upstream {
             Caps::CompressedVideo {
@@ -361,8 +326,6 @@ impl AsyncElement for FeedSink {
     }
 }
 
-/// The end of a branch whose packets are wanted only by what comes before it: a relay's sound,
-/// which only its record tap uses.
 pub(crate) struct Discard;
 
 impl AsyncElement for Discard {
@@ -441,7 +404,6 @@ mod tests {
         }
     }
 
-    /// What `viewer` has waiting, without waiting for more.
     fn waiting(viewer: &mut Viewer) -> Vec<Relayed> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -488,7 +450,6 @@ mod tests {
     fn a_viewer_waits_for_a_keyframe() {
         let feed = Feed::default();
         feed.configure(config());
-        // Pictures from before any keyframe aren't kept for late viewers.
         feed.publish(picture(false, 0));
         let mut viewer = feed.watch();
         feed.publish(picture(false, 1));
@@ -503,7 +464,6 @@ mod tests {
         feed.configure(config());
         feed.publish(picture(true, 0));
         let mut viewer = feed.watch();
-        // Far more than can wait, all before the viewer reads anything.
         for at in 1..=(WAITING as u64 * 2) {
             feed.publish(picture(false, at));
         }
@@ -545,7 +505,6 @@ mod tests {
         assert_eq!(times(&waiting(&mut feed.watch())), [2]);
     }
 
-    /// The SPS and PPS of a 64 x 64 H.264 stream, and a picture of each kind.
     const SPS: &[u8] = &[
         0x67, 0x42, 0xc0, 0x0a, 0xda, 0x0f, 0xd0, 0x80, 0x00, 0x00, 0x03, 0x00, 0x80, 0x00, 0x00,
         0x1e, 0x47, 0x89, 0x16, 0xa8,
@@ -598,7 +557,6 @@ mod tests {
         assert!(!live.load(Ordering::Relaxed), "nothing before a keyframe");
         sink.offer(&access_unit(&[SPS, PPS, IDR], 40, true));
         sink.offer(&access_unit(&[SLICE], 80, false));
-        // A later keyframe the camera sent without the parameter sets.
         sink.offer(&access_unit(&[IDR], 120, true));
         assert!(live.load(Ordering::Relaxed));
 

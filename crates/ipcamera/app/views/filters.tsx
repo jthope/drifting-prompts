@@ -1,16 +1,8 @@
-// The filter, sort, group and view menus of the snapshots, videos and events
-// pages, in the bar of their header, so they stay in reach however far a page
-// scrolls.
 import { View } from "nsh";
 import { MenuChip, MenuLine, MenuRow, PopupMenu, SectionLabel } from "../../../dp/ui";
 import { cameraName, countLabel, GROUPINGS, type Item, type Library, ORDERS, PERIODS, SIZES, tagFilterLabel } from "./library";
 
-/**
- * One page's choices: which camera, which tags, which dates, in what order
- * under which headings, and at what size. `sources` offers Taken by hand and
- * From events in the Tag menu, where the page lists files: not on the events
- * page, whose every item is an event.
- */
+/** One page's filter, sort, group and size menus; `sources` offers Taken by hand and From events. */
 export function LibraryFilters<T extends Item>(props: { library: Library<T>; sources?: boolean }) {
   const library = () => props.library;
   const cameraLabel = () => {

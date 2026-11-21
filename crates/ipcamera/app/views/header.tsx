@@ -5,16 +5,10 @@ import { takeSnapshots, toggleMute, toggleRecording } from "./actions";
 import { LayoutMenu } from "./layout";
 import { cameraOf, currentView, focusedId, onScreen, page, pageName, recording, replacesStage } from "./model";
 
-/** Saves the picture of every connected camera on screen, as Record records them. */
 function SnapshotButton() {
   return <IconButton icon="camera" label="Snapshot" onPress={takeSnapshots} />;
 }
 
-/**
- * Records every connected camera on screen, and stops every recording. While
- * anything records, wherever the user has gone since, it turns red and shows
- * the stop square instead of the record circle.
- */
 function RecordButton() {
   return (
     <IconButton
@@ -27,19 +21,7 @@ function RecordButton() {
   );
 }
 
-/**
- * What the stage shows, and what can be done with it: a view's layout (each
- * tile's fit is on its own toolbar), then the selected camera's status and
- * actions, whose Connect and Disconnect are on its picture's toolbar
- * instead. Snapshot and Record take
- * every camera on screen, so they stay while an empty tile is selected. The
- * snapshots and the videos keep their count and filters in their own header.
- * Last, what the whole window does: the theme menu, with the mode
- * (`appearance`, `onAppearance`, as Settings picks it) over the themes of the
- * appearance it shows (`onTheme`, as Settings picks one), and full screen. It
- * wraps rather than hiding anything, so every action is still there in a
- * narrow window.
- */
+/** What the stage shows and what can be done with it, then what the whole window does; it wraps rather than hides anything. */
 export function Header(props: {
   sidebarOpen: boolean;
   ptzOpen: boolean;
@@ -50,7 +32,6 @@ export function Header(props: {
   onTheme: (name: ThemeName) => void;
 }) {
   const camera = () => cameraOf(focusedId());
-  /** One of the app's own pages (the dashboard, the tables, the galleries, the events), in place of the live video. */
   const library = () => replacesStage(page());
   return (
     <TitleBar class="pl-3">
@@ -74,7 +55,7 @@ export function Header(props: {
       </View>
 
       <View class="max-w-full flex-row flex-wrap items-center gap-1">
-        {/* Fragments, so every control wraps on its own in a narrow window. */}
+        {/* Fragments, so every control wraps on its own. */}
         <If when={currentView()}>{(view) => <LayoutMenu view={view()} class="mr-2" />}</If>
         <If when={camera()}>
           {(shown) => (
@@ -97,8 +78,6 @@ export function Header(props: {
             </>
           )}
         </If>
-        {/* Without a selected camera, snapshots and recording are still in reach: to take or
-            start them for the rest of the screen, or to stop recording from the videos. */}
         <If when={!camera() && !library() && onScreen().length > 0}>
           <SnapshotButton />
         </If>

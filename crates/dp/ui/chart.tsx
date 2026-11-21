@@ -1,9 +1,3 @@
-// The dashboard's charts and cards, over nsh's plot (`nsh/base/plot`), which
-// draws the marks in Rust, follows the pointer and the keys, and animates on
-// the platform's animator: no JS runs as the pointer moves. These bring the
-// look: the theme's chart colors (`chart-1` to `chart-5`: `theme.json` gives
-// the Default themes theirs, and every theme file has its own), its lines and
-// muted text, and the app's card (`card.tsx`), as Settings' groups have.
 import { type JSX, reduceMotion, signal, Text, View } from "nsh";
 import { Area, Bar, Cell, Grid, Line, Pie, Plot, PlotAxis, type PlotMotion } from "nsh/base/plot";
 import { look } from "./brand";
@@ -26,18 +20,10 @@ export const SERIES: Paint[] = [
   { fill: "fill-chart-5", bg: "bg-chart-5" },
 ];
 
-/**
- * What is left of a whole: free space, and a bar's empty track. A faint wash
- * of the muted text rather than `muted`, which some themes make their card's
- * own color, so it shows on every card.
- */
+/** What is left of a whole: a wash of the muted text, not `muted`, which some themes make the card's color. */
 export const REST: Paint = { fill: "fill-muted-foreground/15", bg: "bg-muted-foreground/15" };
 
-/**
- * Each chart color as a wash, in `SERIES`' order: what is left of a whole the
- * color stands for, such as a drive's free space beside its files in the full
- * color. Lighter, so it reads as room rather than as something there.
- */
+/** Each chart color as a wash, in `SERIES`' order: what is left of a whole that color stands for. */
 export const WASHES: Paint[] = [
   { fill: "fill-chart-1/30", bg: "bg-chart-1/30" },
   { fill: "fill-chart-2/30", bg: "bg-chart-2/30" },
@@ -46,7 +32,6 @@ export const WASHES: Paint[] = [
   { fill: "fill-chart-5/30", bg: "bg-chart-5/30" },
 ];
 
-/** Each chart color as a sparkline paints it, in `SERIES`' order: its line, and a faint wash under it. */
 const TRENDS = [
   { line: "stroke-chart-1", under: "fill-chart-1/10" },
   { line: "stroke-chart-2", under: "fill-chart-2/10" },
@@ -55,7 +40,6 @@ const TRENDS = [
   { line: "stroke-chart-5", under: "fill-chart-5/10" },
 ];
 
-/** The plots' motion: drawing in when shown and moving to new values, none when the system asks for less. */
 function motion(): PlotMotion | null {
   if (reduceMotion()) return null;
   return { appear: { duration: 500, easing: "easeOut" }, update: { duration: 300, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 120 } };
@@ -83,15 +67,7 @@ export function ChartCard(props: { title: string; detail?: string; action?: JSX.
   );
 }
 
-/**
- * A number on the dashboard: its icon, in the theme's `chartInk`, on a chip of
- * one of the theme's first four chart colors (`chart`, 0 for `chart-1`), what
- * it counts (`label`), the number (`value`) and a line about it (`detail`). A
- * number about a series takes its color, so the tile and the charts agree.
- * With `trend`, a sparkline of it in the same color fills the rest of the
- * number's line. With `onPress` it opens the page it sums up, sinking while
- * held.
- */
+/** A number on the dashboard, on a chip of a chart color, with an optional sparkline and press. */
 export function StatTile(props: {
   icon: IconName;
   chart: number;
@@ -126,10 +102,8 @@ export function StatTile(props: {
       </View>
     </>
   );
-  // Every tile is the same two views, pressable or not: an unpadded one taking its share of the
-  // row, and the card filling it. A padded view taking the share itself would start from its
-  // padding where the others start from nothing, and come out wider. The shadow is the card's
-  // (`Card`), on its rounded view, not the wrapper's, which would draw it square.
+  // The same two views, pressable or not: a padded view taking its share would come out wider.
+  // The shadow is the rounded card's: on the wrapper it would draw square.
   return (
     <View class="min-w-44 flex-1">
       <If
@@ -156,16 +130,11 @@ export function StatTile(props: {
   );
 }
 
-/**
- * A small line of `values` in a chart color (`chart`, 0 for `chart-1`), the
- * oldest first, over a faint wash: how a number got where it is. It takes no
- * pointer or focus, so a press goes to the tile it sits in, and draws in when
- * the number of values changes (another period).
- */
+/** A small line of `values`, oldest first; it takes no pointer, so a press reaches its tile. */
 export function Sparkline(props: { values: number[]; chart: number }) {
   const paint = () => TRENDS[props.chart % TRENDS.length];
   const rows = () => props.values.map((value) => ({ value }));
-  // Room above the highest point and below zero, so the line's stroke isn't cut at the plot's edges.
+  // Room past both ends, so the stroke isn't cut at the plot's edges.
   const domain = (): [number, number] => {
     const most = Math.max(1, ...props.values);
     return [-most * 0.08, most * 1.12];
@@ -206,14 +175,7 @@ export function LegendItem(props: { paint: Paint; label: string; value?: string 
 /** One series of `StackedBars`: what it counts in a row, its name, and its paint. */
 export type BarSeries<T> = { value: (row: T) => number; name: string; paint: Paint };
 
-/**
- * Upright bars, one band per row, its series piled up in order, over the
- * theme's grid lines, with the rows' names under them (`tick`, on every
- * `tickEvery`th row counting back from the last, so the newest is always
- * named, or on the rows `ticks` lists) and whole numbers beside them. The
- * pointer, or the arrow keys once it has the focus, picks a row out and shows
- * `tooltip` of it.
- */
+/** Upright stacked bars, one band per row; `tickEvery` counts back from the last, so the newest is named. */
 export function StackedBars<T>(props: {
   rows: T[];
   series: BarSeries<T>[];
@@ -278,16 +240,7 @@ export function StackedBars<T>(props: {
   );
 }
 
-/**
- * A grid of cells, `columns` across and `lines` down, each row of `rows` the
- * cell of its column (`column`) and line (`line`), named by `columnTick` and
- * `lineTick`, `columnTicks` the columns named (all without). Its color is how
- * much the row holds (`value`) along the theme's `heat` ramp of a chart color
- * (`chart`, 0 for `chart-1`): from a wash for the least above nothing to the
- * full color for the most; a cell holding nothing is a bar's empty track. The
- * pointer, or the arrow keys once it has the focus, outlines a cell and shows
- * `tooltip` of it.
- */
+/** A grid of cells colored along the theme's `heat` ramp of chart color `chart`. */
 export function Heatmap<T>(props: {
   rows: T[];
   columns: string[];
@@ -312,9 +265,7 @@ export function Heatmap<T>(props: {
   const surface = () => popupSurface("gap-1 rounded-md px-2.5 py-1.5");
   const heat = () => look().heat(props.chart);
   const most = () => Math.max(1, ...props.rows.map(props.value));
-  // Where a cell's value falls along the ramp's three stops: nothing on the first, the empty
-  // track; the least above nothing on the middle one, a wash, and the most on the last, so even
-  // one event stands apart from none.
+  // The least above nothing sits on the wash, so one event stands apart from none.
   const shade = (value: number) => (value <= 0 ? 0 : most() <= 1 ? 1 : 0.5 + (0.5 * (value - 1)) / (most() - 1));
   return (
     <Plot
@@ -362,11 +313,7 @@ export function Heatmap<T>(props: {
 /** One slice of a `Donut`: its name, its size and its paint. */
 export type Slice = { name: string; value: number; paint: Paint };
 
-/**
- * A ring of `slices`, in order clockwise from the top, with `center` in its
- * hole. The pointer over a slice lifts it, and `onHover` hears which, so the
- * center can say what it is.
- */
+/** A ring of `slices`, clockwise from the top, with `center` in its hole; `onHover` hears the slice. */
 export function Donut(props: { slices: Slice[]; center: JSX.Element; label: string; onHover?: (slice: Slice | undefined) => void; size?: number }) {
   const size = () => props.size ?? 148;
   return (
@@ -388,11 +335,7 @@ export function Donut(props: { slices: Slice[]; center: JSX.Element; label: stri
   );
 }
 
-/**
- * A bar split in parts, in proportion to `max` (the longest bar's total, so
- * bars in a list compare), each part in its series' paint. Views, not a plot:
- * a list of these reads as one chart, each row with its own name.
- */
+/** A bar split in parts, in proportion to `max`, the longest bar's total, so bars in a list compare. */
 export function SplitBar(props: { parts: { value: number; paint: Paint }[]; max: number }) {
   const total = () => props.parts.reduce((sum, part) => sum + part.value, 0);
   const share = (value: number) => (props.max > 0 ? value / props.max : 0);

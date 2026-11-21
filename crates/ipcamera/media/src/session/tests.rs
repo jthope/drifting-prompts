@@ -1,5 +1,4 @@
-//! Tests of a camera's session: the pretend camera's picture, relayed and recorded, and how
-//! a session fails, reconnects and stops, against local cameras that never touch a real one.
+//! Tests of a camera's session, against local cameras that never touch a real one.
 
 use super::*;
 use crate::pipeline::{AudioCodec, Offer};
@@ -12,13 +11,11 @@ use std::{
     time::Instant,
 };
 
-/// A pretend camera on a local port, so these tests never touch a real one.
 struct FakeCamera {
     port: u16,
 }
 
 impl FakeCamera {
-    /// Starts one that handles each connection with `serve`.
     fn start(serve: fn(TcpStream)) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a local port should be free");
         let port = listener.local_addr().expect("it has an address").port();
@@ -42,7 +39,6 @@ impl FakeCamera {
     }
 }
 
-/// Answers every request with 401, as a camera does to a wrong password.
 fn refuse_every_login(stream: TcpStream) {
     let mut writer = stream.try_clone().expect("the stream should clone");
     let mut lines = BufReader::new(stream).lines();
@@ -64,12 +60,10 @@ fn refuse_every_login(stream: TcpStream) {
     }
 }
 
-/// Hangs up straight away, as a camera does when the network drops.
 fn hang_up(stream: TcpStream) {
     drop(stream);
 }
 
-/// Describes a stream with nothing but Motion JPEG video, which this app does not play.
 fn offer_only_mjpeg(stream: TcpStream) {
     const SDP: &str = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=Fake\r\nc=IN IP4 0.0.0.0\r\n\
                        t=0 0\r\nm=video 0 RTP/AVP 26\r\na=control:trackID=0\r\n";
@@ -103,7 +97,6 @@ fn offer_only_mjpeg(stream: TcpStream) {
     }
 }
 
-/// Waits for `wanted`, returning the status that satisfied it.
 fn wait_for(session: &MediaSession, wanted: fn(&MediaStatus) -> bool) -> MediaStatus {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -116,12 +109,9 @@ fn wait_for(session: &MediaSession, wanted: fn(&MediaStatus) -> bool) -> MediaSt
     }
 }
 
-/// The pretend camera's picture size.
 #[cfg(windows)]
 const PRETEND_SIZE: (u32, u32) = (640, 360);
 
-/// A pretend camera ([`crate::pretend`]) serving twenty seconds at 25 fps. Returns the
-/// settings that reach it.
 #[cfg(windows)]
 fn pretend_camera() -> CameraConfig {
     let (width, height) = PRETEND_SIZE;
@@ -134,7 +124,6 @@ fn pretend_camera() -> CameraConfig {
     .expect("the pretend camera should start")
 }
 
-/// Waits for the session's first picture.
 #[cfg(windows)]
 fn first_picture(session: &MediaSession) -> Arc<crate::DecodedFrame> {
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -219,9 +208,6 @@ fn a_crash_is_retried_like_a_broken_stream() {
     );
 }
 
-/// The whole path a camera's picture takes, against [`pretend_camera`]. The session has to
-/// DESCRIBE it, build its graph, decode with [`crate::avc`] and hand over BGRA pictures of
-/// the right size that are not one flat color.
 #[cfg(windows)]
 #[test]
 fn decodes_a_local_h264_stream_into_bgra_pictures() {
@@ -245,15 +231,13 @@ fn decodes_a_local_h264_stream_into_bgra_pictures() {
         brightest - darkest > 100,
         "the test pattern came out flat ({darkest}..{brightest})"
     );
-    // The session reports Live on its next look at the slot, up to 50 ms after the picture.
+    // Live comes up to 50 ms after the picture.
     wait_for(&session, |status| *status == MediaStatus::Live);
 
     session.stop();
     assert_eq!(session.status(), MediaStatus::Stopped);
 }
 
-/// A live view nothing shows goes live without decoding a picture, and has one as soon as it
-/// is shown again.
 #[cfg(windows)]
 #[test]
 fn a_hidden_live_view_goes_live_without_decoding() {
@@ -279,9 +263,6 @@ fn a_hidden_live_view_goes_live_without_decoding() {
     assert_eq!(session.status(), MediaStatus::Stopped);
 }
 
-/// A relaying session against [`pretend_camera`]: it goes live with no decoder and no sound
-/// device, and a viewer gets the decoder's set-up, then a keyframe that carries its parameter
-/// sets, then the pictures after it.
 #[cfg(windows)]
 #[test]
 fn relays_a_local_h264_stream_to_a_viewer() {
@@ -329,8 +310,6 @@ fn relays_a_local_h264_stream_to_a_viewer() {
     assert_eq!(session.status(), MediaStatus::Stopped);
 }
 
-/// A relay decodes nothing until asked, and then one picture: the newest, from the pictures
-/// since the last keyframe, or that keyframe alone.
 #[cfg(windows)]
 #[test]
 fn a_relay_decodes_a_picture_when_asked() {
@@ -365,8 +344,6 @@ fn a_relay_decodes_a_picture_when_asked() {
     session.stop();
 }
 
-/// A relay records as a live view does: a whole MP4, finished when recording stops, while the
-/// relay carries on.
 #[cfg(windows)]
 #[test]
 fn a_relay_records_into_an_mp4() {
@@ -386,10 +363,6 @@ fn a_relay_records_into_an_mp4() {
     session.stop();
 }
 
-/// Records `session` into `file` until the file holds its first whole fragment, then stops
-/// recording and waits for the file to be finished. A fragment closes at the first keyframe a
-/// second in, so this takes about a keyframe interval; that the muxer cuts one fragment after
-/// another is `record.rs`'s to test, on pictures of its own.
 #[cfg(windows)]
 fn record_a_fragment(session: &MediaSession, file: &std::path::Path) {
     use crate::RecordStatus;
@@ -418,7 +391,6 @@ fn record_a_fragment(session: &MediaSession, file: &std::path::Path) {
     }
 }
 
-/// The top-level boxes of the MP4 written so far, by type, up to the first that isn't whole yet.
 #[cfg(windows)]
 fn boxes_so_far(bytes: &[u8]) -> Vec<String> {
     let mut boxes = Vec::new();
@@ -434,7 +406,6 @@ fn boxes_so_far(bytes: &[u8]) -> Vec<String> {
     boxes
 }
 
-/// The top-level boxes of an MP4, by type, or why the file doesn't divide into them.
 #[cfg(windows)]
 fn mp4_boxes(bytes: &[u8]) -> Result<Vec<String>, String> {
     let mut boxes = Vec::new();
@@ -456,9 +427,6 @@ fn mp4_boxes(bytes: &[u8]) -> Result<Vec<String>, String> {
     Ok(boxes)
 }
 
-/// Recording the pretend camera through a real session: the file starts when asked, holds a
-/// whole MP4 with a fragment of picture, and is finished once recording stops, while the
-/// picture carries on.
 #[cfg(windows)]
 #[test]
 fn records_a_local_h264_stream_into_an_mp4() {
@@ -511,7 +479,6 @@ fn a_stream_it_cannot_play_stops_at_once_and_says_why() {
         status,
         MediaStatus::Failed("the camera sends no H.264 or H.265 video".to_string())
     );
-    // Its thread has ended, so nothing is left to try again.
     wait_for_the_end(&session);
     assert!(session.refused());
 }
@@ -537,12 +504,10 @@ fn a_rejected_login_stops_at_once_instead_of_retrying() {
         !MediaStatus::Failed("the camera sends no H.264 or H.265 video".into()).login_rejected()
     );
 
-    // Its thread has ended, so nothing is left to try again.
     wait_for_the_end(&session);
     assert!(session.refused());
 }
 
-/// Waits for the session's thread to end, as it does when the session gives up for good.
 fn wait_for_the_end(session: &MediaSession) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while !session
@@ -622,8 +587,6 @@ fn stopping_during_the_wait_before_a_retry_returns_at_once() {
     assert_eq!(session.status(), MediaStatus::Stopped);
 }
 
-/// Every pairing of codecs a camera can offer builds a graph, and sound adds one branch.
-/// Nothing is connected: a graph only touches the network once it runs.
 #[test]
 fn a_graph_builds_for_every_offer() {
     let camera = CameraConfig::default();
@@ -642,9 +605,7 @@ fn a_graph_builds_for_every_offer() {
         .node_count()
     };
 
-    // Source, parse, record tap, size tap, decode gate, decode, convert, sink.
     assert_eq!(build(VideoCodec::H264, None), 8);
-    // Plus parse, record tap, decode, convert, resample, volume and the speaker.
     assert_eq!(build(VideoCodec::H264, Some(AudioCodec::Aac)), 15);
     // G.711 needs no parser, and is not recorded.
     assert_eq!(build(VideoCodec::H264, Some(AudioCodec::Alaw)), 13);
@@ -653,20 +614,10 @@ fn a_graph_builds_for_every_offer() {
     assert_eq!(build(VideoCodec::H265, Some(AudioCodec::Aac)), 15);
 }
 
-/// Manual smoke test against a real camera — the only way to know that the decoder, the
-/// pad routing and the BGRA conversion all work together.
-///
-/// ```text
-/// $env:IPCAMERA_HOST = "<the camera's address>"
-/// $env:IPCAMERA_USER = "..."
-/// $env:IPCAMERA_PASSWORD = "..."
-/// cargo test -p ipcamera-media -- --ignored --nocapture
-/// ```
+/// Against a real camera: `IPCAMERA_HOST`, `IPCAMERA_USER` and `IPCAMERA_PASSWORD` name it.
 #[test]
 #[ignore = "needs a real camera on the network"]
 fn pulls_frames_from_a_real_camera() {
-    // The IPCAMERA_HOST, _USER and _PASSWORD overrides name the camera; everything else is a new
-    // camera's defaults, as the app would save it.
     let mut camera = CameraConfig::default();
     camera.apply_env();
     println!("camera: {}", camera.stream_label());
@@ -703,11 +654,7 @@ fn pulls_frames_from_a_real_camera() {
     assert!(width > 0 && height > 0);
 }
 
-/// For when the app will not connect: the first camera saved in `IPCAMERA_SETTINGS_DIR`, with
-/// no reconnecting, so the first failure shows with its reason. Prints what the camera offers
-/// and every status change; `IPCAMERA_DIAGNOSE_SECONDS` keeps it running and prints the frame
-/// rate. The password is only handed to the session, never printed. See `crates/ipcamera/README.md`,
-/// "Camera checks without the GUI".
+/// The first camera saved in `IPCAMERA_SETTINGS_DIR`; never print its password.
 #[test]
 #[ignore = "needs a real camera and a saved settings folder"]
 fn diagnose_a_saved_camera() {
@@ -728,7 +675,7 @@ fn diagnose_a_saved_camera() {
         !camera.password.is_empty()
     );
     camera.auto_reconnect = false;
-    // An FLV stream says what it sends once it is open, which the session does.
+    // An FLV stream says what it sends only once open.
     if let StreamPath::Rtsp(_) = camera.stream_path() {
         let offer = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -762,7 +709,6 @@ fn diagnose_a_saved_camera() {
         sleep(Duration::from_millis(20));
     }
 
-    // Then keep it running, to see that it keeps up and stays up.
     let seconds: u64 = env::var("IPCAMERA_DIAGNOSE_SECONDS")
         .ok()
         .and_then(|text| text.parse().ok())

@@ -1,16 +1,5 @@
-//! Closing a camera's session off the runtime's threads, and waiting for all of them as the server
-//! ends.
-//!
-//! Closing a relay session waits for its thread and finishes its recording's file; closing a PTZ
-//! connection sends the camera a stop and waits for PTZ's thread. Neither may happen on one of
-//! the runtime's threads, where it would hold up every viewer on that thread, so [`OffThread`]
-//! closes what it holds on a thread of its own when it is dropped.
-//!
-//! Nothing waits for those threads while the server runs. As it ends something must: the process
-//! ending takes them with it, and a stop that never went out leaves a camera turning, a recording
-//! cut short has no length in its header. So a [`Closing`] counts what is still open or closing,
-//! and [`Closing::wait`] returns when nothing is. In C# terms, `OffThread<T>` is an owner whose
-//! `Dispose` runs on another thread, and `Closing` is the `CountdownEvent` the host waits on.
+//! Closing a session off the runtime's threads, where it would hold up every viewer there, and
+//! waiting for all of them as the server ends, which would otherwise cut them short.
 
 use std::{
     ops::Deref,
@@ -21,17 +10,13 @@ use std::{
 
 use ipcamera_core::sync::LockExt;
 
-/// How many sessions are open or still closing.
 #[derive(Default)]
 pub(crate) struct Closing {
     open: Mutex<usize>,
-    /// Told whenever one has finished closing.
     closed: Condvar,
 }
 
 impl Closing {
-    /// Holds `value` until it is dropped, when it is closed on a thread of its own. It counts as
-    /// open from now until that thread is done.
     pub(crate) fn hold<T: Send + 'static>(self: &Arc<Self>, value: T) -> OffThread<T> {
         *self.open.locked() += 1;
         OffThread {
@@ -39,8 +24,7 @@ impl Closing {
         }
     }
 
-    /// Waits until everything held has finished closing, or `until`. Returns whether it all has.
-    /// It blocks, so it runs off the runtime's threads.
+    /// Blocks, so never on the runtime's threads; false when `until` came first.
     pub(crate) fn wait(&self, until: Instant) -> bool {
         let mut open = self.open.locked();
         while *open > 0 {
@@ -57,7 +41,6 @@ impl Closing {
     }
 }
 
-/// One held value's place in the count, given back when it goes, wherever that happens.
 struct Counted(Arc<Closing>);
 
 impl Drop for Counted {
@@ -67,7 +50,6 @@ impl Drop for Counted {
     }
 }
 
-/// A value that is slow to close, closed on a thread of its own when this is dropped.
 pub(crate) struct OffThread<T: Send + 'static> {
     /// Always `Some` until dropped.
     held: Option<(T, Counted)>,
@@ -87,8 +69,7 @@ impl<T: Send + 'static> Drop for OffThread<T> {
         let Some((value, counted)) = self.held.take() else {
             return;
         };
-        // The value first, then its place in the count, so a waiter never returns while it is
-        // still closing. If the thread can't start, both are dropped here instead.
+        // The value first, then its count, so a waiter never returns while it is still closing.
         let _ = thread::Builder::new()
             .name("ipcamera-close".into())
             .spawn(move || {
@@ -107,7 +88,6 @@ mod tests {
 
     use super::*;
 
-    /// Something that takes a while to close, and says when it has.
     struct Slow(Arc<AtomicBool>);
 
     impl Drop for Slow {

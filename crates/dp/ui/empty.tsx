@@ -2,15 +2,11 @@ import { type JSX, Text, View } from "nsh";
 import { BrandBadge, look } from "./brand";
 import type { IconName } from "./icon";
 
-/** The badge's size, and the square the theme's rings around it are drawn in, wide enough for the outermost (`Look.halo`). */
+/** Wide enough for the outermost of the theme's rings (`Look.halo`). */
 const BADGE = 56;
 const HALO = 256;
 
-/**
- * What a page says before it has anything to show: its icon on the theme's
- * badge, within the theme's rings, a title, what to do about it (`text`), and
- * a button for it (`action`).
- */
+/** What a page says before it has anything to show: an icon, a title, `text` and an `action`. */
 export function EmptyState(props: { icon: IconName; title: string; text: string; action?: JSX.Element }) {
   return (
     <View class="flex-1 items-center justify-center gap-4 p-6">
